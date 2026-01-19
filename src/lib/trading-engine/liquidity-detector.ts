@@ -64,10 +64,10 @@ interface SwapSimulationResult {
 // ============================================
 
 /**
- * Detect a tradable Raydium pool for the given token
- * Returns TRADABLE only if ALL strict conditions pass
+ * Detect a tradable pool for the given token
+ * Supports: Raydium pools, Jupiter routes, AND Pump.fun bonding curve
  * 
- * PERFORMANCE: Uses Jupiter as primary fallback when Raydium API fails (500 errors)
+ * PERFORMANCE: Uses Jupiter as primary (aggregates all sources including Pump.fun)
  */
 export async function detectTradablePool(
   tokenAddress: string,
@@ -77,35 +77,70 @@ export async function detectTradablePool(
   const startTime = Date.now();
   
   try {
-    // STEP 1: Query Raydium API for pools containing this token
+    // PRIORITY 1: Check if token is on Pump.fun bonding curve (fastest for new tokens)
+    const pumpFunResult = await checkPumpFunTradeable(tokenAddress);
+    if (pumpFunResult.isTradeable) {
+      console.log(`[LiquidityDetector] Token ${tokenAddress.slice(0, 8)} is on Pump.fun - TRADEABLE`);
+      
+      onEvent?.({
+        type: 'LIQUIDITY_DETECTED',
+        data: {
+          tokenAddress,
+          tokenName: pumpFunResult.name || 'Unknown',
+          tokenSymbol: pumpFunResult.symbol || 'UNKNOWN',
+          poolAddress: 'pumpfun_bonding_curve',
+          poolType: 'pump_fun',
+          baseMint: SOL_MINT,
+          quoteMint: tokenAddress,
+          liquidityAmount: pumpFunResult.liquidity || 0,
+          lpTokenMint: null,
+          timestamp: startTime,
+          blockHeight: 0,
+        },
+      });
+      
+      return {
+        status: 'TRADABLE',
+        poolAddress: 'pumpfun_bonding_curve',
+        baseMint: SOL_MINT,
+        quoteMint: tokenAddress,
+        liquidity: pumpFunResult.liquidity || 50, // Pump.fun always has liquidity from bonding curve
+        poolType: 'raydium_v4', // Use raydium type for compatibility
+        detectedAt: startTime,
+      };
+    }
+    
+    // PRIORITY 2: Try Jupiter fallback first (most reliable, includes Raydium + all DEXs)
+    console.log('[LiquidityDetector] Checking Jupiter for routes...');
+    const jupiterFallback = await tryJupiterFallback(tokenAddress, config.minLiquidity);
+    if (jupiterFallback.status === 'TRADABLE') {
+      onEvent?.({
+        type: 'LIQUIDITY_DETECTED',
+        data: {
+          tokenAddress,
+          tokenName: 'Unknown',
+          tokenSymbol: 'UNKNOWN',
+          poolAddress: jupiterFallback.poolAddress || '',
+          poolType: 'raydium',
+          baseMint: SOL_MINT,
+          quoteMint: tokenAddress,
+          liquidityAmount: jupiterFallback.liquidity || 0,
+          lpTokenMint: null,
+          timestamp: startTime,
+          blockHeight: 0,
+        },
+      });
+      return jupiterFallback;
+    }
+    
+    // PRIORITY 3: Query Raydium API directly (backup)
     const pools = await fetchRaydiumPools(tokenAddress);
     
-    // If Raydium API failed or returned no pools, try Jupiter fallback
     if (!pools || pools.length === 0) {
-      console.log('[LiquidityDetector] No Raydium pools, trying Jupiter fallback...');
-      const jupiterFallback = await tryJupiterFallback(tokenAddress, config.minLiquidity);
-      if (jupiterFallback.status === 'TRADABLE') {
-        onEvent?.({
-          type: 'LIQUIDITY_DETECTED',
-          data: {
-            tokenAddress,
-            tokenName: 'Unknown',
-            tokenSymbol: 'UNKNOWN',
-            poolAddress: jupiterFallback.poolAddress || '',
-            poolType: 'raydium',
-            baseMint: SOL_MINT,
-            quoteMint: tokenAddress,
-            liquidityAmount: jupiterFallback.liquidity || 0,
-            lpTokenMint: null,
-            timestamp: startTime,
-            blockHeight: 0,
-          },
-        });
-        return jupiterFallback;
-      }
+      console.log('[LiquidityDetector] No pools found on Raydium or Jupiter');
       return {
         status: 'DISCARDED',
-        reason: jupiterFallback.reason || 'No Raydium AMM pool found for token',
+        reason: jupiterFallback.reason || 'No tradeable route found',
       };
     }
     
@@ -176,6 +211,61 @@ export async function detectTradablePool(
   }
 }
 
+/**
+ * Check if token is tradeable on Pump.fun bonding curve
+ */
+async function checkPumpFunTradeable(tokenAddress: string): Promise<{
+  isTradeable: boolean;
+  name?: string;
+  symbol?: string;
+  liquidity?: number;
+}> {
+  try {
+    const response = await fetch(
+      `https://frontend-api.pump.fun/coins/${tokenAddress}`,
+      {
+        signal: AbortSignal.timeout(5000),
+        headers: { 
+          'Accept': 'application/json',
+          'User-Agent': 'MemeSniper/2.0',
+        },
+      }
+    );
+    
+    if (!response.ok) {
+      return { isTradeable: false };
+    }
+    
+    const data = await response.json();
+    
+    // If token exists and is NOT complete (still on bonding curve), it's tradeable via Pump.fun
+    if (data && data.mint === tokenAddress) {
+      if (data.complete === false) {
+        // Still on bonding curve - tradeable via Pump.fun
+        // Estimate liquidity from virtual reserves
+        const virtualSolReserves = data.virtual_sol_reserves || 0;
+        const liquidityInSol = virtualSolReserves / 1e9;
+        
+        return {
+          isTradeable: true,
+          name: data.name,
+          symbol: data.symbol,
+          liquidity: liquidityInSol > 0 ? liquidityInSol : 30, // Default to 30 SOL (bonding curve start)
+        };
+      } else {
+        // Graduated to Raydium - will be handled by Raydium/Jupiter
+        return { isTradeable: false };
+      }
+    }
+    
+    return { isTradeable: false };
+    
+  } catch (error) {
+    console.log('[LiquidityDetector] Pump.fun check error:', error);
+    return { isTradeable: false };
+  }
+}
+
 // ============================================
 // POOL VALIDATION (STRICT CRITERIA)
 // ============================================
@@ -237,12 +327,8 @@ async function validatePoolStrict(
     return { passed: false, reason: 'LP supply is zero - pool not initialized' };
   }
   
-  // CHECK 8: Verify this is NOT a Pump.fun bonding curve
-  // Pump.fun pools have specific characteristics we must reject
-  const isPumpFunPool = await checkIfPumpFunPool(pool.quoteMint);
-  if (isPumpFunPool) {
-    return { passed: false, reason: 'Token still in Pump.fun bonding curve stage' };
-  }
+  // CHECK 8: Pump.fun check REMOVED - we now handle Pump.fun in detectTradablePool priority 1
+  // Tokens on Pump.fun bonding curve are tradeable via Jupiter which supports Pump.fun
   
   return { passed: true };
 }
