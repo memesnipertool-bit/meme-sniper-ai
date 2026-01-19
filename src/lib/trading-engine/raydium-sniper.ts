@@ -3,7 +3,7 @@
  * Direct AMM swap for pre-Jupiter token purchases
  */
 
-import { supabase } from '@/integrations/supabase/client';
+// Note: supabase import removed - no longer using Pump.fun via edge function
 import type {
   TradingConfig,
   LiquidityInfo,
