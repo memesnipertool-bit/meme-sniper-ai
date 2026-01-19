@@ -4,6 +4,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Complete mapping of API types to their secret/environment variable names
+// Complete mapping of API types to their secret/environment variable names
+// Only includes APIs actually used in the application
 export const API_SECRET_MAPPING: Record<string, string> = {
   birdeye: 'BIRDEYE_API_KEY',
   dextools: 'DEXTOOLS_API_KEY',
@@ -15,7 +17,6 @@ export const API_SECRET_MAPPING: Record<string, string> = {
   raydium: 'RAYDIUM_API_KEY',
   pumpfun: 'PUMPFUN_API_KEY',
   rpc_provider: 'SOLANA_RPC_URL',
-  trade_execution: 'TRADE_EXECUTION_API_KEY',
 };
 
 // API validation endpoints for testing connectivity
@@ -28,6 +29,8 @@ export const API_VALIDATION_ENDPOINTS: Record<string, { url: string; method: str
   pumpfun: { url: 'https://frontend-api.pump.fun/coins?offset=0&limit=1', method: 'GET', requiresKey: false },
   honeypot_rugcheck: { url: 'https://api.rugcheck.xyz/v1/tokens/So11111111111111111111111111111111111111112/report', method: 'GET', requiresKey: false },
   rpc_provider: { url: 'https://api.mainnet-beta.solana.com', method: 'POST', requiresKey: false },
+  dextools: { url: 'https://public-api.dextools.io/trial/v2/token/solana/So11111111111111111111111111111111111111112/info', method: 'GET', requiresKey: true },
+  liquidity_lock: { url: 'https://api.team.finance/v1/lockups', method: 'GET', requiresKey: true },
 };
 
 // Encryption/decryption for API keys stored in database
