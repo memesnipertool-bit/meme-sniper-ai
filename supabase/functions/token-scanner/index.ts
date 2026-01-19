@@ -269,82 +269,213 @@ serve(async (req) => {
       return null;
     };
 
+    // STRICT RAYDIUM-ONLY TRADABILITY CHECK
+    // Tokens must have a live Raydium pool with swap capability
     const checkTradability = async (token: TokenData): Promise<TokenData> => {
-      // Pump.fun tokens are always tradeable via bonding curve - skip Jupiter check
+      // REJECT: Pump.fun bonding curve tokens - not tradable via Raydium
       if (token.isPumpFun) {
-        token.canBuy = true;
-        token.canSell = true;
-        token.isTradeable = true;
-        token.safetyReasons.push("✅ Pump.fun bonding curve (tradeable)");
+        token.canBuy = false;
+        token.canSell = false;
+        token.isTradeable = false;
+        token.safetyReasons.push("❌ Still in Pump.fun bonding curve (not on Raydium)");
         return token;
       }
 
       try {
+        // Step 1: Check if Raydium has a valid pool for this token
+        const raydiumCheck = await checkRaydiumPool(token.address, token.liquidity);
+        
+        if (!raydiumCheck.hasPool) {
+          token.canBuy = false;
+          token.isTradeable = false;
+          token.safetyReasons.push(raydiumCheck.reason || "❌ No Raydium pool found");
+          return token;
+        }
+        
+        // Step 2: Simulate a tiny swap to confirm tradability
+        const swapResult = await simulateRaydiumSwap(token.address);
+        
+        if (!swapResult.success) {
+          token.canBuy = false;
+          token.isTradeable = false;
+          token.safetyReasons.push(swapResult.reason || "❌ Swap simulation failed");
+          return token;
+        }
+        
+        // ALL CHECKS PASSED - Token is TRADABLE
+        token.canBuy = true;
+        token.isTradeable = true;
+        token.safetyReasons.push("✅ Raydium pool verified (swap simulation passed)");
+        
+        // Add pool info
+        if (raydiumCheck.poolType) {
+          token.safetyReasons.push(`✅ Pool: ${raydiumCheck.poolType}`);
+        }
+        
+      } catch (e: any) {
+        console.error('Tradability check error for', token.symbol, e);
+        // On error, mark as NOT tradable for safety
+        token.canBuy = false;
+        token.isTradeable = false;
+        token.safetyReasons.push("⚠️ Tradability check failed");
+      }
+      
+      return token;
+    };
+    
+    // Check Raydium pool existence and validity
+    const checkRaydiumPool = async (tokenAddress: string, liquidity: number): Promise<{
+      hasPool: boolean;
+      reason?: string;
+      poolType?: string;
+    }> => {
+      try {
+        const response = await fetch(
+          `https://api-v3.raydium.io/pools/info/mint?mint1=${tokenAddress}&mint2=${SOL_MINT}&poolType=standard&pageSize=5`,
+          {
+            signal: AbortSignal.timeout(8000),
+            headers: { 'Accept': 'application/json' },
+          }
+        );
+        
+        if (!response.ok) {
+          return { hasPool: false, reason: `❌ Raydium API error: ${response.status}` };
+        }
+        
+        const data = await response.json();
+        
+        if (!data.success || !data.data?.data?.length) {
+          return { hasPool: false, reason: "❌ No Raydium AMM pool found" };
+        }
+        
+        // Find best pool
+        const pools = data.data.data;
+        const validPool = pools.find((p: any) => {
+          // Must have SOL or USDC as one of the mints
+          const mintA = p.mintA?.address || p.mintA;
+          const mintB = p.mintB?.address || p.mintB;
+          const hasSolOrUsdc = mintA === SOL_MINT || mintB === SOL_MINT ||
+                               mintA === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" ||
+                               mintB === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+          
+          // Must have reserves
+          const hasReserves = (p.mintAmountA || 0) > 0 && (p.mintAmountB || 0) > 0;
+          
+          return hasSolOrUsdc && hasReserves;
+        });
+        
+        if (!validPool) {
+          return { hasPool: false, reason: "❌ No valid SOL/USDC pool found" };
+        }
+        
+        // Check minimum liquidity (20 SOL default)
+        const minLiquidityThreshold = 20;
+        let poolLiquidity = 0;
+        
+        // Calculate pool liquidity in SOL
+        const mintA = validPool.mintA?.address || validPool.mintA;
+        if (mintA === SOL_MINT) {
+          poolLiquidity = validPool.mintAmountA || 0;
+        } else {
+          poolLiquidity = validPool.mintAmountB || 0;
+        }
+        
+        if (poolLiquidity < minLiquidityThreshold) {
+          return { 
+            hasPool: false, 
+            reason: `❌ Insufficient liquidity: ${poolLiquidity.toFixed(2)} SOL < ${minLiquidityThreshold} SOL` 
+          };
+        }
+        
+        return { 
+          hasPool: true, 
+          poolType: `Raydium V4 (${poolLiquidity.toFixed(0)} SOL)` 
+        };
+        
+      } catch (e: any) {
+        console.error('Raydium pool check error:', e);
+        return { hasPool: false, reason: "❌ Raydium check failed" };
+      }
+    };
+    
+    // Simulate swap via Raydium compute API
+    const simulateRaydiumSwap = async (tokenAddress: string): Promise<{
+      success: boolean;
+      reason?: string;
+    }> => {
+      try {
+        // Simulate a 0.001 SOL swap
+        const amountLamports = 1000000; // 0.001 SOL
+        const slippageBps = 1500; // 15%
+        
+        const response = await fetch(
+          `https://api-v3.raydium.io/compute/swap-base-in?` +
+          `inputMint=${SOL_MINT}&` +
+          `outputMint=${tokenAddress}&` +
+          `amount=${amountLamports}&` +
+          `slippageBps=${slippageBps}`,
+          {
+            signal: AbortSignal.timeout(8000),
+            headers: { 'Accept': 'application/json' },
+          }
+        );
+        
+        if (!response.ok) {
+          // Try Jupiter as fallback
+          return await simulateJupiterSwap(tokenAddress);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.success || !data.data) {
+          return { success: false, reason: "❌ Raydium: No swap route" };
+        }
+        
+        const outputAmount = data.data.outputAmount || 0;
+        if (outputAmount <= 0) {
+          return { success: false, reason: "❌ Raydium: Zero output" };
+        }
+        
+        return { success: true };
+        
+      } catch (e: any) {
+        console.error('Raydium swap simulation error:', e);
+        // Try Jupiter as fallback
+        return await simulateJupiterSwap(tokenAddress);
+      }
+    };
+    
+    // Jupiter fallback for swap simulation
+    const simulateJupiterSwap = async (tokenAddress: string): Promise<{
+      success: boolean;
+      reason?: string;
+    }> => {
+      try {
         const params = new URLSearchParams({
           inputMint: SOL_MINT,
-          outputMint: token.address,
+          outputMint: tokenAddress,
           amount: "1000000", // 0.001 SOL
-          slippageBps: "500",
+          slippageBps: "1500",
         });
         
         const buildUrl = (endpoint: string) => `${endpoint}?${params}`;
         const response = await fetchWithRetry(buildUrl);
         
-        if (response) {
-          const data = await response.json();
-          if (data.outAmount && parseInt(data.outAmount) > 0) {
-            token.canBuy = true;
-            token.isTradeable = true;
-            token.safetyReasons.push("✅ Tradeable on Jupiter");
-          } else if (data.routePlan && data.routePlan.length > 0) {
-            // Alternative response format
-            token.canBuy = true;
-            token.isTradeable = true;
-            token.safetyReasons.push("✅ Jupiter route available");
-          } else {
-            // No Jupiter route found - but for new tokens this is expected
-            // They can still be traded via Raydium or Pump.fun directly
-            if (token.isPumpFun && token.liquidity && token.liquidity > 0) {
-              token.canBuy = true;
-              token.isTradeable = true;
-              token.safetyReasons.push("✅ Tradeable via Pump.fun");
-            } else if (token.liquidity && token.liquidity > 0) {
-              token.canBuy = true;
-              token.isTradeable = true;
-              token.safetyReasons.push("✅ Tradeable via Raydium (Jupiter indexing in progress)");
-            } else {
-              token.canBuy = false;
-              token.isTradeable = false;
-              token.safetyReasons.push("❌ No liquidity pool found");
-            }
-          }
-        } else {
-          // All endpoints failed - likely infrastructure issue
-          // For Pump.fun tokens or tokens with liquidity, allow direct trading via Raydium/Pump.fun
-          if (token.isPumpFun && token.liquidity && token.liquidity > 0) {
-            token.canBuy = true;
-            token.isTradeable = true;
-            token.safetyReasons.push("✅ Tradeable via Pump.fun (Jupiter not required)");
-          } else if (token.liquidity && token.liquidity > 500) {
-            token.canBuy = true;
-            token.isTradeable = true;
-            token.safetyReasons.push("✅ Tradeable via Raydium (new token, Jupiter pending)");
-          } else if (token.liquidity && token.liquidity > 0) {
-            token.canBuy = true;
-            token.isTradeable = true;
-            token.safetyReasons.push("⚠️ Low liquidity - trade with caution");
-          } else {
-            // Keep defaults but warn user
-            token.safetyReasons.push("⚠️ No liquidity detected");
-          }
+        if (!response) {
+          return { success: false, reason: "❌ No swap route available" };
         }
+        
+        const data = await response.json();
+        
+        if (data.outAmount && parseInt(data.outAmount) > 0) {
+          return { success: true };
+        }
+        
+        return { success: false, reason: "❌ Jupiter: No valid route" };
+        
       } catch (e: any) {
-        console.error('Jupiter check unexpected error for', token.symbol, e);
-        // Unexpected error - don't block trading
-        token.safetyReasons.push("⚠️ Jupiter check incomplete");
+        return { success: false, reason: "❌ Swap verification failed" };
       }
-      
-      return token;
     };
 
     // Pump.fun API endpoints with fallbacks (primary can get Cloudflare 530 errors)

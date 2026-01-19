@@ -15,11 +15,11 @@ export const DEFAULT_RISK_FILTERS: RiskFilters = {
   maxOwnershipPercent: 50,
 };
 
-// Default trading configuration
+// Default trading configuration - STRICT Raydium-only mode
 export const DEFAULT_TRADING_CONFIG: TradingConfig = {
-  // Liquidity detection - lowered for meme tokens
-  minLiquidity: 1, // 1 SOL minimum (lowered from 5 for new tokens)
-  maxRiskScore: 70, // Max 70/100 risk score (slightly more permissive)
+  // Liquidity detection - STRICT thresholds for tradable pools
+  minLiquidity: 20, // 20 SOL minimum - only real Raydium pools
+  maxRiskScore: 60, // Max 60/100 risk score - stricter filtering
   
   // Trading parameters
   buyAmount: 0.1, // 0.1 SOL default
