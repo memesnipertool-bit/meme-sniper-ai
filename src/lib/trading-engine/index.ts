@@ -77,6 +77,16 @@ export {
 } from './liquidity-detector';
 export type { TradablePoolResult } from './liquidity-detector';
 
+// RPC-Based Pool Validation (NO Raydium HTTP dependency)
+export {
+  detectTradablePoolRPC,
+  waitForPoolReadiness,
+  simulateRaydiumSwapRPC,
+  simulateSwapWithRetry,
+  isPoolReadyForExecution,
+} from './rpc-pool-validator';
+export type { PoolReadinessResult, SwapSimulationResult as RpcSwapSimulationResult } from './rpc-pool-validator';
+
 // Stage 2: Raydium Sniping
 export {
   executeRaydiumSnipe,

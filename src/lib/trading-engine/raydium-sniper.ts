@@ -49,11 +49,15 @@ export async function executeRaydiumSnipe(
     };
   }
   
+  // Use exponential backoff with minimum 2-block delays
+  // NO tight retry loops (<1 second) allowed
+  const MIN_RETRY_DELAY_MS = 1000; // Minimum 1 second between retries
+  
   while (attempts < config.maxRetries) {
     attempts++;
     
     try {
-      // Execute Raydium swap
+      // Execute Raydium swap via Jupiter (primary) or Raydium HTTP (fallback with 500 tolerance)
       return await executeRaydiumSwap(
         liquidityInfo,
         buyAmount,
@@ -69,7 +73,13 @@ export async function executeRaydiumSnipe(
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
-      onEvent?.({ type: 'SNIPE_FAILED', data: { error: errorMessage, attempts } });
+      // Log but DON'T abort on Raydium HTTP 500 errors
+      if (errorMessage.includes('500') || errorMessage.includes('502') || errorMessage.includes('503')) {
+        console.warn(`[RaydiumSniper] Raydium HTTP ${errorMessage} - continuing with fallback`);
+        onEvent?.({ type: 'SNIPE_FAILED', data: { error: `Raydium API error (retrying): ${errorMessage}`, attempts } });
+      } else {
+        onEvent?.({ type: 'SNIPE_FAILED', data: { error: errorMessage, attempts } });
+      }
       
       if (attempts >= config.maxRetries) {
         return {
@@ -84,8 +94,11 @@ export async function executeRaydiumSnipe(
         };
       }
       
-      // Wait before retry
-      await new Promise(resolve => setTimeout(resolve, config.retryDelayMs));
+      // Exponential backoff: 1s, 2s, 4s (capped at ~4 blocks)
+      const backoffMs = Math.max(MIN_RETRY_DELAY_MS, config.retryDelayMs * Math.pow(2, attempts - 1));
+      const cappedBackoff = Math.min(backoffMs, 4000); // Cap at 4 seconds
+      console.log(`[RaydiumSniper] Retry ${attempts}/${config.maxRetries} in ${cappedBackoff}ms`);
+      await new Promise(resolve => setTimeout(resolve, cappedBackoff));
     }
   }
   
@@ -106,7 +119,12 @@ export async function executeRaydiumSnipe(
 // Pump.fun bonding curve tokens are rejected at Stage 1
 
 /**
- * Execute swap via Raydium AMM
+ * Execute swap via Jupiter (primary) with Raydium HTTP fallback
+ * 
+ * STRATEGY:
+ * 1. Try Jupiter first (most reliable, aggregates all routes)
+ * 2. If Jupiter fails, try Raydium HTTP (tolerate 500 errors)
+ * 3. Raydium HTTP 500 errors are logged but DON'T block the trade
  */
 async function executeRaydiumSwap(
   liquidityInfo: LiquidityInfo,
@@ -119,15 +137,173 @@ async function executeRaydiumSwap(
   attempts: number,
   onEvent?: TradingEventCallback
 ): Promise<RaydiumSnipeResult> {
-  // First, get a quote from Raydium
   const amountInLamports = Math.floor(buyAmount * 1e9);
+  const slippageBps = Math.floor(slippage * 10000);
   
+  // TRY JUPITER FIRST (primary - most reliable)
+  try {
+    const jupiterResult = await executeViaJupiter(
+      liquidityInfo.tokenAddress,
+      amountInLamports,
+      slippageBps,
+      priorityFee,
+      walletAddress,
+      signTransaction,
+      startTime,
+      attempts,
+      onEvent
+    );
+    
+    if (jupiterResult.status === 'SNIPED') {
+      return jupiterResult;
+    }
+    
+    console.log(`[RaydiumSniper] Jupiter failed: ${jupiterResult.error}, trying Raydium HTTP...`);
+  } catch (jupiterError) {
+    console.log(`[RaydiumSniper] Jupiter error: ${jupiterError}, trying Raydium HTTP...`);
+  }
+  
+  // FALLBACK TO RAYDIUM HTTP (with 500 tolerance)
+  try {
+    return await executeViaRaydiumHttp(
+      liquidityInfo.tokenAddress,
+      amountInLamports,
+      slippageBps,
+      priorityFee,
+      walletAddress,
+      signTransaction,
+      startTime,
+      attempts,
+      onEvent
+    );
+  } catch (raydiumError) {
+    const errorMsg = raydiumError instanceof Error ? raydiumError.message : 'Unknown error';
+    
+    // Check if this is an HTTP 500-level error - log but don't treat as fatal
+    if (errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
+      console.warn(`[RaydiumSniper] Raydium HTTP ${errorMsg} - API unavailable`);
+      throw new Error(`Raydium API temporarily unavailable: ${errorMsg}`);
+    }
+    
+    throw raydiumError;
+  }
+}
+
+/**
+ * Execute via Jupiter aggregator (primary route)
+ */
+async function executeViaJupiter(
+  tokenAddress: string,
+  amountInLamports: number,
+  slippageBps: number,
+  priorityFee: number,
+  walletAddress: string,
+  signTransaction: (tx: UnsignedTransaction) => Promise<{ signature: string; error?: string }>,
+  startTime: number,
+  attempts: number,
+  onEvent?: TradingEventCallback
+): Promise<RaydiumSnipeResult> {
+  // Get Jupiter quote
+  const quoteResponse = await fetch(
+    `https://quote-api.jup.ag/v6/quote?` +
+    `inputMint=${SOL_MINT}&` +
+    `outputMint=${tokenAddress}&` +
+    `amount=${amountInLamports}&` +
+    `slippageBps=${slippageBps}`,
+    { signal: AbortSignal.timeout(10000) }
+  );
+  
+  if (!quoteResponse.ok) {
+    throw new Error(`Jupiter quote failed: ${quoteResponse.status}`);
+  }
+  
+  const quoteData = await quoteResponse.json();
+  
+  if (quoteData.error || !quoteData.outAmount) {
+    throw new Error(quoteData.error || 'No Jupiter route available');
+  }
+  
+  // Build swap transaction
+  const swapResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      quoteResponse: quoteData,
+      userPublicKey: walletAddress,
+      wrapAndUnwrapSol: true,
+      prioritizationFeeLamports: priorityFee,
+      dynamicComputeUnitLimit: true,
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  
+  if (!swapResponse.ok) {
+    throw new Error(`Jupiter swap build failed: ${swapResponse.status}`);
+  }
+  
+  const swapData = await swapResponse.json();
+  
+  if (!swapData.swapTransaction) {
+    throw new Error('No transaction in Jupiter response');
+  }
+  
+  // Sign the transaction
+  const signResult = await signTransaction({
+    serializedTransaction: swapData.swapTransaction,
+    blockhash: swapData.blockhash || '',
+    lastValidBlockHeight: swapData.lastValidBlockHeight || 0,
+    feePayer: walletAddress,
+  });
+  
+  if (signResult.error) {
+    throw new Error(`Transaction signing failed: ${signResult.error}`);
+  }
+  
+  // Calculate entry price
+  const outputAmount = parseInt(quoteData.outAmount, 10) || 0;
+  const buyAmount = amountInLamports / 1e9;
+  const tokenAmount = outputAmount / Math.pow(10, quoteData.outputMint?.decimals || 9);
+  const entryPrice = tokenAmount > 0 ? buyAmount / tokenAmount : 0;
+  
+  const result: RaydiumSnipeResult = {
+    status: 'SNIPED',
+    txHash: signResult.signature,
+    entryPrice,
+    tokenAmount,
+    solSpent: buyAmount,
+    attempts,
+    snipedAt: startTime,
+  };
+  
+  onEvent?.({ type: 'SNIPE_SUCCESS', data: result });
+  
+  return result;
+}
+
+/**
+ * Execute via Raydium HTTP API (fallback)
+ * Tolerates 500 errors by NOT aborting on them
+ */
+async function executeViaRaydiumHttp(
+  tokenAddress: string,
+  amountInLamports: number,
+  slippageBps: number,
+  priorityFee: number,
+  walletAddress: string,
+  signTransaction: (tx: UnsignedTransaction) => Promise<{ signature: string; error?: string }>,
+  startTime: number,
+  attempts: number,
+  onEvent?: TradingEventCallback
+): Promise<RaydiumSnipeResult> {
+  const buyAmount = amountInLamports / 1e9;
+  
+  // Get quote from Raydium (single attempt - NO aggressive retries)
   const quoteResponse = await fetch(
     `${API_ENDPOINTS.raydiumSwap}/compute/swap-base-in?` +
     `inputMint=${SOL_MINT}&` +
-    `outputMint=${liquidityInfo.tokenAddress}&` +
+    `outputMint=${tokenAddress}&` +
     `amount=${amountInLamports}&` +
-    `slippageBps=${Math.floor(slippage * 10000)}`,
+    `slippageBps=${slippageBps}`,
     { signal: AbortSignal.timeout(15000) }
   );
   
@@ -141,7 +317,7 @@ async function executeRaydiumSwap(
     throw new Error(quoteData.msg || 'No route found on Raydium');
   }
   
-  // Build the swap transaction
+  // Build the swap transaction (single attempt)
   const swapResponse = await fetch(`${API_ENDPOINTS.raydiumSwap}/transaction/swap-base-in`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

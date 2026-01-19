@@ -412,6 +412,8 @@ async function checkIfPumpFunPool(tokenAddress: string): Promise<boolean> {
 
 // ============================================
 // SWAP SIMULATION (MANDATORY)
+// Uses Jupiter ONLY - NO Raydium HTTP API
+// Raydium HTTP 500 errors must NEVER block trades
 // ============================================
 
 async function simulateSwap(
@@ -419,60 +421,10 @@ async function simulateSwap(
   outputMint: string,
   amountSol: number
 ): Promise<SwapSimulationResult> {
-  try {
-    // Use Raydium swap compute API to simulate
-    const amountLamports = Math.floor(amountSol * 1e9);
-    const slippageBps = 1500; // 15% for simulation
-    
-    const response = await fetch(
-      `https://api-v3.raydium.io/compute/swap-base-in?` +
-      `inputMint=${inputMint}&` +
-      `outputMint=${outputMint}&` +
-      `amount=${amountLamports}&` +
-      `slippageBps=${slippageBps}`,
-      {
-        signal: AbortSignal.timeout(10000),
-        headers: { 'Accept': 'application/json' },
-      }
-    );
-    
-    if (!response.ok) {
-      // Try Jupiter as backup for simulation
-      return await simulateSwapJupiter(inputMint, outputMint, amountLamports);
-    }
-    
-    const data = await response.json();
-    
-    if (!data.success || !data.data) {
-      return {
-        success: false,
-        error: data.msg || 'Raydium simulation failed - no route',
-      };
-    }
-    
-    // Check that we get a reasonable output
-    const outputAmount = data.data.outputAmount || 0;
-    
-    if (outputAmount <= 0) {
-      return {
-        success: false,
-        error: 'Simulation returned zero output',
-      };
-    }
-    
-    return {
-      success: true,
-      outputAmount: outputAmount,
-      priceImpact: data.data.priceImpact || 0,
-    };
-    
-  } catch (error) {
-    console.error('[LiquidityDetector] Swap simulation error:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Simulation failed',
-    };
-  }
+  // REMOVED: Raydium HTTP simulation - causes 500 errors
+  // NOW: Use Jupiter as the ONLY simulation source
+  const amountLamports = Math.floor(amountSol * 1e9);
+  return await simulateSwapJupiter(inputMint, outputMint, amountLamports);
 }
 
 async function simulateSwapJupiter(
