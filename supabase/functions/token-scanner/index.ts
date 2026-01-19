@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { validateTokenScannerInput } from "../_shared/validation.ts";
+import { getApiKey, decryptKey as sharedDecryptKey } from "../_shared/api-keys.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -141,32 +142,20 @@ serve(async (req) => {
       }
     };
 
-    const getApiConfig = (type: string): ApiConfig | undefined => 
+    const getApiConfigLocal = (type: string): ApiConfig | undefined => 
       apiConfigs?.find((c: ApiConfig) => c.api_type === type && c.is_enabled);
 
-    const decryptKey = (encrypted: string | null): string | null => {
-      if (!encrypted) return null;
-      if (!encrypted.startsWith('enc:')) return encrypted;
-      try {
-        return atob(encrypted.substring(4));
-      } catch {
-        return null;
-      }
-    };
+    // Use shared decrypt function
+    const decryptKey = sharedDecryptKey;
 
-    const getApiKey = (apiType: string, dbApiKey: string | null): string | null => {
+    // Get API key from database or environment using shared helper
+    const getApiKeyForType = async (apiType: string, dbApiKey: string | null): Promise<string | null> => {
+      // First try decrypting the DB key
       const decrypted = decryptKey(dbApiKey);
       if (decrypted) return decrypted;
       
-      const envKeyName = `${apiType.toUpperCase().replace(/_/g, '_')}_API_KEY`;
-      const envKey = Deno.env.get(envKeyName);
-      if (envKey) return envKey;
-      
-      if (apiType === 'birdeye') {
-        return Deno.env.get('BIRDEYE_API_KEY') || null;
-      }
-      
-      return null;
+      // Fall back to shared helper which checks DB and env
+      return await getApiKey(apiType);
     };
 
     // Validate token safety using RugCheck API
@@ -351,7 +340,7 @@ serve(async (req) => {
       // Pump.fun works with Solana chain
       if (!chains.includes('solana')) return;
 
-      const pumpFunConfig = getApiConfig('pumpfun');
+      const pumpFunConfig = getApiConfigLocal('pumpfun');
       let baseUrl = pumpFunConfig?.base_url || PUMPFUN_API;
       
       // Validate URL scheme - only use HTTPS, fallback if WebSocket or invalid URL
@@ -447,7 +436,7 @@ serve(async (req) => {
 
     // DexScreener fetch function
     const fetchDexScreener = async () => {
-      const dexScreenerConfig = getApiConfig('dexscreener');
+      const dexScreenerConfig = getApiConfigLocal('dexscreener');
       if (!dexScreenerConfig) return;
 
       const endpoint = `${dexScreenerConfig.base_url}/latest/dex/search?q=solana`;
@@ -541,7 +530,7 @@ serve(async (req) => {
 
     // GeckoTerminal fetch function
     const fetchGeckoTerminal = async () => {
-      const geckoConfig = getApiConfig('geckoterminal');
+      const geckoConfig = getApiConfigLocal('geckoterminal');
       if (!geckoConfig) return;
 
       const chainParam = chains.includes('solana') ? 'solana' : 'eth';
@@ -624,10 +613,10 @@ serve(async (req) => {
 
     // Birdeye fetch function
     const fetchBirdeye = async () => {
-      const birdeyeConfig = getApiConfig('birdeye');
+      const birdeyeConfig = getApiConfigLocal('birdeye');
       if (!birdeyeConfig) return;
       
-      const apiKey = getApiKey('birdeye', birdeyeConfig.api_key_encrypted);
+      const apiKey = await getApiKeyForType('birdeye', birdeyeConfig.api_key_encrypted);
       if (!apiKey) return;
 
       const endpoint = `${birdeyeConfig.base_url}/defi/tokenlist?sort_by=v24hUSD&sort_type=desc&limit=15`;
@@ -709,7 +698,7 @@ serve(async (req) => {
 
     // Jupiter/Raydium health check
     const checkTradeExecution = async () => {
-      const tradeConfig = getApiConfig('trade_execution');
+      const tradeConfig = getApiConfigLocal('trade_execution');
       if (!chains.includes('solana') || !tradeConfig) return;
 
       const endpoint = JUPITER_QUOTE_API;
