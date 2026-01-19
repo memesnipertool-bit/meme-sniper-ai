@@ -1,117 +1,45 @@
-import React, { forwardRef, useState, useEffect, useCallback } from 'react';
+import React, { forwardRef, useState } from 'react';
 import TradingHeader from "@/components/trading/TradingHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Slider } from "@/components/ui/slider";
-import { useSniperSettings, SnipingPriority } from "@/hooks/useSniperSettings";
+import { useSniperSettings } from "@/hooks/useSniperSettings";
 import { useWallet } from "@/hooks/useWallet";
-import { useDebouncedCallback } from "@/hooks/useDebounce";
-import { validateSettings, isValidSolanaAddress, validateField } from "@/lib/sniperValidation";
+import { isValidSolanaAddress } from "@/lib/sniperValidation";
 import {
-  Crosshair,
   Save,
   Loader2,
-  DollarSign,
-  TrendingUp,
-  TrendingDown,
-  Zap,
-  Filter,
   Shield,
   Plus,
   X,
-  Users,
-  AlertCircle,
+  Star,
+  Info,
+  ListFilter,
 } from "lucide-react";
 import { toast } from "sonner";
-
-const CATEGORY_OPTIONS = [
-  { id: 'animals', label: 'Animals', emoji: '🐕' },
-  { id: 'parody', label: 'Parody', emoji: '🎭' },
-  { id: 'trend', label: 'Trend', emoji: '📈' },
-  { id: 'utility', label: 'Utility', emoji: '⚙️' },
-];
-
-const PRIORITY_OPTIONS: { value: SnipingPriority; label: string; description: string }[] = [
-  { value: 'normal', label: 'Normal', description: 'Standard priority' },
-  { value: 'fast', label: 'Fast', description: 'Higher gas' },
-  { value: 'turbo', label: 'Turbo', description: 'Maximum speed' },
-];
 
 const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSniperSettings(_props, ref) {
   const { settings, loading, saving, saveSettings, updateField } = useSniperSettings();
   const { wallet, connectPhantom, disconnect } = useWallet();
   const [newBlacklistToken, setNewBlacklistToken] = useState('');
   const [newWhitelistToken, setNewWhitelistToken] = useState('');
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // Debounced field update to prevent excessive API calls (300ms delay)
-  const debouncedUpdateField = useDebouncedCallback(
-    <K extends keyof typeof settings>(field: K, value: (typeof settings)[K]) => {
-      if (!settings) return;
-      
-      // Validate the field
-      const validation = validateField(field as any, value as any);
-      if (!validation.valid) {
-        setValidationErrors(prev => ({ ...prev, [field]: validation.error || 'Invalid' }));
-      } else {
-        setValidationErrors(prev => {
-          const next = { ...prev };
-          delete next[field];
-          return next;
-        });
-      }
-      
-      updateField(field, value);
-      setHasUnsavedChanges(true);
-    },
-    300
-  );
-
-  // Immediate update for non-debounced fields (like toggles)
-  const immediateUpdateField = useCallback(<K extends keyof typeof settings>(field: K, value: (typeof settings)[K]) => {
-    if (!settings) return;
-    updateField(field, value);
-    setHasUnsavedChanges(true);
-  }, [settings, updateField]);
-
-  const handleSave = async () => {
-    if (!settings) return;
-    
-    // Validate all fields before saving
-    const validation = validateSettings(settings);
-    if (!validation.valid) {
-      setValidationErrors(validation.errors);
-      toast.error('Please fix validation errors before saving');
-      return;
-    }
-    
-    try {
-      await saveSettings(settings);
-      setValidationErrors({});
-      setHasUnsavedChanges(false);
-    } catch {
-      // Error already handled in hook
+  const handleConnectWallet = async () => {
+    if (wallet.isConnected) {
+      await disconnect();
+    } else {
+      await connectPhantom();
     }
   };
 
-  const toggleCategory = (categoryId: string) => {
+  const handleSave = async () => {
     if (!settings) return;
-    const current = settings.category_filters;
-    const updated = current.includes(categoryId)
-      ? current.filter(c => c !== categoryId)
-      : [...current, categoryId];
-    
-    // Validate minimum categories
-    if (updated.length === 0) {
-      toast.error('Select at least one category');
-      return;
+    try {
+      await saveSettings(settings);
+    } catch {
+      // Error already handled in hook
     }
-    
-    immediateUpdateField('category_filters', updated);
   };
 
   const addToBlacklist = () => {
@@ -119,7 +47,6 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
     
     const trimmed = newBlacklistToken.trim();
     
-    // Validate address format
     if (!isValidSolanaAddress(trimmed)) {
       toast.error('Invalid Solana token address format');
       return;
@@ -130,13 +57,15 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
       return;
     }
     
-    immediateUpdateField('token_blacklist', [...settings.token_blacklist, trimmed]);
+    updateField('token_blacklist', [...settings.token_blacklist, trimmed]);
     setNewBlacklistToken('');
+    toast.success('Token added to blacklist');
   };
 
   const removeFromBlacklist = (token: string) => {
     if (!settings) return;
-    immediateUpdateField('token_blacklist', settings.token_blacklist.filter(t => t !== token));
+    updateField('token_blacklist', settings.token_blacklist.filter(t => t !== token));
+    toast.success('Token removed from blacklist');
   };
 
   const addToWhitelist = () => {
@@ -144,7 +73,6 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
     
     const trimmed = newWhitelistToken.trim();
     
-    // Validate address format
     if (!isValidSolanaAddress(trimmed)) {
       toast.error('Invalid Solana token address format');
       return;
@@ -155,35 +83,16 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
       return;
     }
     
-    immediateUpdateField('token_whitelist', [...settings.token_whitelist, trimmed]);
+    updateField('token_whitelist', [...settings.token_whitelist, trimmed]);
     setNewWhitelistToken('');
+    toast.success('Token added to whitelist');
   };
 
   const removeFromWhitelist = (token: string) => {
     if (!settings) return;
-    immediateUpdateField('token_whitelist', settings.token_whitelist.filter(t => t !== token));
+    updateField('token_whitelist', settings.token_whitelist.filter(t => t !== token));
+    toast.success('Token removed from whitelist');
   };
-
-  const handleConnectWallet = async () => {
-    if (wallet.isConnected) {
-      await disconnect();
-    } else {
-      await connectPhantom();
-    }
-  };
-
-  // Warn about unsaved changes
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
-    
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges]);
 
   if (loading) {
     return (
@@ -217,10 +126,8 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
     );
   }
 
-  const hasErrors = Object.keys(validationErrors).length > 0;
-
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" ref={ref}>
       <TradingHeader
         walletConnected={wallet.isConnected}
         walletAddress={wallet.address || undefined}
@@ -234,391 +141,153 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-lg bg-primary/20">
-                <Crosshair className="w-6 h-6 text-primary" />
+                <ListFilter className="w-6 h-6 text-primary" />
               </div>
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold text-foreground">
-                  Trading Settings
+                  Token Lists
                 </h1>
                 <p className="text-muted-foreground text-sm">
-                  Configure your liquidity-based auto trading parameters
+                  Manage blacklist and whitelist for token filtering
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {hasUnsavedChanges && (
-                <Badge variant="outline" className="text-warning border-warning/50">
-                  Unsaved changes
-                </Badge>
-              )}
-              <Button 
-                onClick={handleSave} 
-                disabled={saving || hasErrors} 
-                variant="glow"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                Save Settings
-              </Button>
-            </div>
+            <Button 
+              onClick={handleSave} 
+              disabled={saving} 
+              variant="glow"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+              Save
+            </Button>
           </div>
 
-          {/* Validation Errors Banner */}
-          {hasErrors && (
-            <div className="mb-6 p-4 rounded-lg border border-destructive/50 bg-destructive/10">
-              <div className="flex items-center gap-2 text-destructive">
-                <AlertCircle className="w-5 h-5" />
-                <span className="font-medium">Please fix the following errors:</span>
+          {/* Info Card */}
+          <Card className="mb-6 border-primary/20 bg-primary/5">
+            <CardContent className="pt-4">
+              <div className="flex items-start gap-3">
+                <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="text-foreground font-medium mb-1">How Token Lists Work</p>
+                  <p className="text-muted-foreground">
+                    <strong>Blacklist:</strong> Tokens added here will be completely ignored by the bot.
+                    <br />
+                    <strong>Whitelist:</strong> Prioritized tokens that bypass some safety checks.
+                  </p>
+                </div>
               </div>
-              <ul className="mt-2 ml-7 list-disc text-sm text-destructive/80">
-                {Object.entries(validationErrors).map(([field, error]) => (
-                  <li key={field}>{error}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+            </CardContent>
+          </Card>
 
-          <div className="grid gap-6">
-            {/* Liquidity Settings */}
+          {/* Token Lists Grid */}
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Blacklist */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5 text-primary" />
-                  Liquidity Settings
+                  <Shield className="h-5 w-5 text-destructive" />
+                  Blacklist
                 </CardTitle>
-                <CardDescription>Set minimum liquidity for token detection</CardDescription>
+                <CardDescription>Tokens to never buy</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-6">
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <Label>Minimum Liquidity (SOL)</Label>
-                      <span className="text-success font-bold text-xl">{settings.min_liquidity}</span>
-                    </div>
-                    <Slider
-                      value={[settings.min_liquidity]}
-                      onValueChange={([v]) => debouncedUpdateField('min_liquidity', v)}
-                      min={50}
-                      max={1000}
-                      step={10}
-                      className="[&_[role=slider]]:bg-success [&_[role=slider]]:border-success"
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Bot only buys tokens with at least this much liquidity
-                    </p>
-                    {validationErrors.min_liquidity && (
-                      <p className="text-xs text-destructive mt-1">{validationErrors.min_liquidity}</p>
-                    )}
-                  </div>
-
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="trade_amount">Buy Amount (SOL)</Label>
-                      <div className="flex items-center justify-between mt-2">
-                        <Slider
-                          value={[settings.trade_amount * 10]}
-                          onValueChange={([v]) => debouncedUpdateField('trade_amount', v / 10)}
-                          min={1}
-                          max={50}
-                          step={1}
-                          className="flex-1 mr-4"
-                        />
-                        <span className="font-mono font-bold text-foreground w-12 text-right">
-                          {settings.trade_amount}
-                        </span>
-                      </div>
-                      {validationErrors.trade_amount && (
-                        <p className="text-xs text-destructive mt-1">{validationErrors.trade_amount}</p>
-                      )}
-                    </div>
-                    <div>
-                      <Label htmlFor="max_concurrent">Max Concurrent Trades</Label>
-                      <div className="flex items-center justify-between mt-2">
-                        <Slider
-                          value={[settings.max_concurrent_trades]}
-                          onValueChange={([v]) => debouncedUpdateField('max_concurrent_trades', v)}
-                          min={1}
-                          max={10}
-                          step={1}
-                          className="flex-1 mr-4"
-                        />
-                        <span className="font-mono font-bold text-foreground w-12 text-right">
-                          {settings.max_concurrent_trades}
-                        </span>
-                      </div>
-                      {validationErrors.max_concurrent_trades && (
-                        <p className="text-xs text-destructive mt-1">{validationErrors.max_concurrent_trades}</p>
-                      )}
-                    </div>
-                  </div>
+              <CardContent className="space-y-4">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Token address..."
+                    value={newBlacklistToken}
+                    onChange={(e) => setNewBlacklistToken(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addToBlacklist()}
+                    className="font-mono text-sm"
+                  />
+                  <Button size="icon" onClick={addToBlacklist} variant="destructive">
+                    <Plus className="h-4 w-4" />
+                  </Button>
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Buyer Position Settings - Multi-select */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="h-5 w-5 text-primary" />
-                  Buyer Position Strategy
-                </CardTitle>
-                <CardDescription>Select target buyer positions (multi-select)</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground mb-4">
-                  When a new token adds liquidity, the bot will enter if it can become one of your selected buyer positions.
-                </p>
-                <div className="flex gap-2 flex-wrap">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((pos) => {
-                    const isSelected = settings.target_buyer_positions?.includes(pos);
-                    const isRecommended = pos === 2 || pos === 3;
-                    return (
-                      <button
-                        key={pos}
-                        onClick={() => {
-                          const current = settings.target_buyer_positions || [2, 3];
-                          const updated = isSelected
-                            ? current.filter(p => p !== pos)
-                            : [...current, pos].sort((a, b) => a - b);
-                          if (updated.length > 0) {
-                            immediateUpdateField('target_buyer_positions', updated);
-                          } else {
-                            toast.error('Select at least one position');
-                          }
-                        }}
-                        className={`px-4 py-2.5 rounded-lg font-semibold cursor-pointer transition-all flex items-center gap-2 ${
-                          isSelected
-                            ? 'bg-primary text-primary-foreground border-2 border-primary shadow-lg shadow-primary/25'
-                            : 'bg-secondary text-muted-foreground border-2 border-transparent hover:bg-secondary/80'
-                        }`}
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {settings.token_blacklist.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">No tokens blacklisted</p>
+                  ) : (
+                    settings.token_blacklist.map((token) => (
+                      <div
+                        key={token}
+                        className="flex items-center justify-between p-2.5 bg-destructive/10 rounded-lg border border-destructive/20"
                       >
-                        #{pos}
-                        {isRecommended && (
-                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                            ★
-                          </Badge>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-muted-foreground mt-3">
-                  Selected: {settings.target_buyer_positions?.length > 0 
-                    ? settings.target_buyer_positions.map(p => `#${p}`).join(', ')
-                    : '#2, #3 (default)'}
-                  <span className="text-muted-foreground/70 ml-2">• Positions #2-3 are recommended for best results</span>
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Profit & Loss Settings */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-success" />
-                  Auto Exit Settings
-                </CardTitle>
-                <CardDescription>Automatic profit taking and stop loss</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid sm:grid-cols-2 gap-6">
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <Label className="flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4 text-success" />
-                        Take Profit
-                      </Label>
-                      <span className="text-success font-bold text-xl">{settings.profit_take_percentage}%</span>
-                    </div>
-                    <Slider
-                      value={[settings.profit_take_percentage]}
-                      onValueChange={([v]) => debouncedUpdateField('profit_take_percentage', v)}
-                      min={10}
-                      max={500}
-                      step={5}
-                      className="[&_[role=slider]]:bg-success [&_[role=slider]]:border-success"
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Auto-sell when profit reaches this percentage
-                    </p>
-                    {validationErrors.profit_take_percentage && (
-                      <p className="text-xs text-destructive mt-1">{validationErrors.profit_take_percentage}</p>
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <Label className="flex items-center gap-2">
-                        <TrendingDown className="h-4 w-4 text-destructive" />
-                        Stop Loss
-                      </Label>
-                      <span className="text-destructive font-bold text-xl">{settings.stop_loss_percentage}%</span>
-                    </div>
-                    <Slider
-                      value={[settings.stop_loss_percentage]}
-                      onValueChange={([v]) => debouncedUpdateField('stop_loss_percentage', v)}
-                      min={5}
-                      max={50}
-                      step={1}
-                      className="[&_[role=slider]]:bg-destructive [&_[role=slider]]:border-destructive"
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Auto-sell when loss reaches this percentage
-                    </p>
-                    {validationErrors.stop_loss_percentage && (
-                      <p className="text-xs text-destructive mt-1">{validationErrors.stop_loss_percentage}</p>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Sniping Priority */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap className="h-5 w-5 text-warning" />
-                  Transaction Priority
-                </CardTitle>
-                <CardDescription>Set execution speed</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid sm:grid-cols-3 gap-3">
-                  {PRIORITY_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => immediateUpdateField('priority', option.value)}
-                      className={`p-4 rounded-lg border-2 text-left transition-all ${
-                        settings.priority === option.value
-                          ? 'border-primary bg-primary/10'
-                          : 'border-border bg-secondary/30 hover:bg-secondary/50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <Zap className={`h-4 w-4 ${
-                          option.value === 'turbo' ? 'text-destructive' :
-                          option.value === 'fast' ? 'text-warning' : 'text-muted-foreground'
-                        }`} />
-                        <span className="font-semibold text-foreground">{option.label}</span>
+                        <span className="font-mono text-sm text-foreground truncate flex-1">
+                          {token.slice(0, 8)}...{token.slice(-6)}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/20"
+                          onClick={() => removeFromBlacklist(token)}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
                       </div>
-                      <p className="text-xs text-muted-foreground">{option.description}</p>
-                    </button>
-                  ))}
+                    ))
+                  )}
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Category Filters */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Filter className="h-5 w-5 text-primary" />
-                  Token Categories
-                </CardTitle>
-                <CardDescription>Select which token categories to scan</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-3">
-                  {CATEGORY_OPTIONS.map((category) => {
-                    const isActive = settings.category_filters.includes(category.id);
-                    return (
-                      <button
-                        key={category.id}
-                        onClick={() => toggleCategory(category.id)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-full border-2 transition-all ${
-                          isActive
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-secondary/30 text-muted-foreground hover:bg-secondary/50'
-                        }`}
-                      >
-                        <span>{category.emoji}</span>
-                        <span className="font-medium">{category.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                {validationErrors.category_filters && (
-                  <p className="text-xs text-destructive mt-2">{validationErrors.category_filters}</p>
+                {settings.token_blacklist.length > 0 && (
+                  <Badge variant="destructive" className="text-xs">
+                    {settings.token_blacklist.length} token{settings.token_blacklist.length !== 1 ? 's' : ''}
+                  </Badge>
                 )}
               </CardContent>
             </Card>
 
-            {/* Token Lists */}
-            <div className="grid md:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Shield className="h-5 w-5 text-destructive" />
-                    Blacklist
-                  </CardTitle>
-                  <CardDescription>Tokens to never buy</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Token address..."
-                      value={newBlacklistToken}
-                      onChange={(e) => setNewBlacklistToken(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && addToBlacklist()}
-                      className="font-mono text-sm"
-                    />
-                    <Button size="icon" onClick={addToBlacklist} variant="outline">
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                    {settings.token_blacklist.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No tokens blacklisted</p>
-                    ) : (
-                      settings.token_blacklist.map((token) => (
-                        <Badge key={token} variant="destructive" className="gap-1 font-mono text-xs">
-                          {token.slice(0, 6)}...{token.slice(-4)}
-                          <button onClick={() => removeFromBlacklist(token)}>
-                            <X className="h-3 w-3" />
-                          </button>
-                        </Badge>
-                      ))
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Shield className="h-5 w-5 text-success" />
-                    Whitelist
-                  </CardTitle>
-                  <CardDescription>Prioritized tokens</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Token address..."
-                      value={newWhitelistToken}
-                      onChange={(e) => setNewWhitelistToken(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && addToWhitelist()}
-                      className="font-mono text-sm"
-                    />
-                    <Button size="icon" onClick={addToWhitelist} variant="outline">
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                    {settings.token_whitelist.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No tokens whitelisted</p>
-                    ) : (
-                      settings.token_whitelist.map((token) => (
-                        <Badge key={token} variant="outline" className="gap-1 font-mono text-xs bg-success/20 text-success border-success/30 hover:bg-success/30">
-                          {token.slice(0, 6)}...{token.slice(-4)}
-                          <button onClick={() => removeFromWhitelist(token)}>
-                            <X className="h-3 w-3" />
-                          </button>
-                        </Badge>
-                      ))
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            {/* Whitelist */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Star className="h-5 w-5 text-success" />
+                  Whitelist
+                </CardTitle>
+                <CardDescription>Prioritized tokens</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Token address..."
+                    value={newWhitelistToken}
+                    onChange={(e) => setNewWhitelistToken(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addToWhitelist()}
+                    className="font-mono text-sm"
+                  />
+                  <Button size="icon" onClick={addToWhitelist} className="bg-success hover:bg-success/90">
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {settings.token_whitelist.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">No tokens whitelisted</p>
+                  ) : (
+                    settings.token_whitelist.map((token) => (
+                      <div
+                        key={token}
+                        className="flex items-center justify-between p-2.5 bg-success/10 rounded-lg border border-success/20"
+                      >
+                        <span className="font-mono text-sm text-foreground truncate flex-1">
+                          {token.slice(0, 8)}...{token.slice(-6)}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-success hover:text-success hover:bg-success/20"
+                          onClick={() => removeFromWhitelist(token)}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {settings.token_whitelist.length > 0 && (
+                  <Badge className="bg-success/20 text-success text-xs">
+                    {settings.token_whitelist.length} token{settings.token_whitelist.length !== 1 ? 's' : ''}
+                  </Badge>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </div>
       </main>
