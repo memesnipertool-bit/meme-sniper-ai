@@ -27,7 +27,8 @@ export const API_VALIDATION_ENDPOINTS: Record<string, {
   requiresKey: boolean;
   skipHttpTest?: boolean; // Skip actual HTTP test due to DNS/network restrictions in edge functions
 }> = {
-  birdeye: { url: 'https://public-api.birdeye.so/public/tokenlist?sort_by=v24hUSD&sort_type=desc&offset=0&limit=1', method: 'GET', requiresKey: true },
+  // Birdeye - use /defi/networks endpoint (more reliable than /public/tokenlist)
+  birdeye: { url: 'https://public-api.birdeye.so/defi/networks', method: 'GET', requiresKey: true },
   dexscreener: { url: 'https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112', method: 'GET', requiresKey: false },
   geckoterminal: { url: 'https://api.geckoterminal.com/api/v2/networks', method: 'GET', requiresKey: false },
   // Jupiter, Raydium, Pump.fun have DNS resolution issues in Supabase edge functions
@@ -36,8 +37,10 @@ export const API_VALIDATION_ENDPOINTS: Record<string, {
   pumpfun: { url: 'https://frontend-api.pump.fun/coins', method: 'GET', requiresKey: false, skipHttpTest: true },
   honeypot_rugcheck: { url: 'https://api.rugcheck.xyz/v1/tokens/So11111111111111111111111111111111111111112/report', method: 'GET', requiresKey: false },
   rpc_provider: { url: 'https://api.mainnet-beta.solana.com', method: 'POST', requiresKey: false },
-  dextools: { url: 'https://public-api.dextools.io/trial/v2/token/solana/So11111111111111111111111111111111111111112/info', method: 'GET', requiresKey: true },
-  liquidity_lock: { url: 'https://api.team.finance/v1/lockups', method: 'GET', requiresKey: true },
+  // Dextools - use v2 blockchain endpoint (more reliable) with x-api-key header
+  dextools: { url: 'https://public-api.dextools.io/standard/v2/blockchain', method: 'GET', requiresKey: true },
+  // Team Finance has no public API - skip HTTP test, only verify key is configured
+  liquidity_lock: { url: 'https://api.team.finance/v1/lockups', method: 'GET', requiresKey: true, skipHttpTest: true },
 };
 
 // Encryption/decryption for API keys stored in database
@@ -164,9 +167,13 @@ export async function validateApiKey(apiType: string, apiKey?: string): Promise<
           headers['X-API-KEY'] = keyToTest;
           break;
         case 'dextools':
-          headers['X-RapidAPI-Key'] = keyToTest;
+          // Dextools V2 API uses x-api-key header (not RapidAPI)
+          headers['x-api-key'] = keyToTest;
           break;
         case 'jupiter':
+          headers['x-api-key'] = keyToTest;
+          break;
+        case 'liquidity_lock':
           headers['x-api-key'] = keyToTest;
           break;
         default:

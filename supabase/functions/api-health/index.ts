@@ -62,7 +62,8 @@ async function checkEndpoint(endpoint: { name: string; type: string }): Promise<
           headers['x-api-key'] = apiKey;
           break;
         case 'dextools':
-          headers['X-RapidAPI-Key'] = apiKey;
+          // Dextools V2 API uses x-api-key header
+          headers['x-api-key'] = apiKey;
           break;
       }
     }
