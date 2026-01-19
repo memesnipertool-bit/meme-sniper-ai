@@ -1,0 +1,28 @@
+project_id = "sdbskecqpvwzeyxezyfg"
+
+[functions.token-scanner]
+verify_jwt = false
+
+[functions.auto-sniper]
+verify_jwt = false
+
+[functions.auto-exit]
+verify_jwt = false
+
+[functions.risk-check]
+verify_jwt = false
+
+[functions.admin-analytics]
+verify_jwt = false
+
+[functions.api-secrets]
+verify_jwt = false
+
+[functions.trade-execution]
+verify_jwt = false
+
+[functions.confirm-transaction]
+verify_jwt = false
+
+[functions.solana-balance]
+verify_jwt = false

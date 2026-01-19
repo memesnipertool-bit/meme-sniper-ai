@@ -1,135 +1,239 @@
-import { Target, Zap, Brain, TrendingUp } from "lucide-react";
-import Crosshair from "@/components/Crosshair";
+import React, { forwardRef, useMemo } from "react";
+import AppLayout from "@/components/layout/AppLayout";
+import StatsGrid from "@/components/dashboard/StatsGrid";
+import WalletBanner from "@/components/dashboard/WalletBanner";
+import ActiveTradesCard from "@/components/dashboard/ActiveTradesCard";
+import MarketOverview from "@/components/dashboard/MarketOverview";
+import QuickActions from "@/components/dashboard/QuickActions";
+import RecentActivity from "@/components/dashboard/RecentActivity";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { usePositions } from "@/hooks/usePositions";
+import { useWallet } from "@/hooks/useWallet";
+import { useAppMode } from "@/contexts/AppModeContext";
+import { useDemoPortfolio } from "@/contexts/DemoPortfolioContext";
+import { useTokenScanner } from "@/hooks/useTokenScanner";
+import { PortfolioChart } from "@/components/charts/PriceCharts";
+import { TrendingUp, ArrowUpRight, FlaskConical, Coins, RotateCcw } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
-const Index = () => {
-  return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
-      {/* Background grid */}
-      <div className="absolute inset-0 bg-grid opacity-30" />
-      
-      {/* Gradient glow effect */}
-      <div 
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full opacity-20"
-        style={{ background: 'var(--gradient-glow)' }}
-      />
-
-      {/* Content */}
-      <div className="relative z-10">
-        {/* Header */}
-        <header className="flex items-center justify-between px-6 py-4 md:px-12 lg:px-20">
-          <div className="flex items-center gap-3">
-            <div className="relative w-10 h-10 text-primary animate-pulse-glow">
-              <Crosshair className="w-full h-full" />
-            </div>
-            <span className="text-lg font-semibold tracking-tight">
-              Meme Sniper <span className="text-primary">AI</span>
-            </span>
-          </div>
-          <button className="px-4 py-2 text-sm font-medium border border-primary/50 rounded-lg text-primary hover:bg-primary/10 transition-all duration-300 hover:border-primary hover:glow-neon">
-            Launch App
-          </button>
-        </header>
-
-        {/* Hero Section */}
-        <main className="flex flex-col items-center justify-center px-6 pt-20 pb-32 md:pt-32 md:pb-40 text-center">
-          {/* Floating crosshair */}
-          <div className="absolute right-[10%] top-[20%] w-32 h-32 text-primary/20 animate-scan hidden lg:block">
-            <Crosshair />
-          </div>
-          <div className="absolute left-[8%] bottom-[25%] w-24 h-24 text-primary/15 animate-pulse-glow hidden lg:block">
-            <Crosshair />
-          </div>
-
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 mb-8 text-xs font-medium uppercase tracking-widest border border-primary/30 rounded-full text-primary/80 bg-primary/5">
-            <Zap className="w-3.5 h-3.5" />
-            AI-Powered Precision Trading
-          </div>
-
-          {/* Main headline */}
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 max-w-4xl">
-            Snipe Meme Coins
-            <br />
-            <span className="text-gradient-neon">Before They Moon</span>
-          </h1>
-
-          {/* Subheadline */}
-          <p className="text-muted-foreground text-lg md:text-xl max-w-2xl mb-10 leading-relaxed">
-            AI-driven analysis identifies high-potential meme tokens in milliseconds. 
-            Execute trades with surgical precision.
-          </p>
-
-          {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <button className="px-8 py-3.5 font-semibold text-primary-foreground bg-primary rounded-lg glow-neon hover:brightness-110 transition-all duration-300 flex items-center gap-2">
-              <Target className="w-5 h-5" />
-              Start Sniping
-            </button>
-            <button className="px-8 py-3.5 font-semibold border border-border rounded-lg hover:bg-secondary hover:border-primary/30 transition-all duration-300">
-              View Demo
-            </button>
-          </div>
-
-          {/* Stats */}
-          <div className="grid grid-cols-3 gap-8 md:gap-16 mt-20 pt-10 border-t border-border/50">
-            <div className="text-center">
-              <div className="text-2xl md:text-3xl font-bold text-gradient-neon font-mono">0.3ms</div>
-              <div className="text-xs md:text-sm text-muted-foreground mt-1">Avg. Response</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl md:text-3xl font-bold text-gradient-neon font-mono">99.2%</div>
-              <div className="text-xs md:text-sm text-muted-foreground mt-1">Accuracy Rate</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl md:text-3xl font-bold text-gradient-neon font-mono">24/7</div>
-              <div className="text-xs md:text-sm text-muted-foreground mt-1">Market Watch</div>
-            </div>
-          </div>
-        </main>
-
-        {/* Features */}
-        <section className="px-6 md:px-12 lg:px-20 pb-20">
-          <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            <FeatureCard
-              icon={<Brain className="w-6 h-6" />}
-              title="AI Analysis"
-              description="Deep learning models scan social signals, on-chain data, and market patterns."
-            />
-            <FeatureCard
-              icon={<Target className="w-6 h-6" />}
-              title="Precision Entry"
-              description="Execute buys at optimal moments with sub-second transaction speeds."
-            />
-            <FeatureCard
-              icon={<TrendingUp className="w-6 h-6" />}
-              title="Risk Management"
-              description="Smart stop-loss and take-profit automation protects your capital."
-            />
-          </div>
-        </section>
-      </div>
-    </div>
-  );
+const formatCurrency = (value: number) => {
+  if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
+  if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}K`;
+  return `$${value.toFixed(2)}`;
 };
 
-const FeatureCard = ({
-  icon,
-  title,
-  description,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}) => {
+const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
+  const { openPositions: realOpenPositions, closedPositions: realClosedPositions, loading: positionsLoading } = usePositions();
+  const { wallet } = useWallet();
+  const { isDemo } = useAppMode();
+  const { toast } = useToast();
+  const { tokens, loading: tokensLoading } = useTokenScanner();
+  
+  // Demo portfolio context
+  const {
+    demoBalance,
+    openDemoPositions,
+    closedDemoPositions,
+    portfolioHistory,
+    selectedPeriod,
+    setSelectedPeriod,
+    getCurrentPortfolioData,
+    totalValue: demoTotalValue,
+    totalPnL: demoTotalPnL,
+    totalPnLPercent: demoTotalPnLPercent,
+    resetDemoPortfolio,
+  } = useDemoPortfolio();
+
+  // Use demo or real positions based on mode
+  const openPositions = isDemo ? openDemoPositions : realOpenPositions;
+  const closedPositions = isDemo ? closedDemoPositions : realClosedPositions;
+
+  // Calculate win count from closed positions
+  const winCount = useMemo(() => {
+    return closedPositions.filter(p => {
+      const pnl = 'profit_loss_percent' in p ? p.profit_loss_percent : (p as any).pnl;
+      return pnl > 0;
+    }).length;
+  }, [closedPositions]);
+
+  // Get portfolio data based on mode
+  const portfolioData = useMemo(() => getCurrentPortfolioData(), [getCurrentPortfolioData, selectedPeriod]);
+
+  const totalValue = useMemo(() => {
+    if (isDemo) {
+      return demoTotalValue;
+    }
+    return realOpenPositions.reduce((sum, p) => sum + p.current_value, 0);
+  }, [isDemo, demoTotalValue, realOpenPositions]);
+  
+  const totalPnL = useMemo(() => {
+    if (isDemo) {
+      return demoTotalPnL;
+    }
+    return realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value || 0), 0);
+  }, [isDemo, demoTotalPnL, realOpenPositions]);
+  
+  const totalPnLPercent = useMemo(() => {
+    if (isDemo) {
+      return demoTotalPnLPercent;
+    }
+    const entryTotal = realOpenPositions.reduce((sum, p) => sum + p.entry_value, 0);
+    return entryTotal > 0 ? (totalPnL / entryTotal) * 100 : 0;
+  }, [isDemo, demoTotalPnLPercent, realOpenPositions, totalPnL]);
+
+  const todayPerformance = useMemo(() => {
+    if (portfolioData.length < 2) return 0;
+    const initial = portfolioData[0]?.value || totalValue;
+    const current = portfolioData[portfolioData.length - 1]?.value || totalValue;
+    return initial > 0 ? ((current - initial) / initial) * 100 : 0;
+  }, [portfolioData, totalValue]);
+
+  // Reset demo handler
+  const handleResetDemo = () => {
+    resetDemoPortfolio();
+    toast({
+      title: "Demo Reset",
+      description: "Demo balance reset to 5,000 SOL. All positions cleared.",
+    });
+  };
+
   return (
-    <div className="p-6 rounded-xl bg-card border border-border hover:border-primary/30 transition-all duration-300 group hover:shadow-lg hover:shadow-primary/5">
-      <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-4 group-hover:glow-neon transition-all duration-300">
-        {icon}
+    <AppLayout>
+      <div className="container mx-auto max-w-7xl px-3 md:px-4 space-y-4 md:space-y-6">
+        {/* Demo Mode Banner */}
+        {isDemo && (
+          <Alert className="bg-warning/10 border-warning/30">
+            <FlaskConical className="h-4 w-4 text-warning" />
+            <AlertTitle className="text-warning flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                Demo Mode Active
+                <Badge className="bg-warning/20 text-warning border-warning/30 ml-2">
+                  <Coins className="w-3 h-3 mr-1" />
+                  {demoBalance.toFixed(0)} SOL
+                </Badge>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-7 text-xs border-warning/30 text-warning hover:bg-warning/20"
+                onClick={handleResetDemo}
+              >
+                <RotateCcw className="w-3 h-3 mr-1" />
+                Reset
+              </Button>
+            </AlertTitle>
+            <AlertDescription className="text-warning/80">
+              You're trading with simulated {demoBalance.toFixed(0)} SOL. Switch to Live mode for real trading.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Wallet Banner */}
+        {wallet.isConnected && wallet.address && (
+          <WalletBanner 
+            address={wallet.address} 
+            balance={wallet.balance || '0'} 
+            network={wallet.network || 'solana'} 
+          />
+        )}
+
+        {/* Stats Grid */}
+        <StatsGrid
+          totalValue={totalValue}
+          totalPnL={totalPnL}
+          totalPnLPercent={totalPnLPercent}
+          openPositionsCount={openPositions.length}
+          closedPositionsCount={closedPositions.length}
+          winCount={winCount}
+        />
+
+        {/* Main Content Grid - Mobile stacked */}
+        <div className="grid gap-4 md:gap-6 lg:grid-cols-3">
+          {/* Left Column - 2/3 width on desktop */}
+          <div className="lg:col-span-2 space-y-4 md:space-y-6">
+            {/* Portfolio Chart */}
+            <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-card/90 to-card/60 backdrop-blur-xl animate-fade-in">
+              <div className="absolute inset-0 opacity-30">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-3xl" />
+              </div>
+              
+              <CardHeader className="relative pb-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10">
+                      <TrendingUp className="w-4 h-4 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base font-semibold">
+                        {isDemo ? "Demo Portfolio" : "Portfolio Performance"}
+                      </CardTitle>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-2xl font-bold text-foreground">
+                          {isDemo 
+                            ? `${demoBalance.toFixed(0)} SOL`
+                            : formatCurrency(portfolioData[portfolioData.length - 1]?.value || totalValue)
+                          }
+                        </span>
+                        <Badge 
+                          variant="outline" 
+                          className={`text-xs ${todayPerformance >= 0 ? 'bg-success/10 text-success border-success/30' : 'bg-destructive/10 text-destructive border-destructive/30'}`}
+                        >
+                          <ArrowUpRight className="w-3 h-3 mr-0.5" />
+                          {todayPerformance >= 0 ? '+' : ''}{todayPerformance.toFixed(2)}% ({selectedPeriod})
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-1 bg-secondary/60 rounded-lg p-0.5">
+                    {(['1H', '24H', '7D', '30D'] as const).map((period) => (
+                      <button
+                        key={period}
+                        onClick={() => setSelectedPeriod(period)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                          period === selectedPeriod 
+                            ? 'bg-primary text-primary-foreground' 
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {period}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </CardHeader>
+              
+              <CardContent className="relative">
+                <PortfolioChart data={portfolioData} height={200} />
+              </CardContent>
+            </Card>
+
+            {/* Active Trades + Market Overview - Mobile stacked */}
+            <div className="grid gap-4 md:gap-6 md:grid-cols-2">
+              <ActiveTradesCard 
+                positions={openPositions} 
+                loading={positionsLoading}
+              />
+              <MarketOverview tokens={tokens} loading={tokensLoading} />
+            </div>
+          </div>
+
+          {/* Right Column */}
+          <div className="space-y-4 md:space-y-6">
+            {/* Quick Actions */}
+            <QuickActions />
+            
+            {/* Recent Activity */}
+            <RecentActivity />
+          </div>
+        </div>
       </div>
-      <h3 className="text-lg font-semibold mb-2">{title}</h3>
-      <p className="text-muted-foreground text-sm leading-relaxed">{description}</p>
-    </div>
+    </AppLayout>
   );
-};
+});
+
+Index.displayName = 'Index';
 
 export default Index;
