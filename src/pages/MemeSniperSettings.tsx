@@ -354,36 +354,59 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
               </CardContent>
             </Card>
 
-            {/* Buyer Position Settings */}
+            {/* Buyer Position Settings - Multi-select */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Users className="h-5 w-5 text-primary" />
                   Buyer Position Strategy
                 </CardTitle>
-                <CardDescription>Enter trades when becoming an early buyer</CardDescription>
+                <CardDescription>Select target buyer positions (multi-select)</CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground mb-4">
-                  When a new token adds liquidity, if it receives 2nd or 3rd buyer entry, the bot identifies it as a strong momentum token and automatically enters the trade.
+                  When a new token adds liquidity, the bot will enter if it can become one of your selected buyer positions.
                 </p>
-                <div className="flex gap-3 flex-wrap">
-                  {[1, 2, 3, 4, 5].map((pos) => (
-                    <div
-                      key={pos}
-                      className={`px-6 py-3 rounded-lg font-semibold cursor-pointer transition-all ${
-                        pos === 2 || pos === 3
-                          ? 'bg-success/20 text-success border-2 border-success/50'
-                          : 'bg-secondary text-muted-foreground border-2 border-transparent'
-                      }`}
-                    >
-                      Position #{pos}
-                      {(pos === 2 || pos === 3) && (
-                        <Badge className="ml-2 bg-success/30 text-success text-xs">Recommended</Badge>
-                      )}
-                    </div>
-                  ))}
+                <div className="flex gap-2 flex-wrap">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((pos) => {
+                    const isSelected = settings.target_buyer_positions?.includes(pos);
+                    const isRecommended = pos === 2 || pos === 3;
+                    return (
+                      <button
+                        key={pos}
+                        onClick={() => {
+                          const current = settings.target_buyer_positions || [2, 3];
+                          const updated = isSelected
+                            ? current.filter(p => p !== pos)
+                            : [...current, pos].sort((a, b) => a - b);
+                          if (updated.length > 0) {
+                            immediateUpdateField('target_buyer_positions', updated);
+                          } else {
+                            toast.error('Select at least one position');
+                          }
+                        }}
+                        className={`px-4 py-2.5 rounded-lg font-semibold cursor-pointer transition-all flex items-center gap-2 ${
+                          isSelected
+                            ? 'bg-primary text-primary-foreground border-2 border-primary shadow-lg shadow-primary/25'
+                            : 'bg-secondary text-muted-foreground border-2 border-transparent hover:bg-secondary/80'
+                        }`}
+                      >
+                        #{pos}
+                        {isRecommended && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            ★
+                          </Badge>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
+                <p className="text-xs text-muted-foreground mt-3">
+                  Selected: {settings.target_buyer_positions?.length > 0 
+                    ? settings.target_buyer_positions.map(p => `#${p}`).join(', ')
+                    : '#2, #3 (default)'}
+                  <span className="text-muted-foreground/70 ml-2">• Positions #2-3 are recommended for best results</span>
+                </p>
               </CardContent>
             </Card>
 
