@@ -106,6 +106,12 @@ export function validateAddress(value: unknown, fieldName: string): ValidationRe
     return errorResult(`${fieldName} must be a string`);
   }
   const trimmed = value.trim();
+  
+  // Skip validation for demo addresses (they contain '...' or start with 'Demo')
+  if (trimmed.includes('...') || trimmed.startsWith('Demo')) {
+    return errorResult(`${fieldName} contains demo data - demo mode should not call live API`);
+  }
+  
   // Basic validation: alphanumeric, between 26-66 characters (covers Solana, EVM addresses)
   if (trimmed.length < 26 || trimmed.length > 66) {
     return errorResult(`${fieldName} must be a valid blockchain address (26-66 characters)`);
