@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Wallet, Loader2, ExternalLink, Check } from "lucide-react";
 import { useWallet } from "@/hooks/useWallet";
+import { useWalletModal } from "@/hooks/useWalletModal";
 import { cn } from "@/lib/utils";
 
 interface WalletOption {
@@ -35,7 +36,8 @@ export default function WalletConnectionModal({ trigger }: WalletConnectionModal
     disconnect,
   } = useWallet();
   
-  const [open, setOpen] = useState(false);
+  // Use global modal state for programmatic control
+  const { isOpen, setOpen } = useWalletModal();
   const [connectingWallet, setConnectingWallet] = useState<string | null>(null);
 
   const walletOptions: WalletOption[] = [
@@ -81,7 +83,7 @@ export default function WalletConnectionModal({ trigger }: WalletConnectionModal
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={isOpen} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger || (
           <Button
@@ -177,10 +179,10 @@ export default function WalletConnectionModal({ trigger }: WalletConnectionModal
             </p>
             
             <div className="space-y-2">
-              {walletOptions.map((wallet) => (
+              {walletOptions.map((walletOpt) => (
                 <button
-                  key={wallet.id}
-                  onClick={() => handleConnect(wallet)}
+                  key={walletOpt.id}
+                  onClick={() => handleConnect(walletOpt)}
                   disabled={isConnecting}
                   className={cn(
                     "w-full flex items-center gap-3 p-3.5 rounded-xl border border-border/50 bg-secondary/30",
@@ -191,8 +193,8 @@ export default function WalletConnectionModal({ trigger }: WalletConnectionModal
                 >
                   <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center overflow-hidden">
                     <img
-                      src={wallet.icon}
-                      alt={wallet.name}
+                      src={walletOpt.icon}
+                      alt={walletOpt.name}
                       className="w-6 h-6 object-contain"
                       onError={(e) => {
                         e.currentTarget.src = '';
@@ -202,16 +204,16 @@ export default function WalletConnectionModal({ trigger }: WalletConnectionModal
                   </div>
                   <div className="flex-1 text-left">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{wallet.name}</span>
-                      {wallet.popular && (
+                      <span className="font-medium text-sm">{walletOpt.name}</span>
+                      {walletOpt.popular && (
                         <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-primary/20 text-primary">
                           Popular
                         </Badge>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground">{wallet.description}</p>
+                    <p className="text-xs text-muted-foreground">{walletOpt.description}</p>
                   </div>
-                  {connectingWallet === wallet.id ? (
+                  {connectingWallet === walletOpt.id ? (
                     <Loader2 className="w-5 h-5 animate-spin text-primary" />
                   ) : (
                     <div className="w-5 h-5 rounded-full border-2 border-border group-hover:border-primary transition-colors" />
