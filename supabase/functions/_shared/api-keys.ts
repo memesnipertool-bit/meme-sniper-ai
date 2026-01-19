@@ -1,0 +1,232 @@
+// Shared API key management utilities for edge functions
+// This provides a single source of truth for API type to secret name mapping
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Complete mapping of API types to their secret/environment variable names
+export const API_SECRET_MAPPING: Record<string, string> = {
+  birdeye: 'BIRDEYE_API_KEY',
+  dextools: 'DEXTOOLS_API_KEY',
+  liquidity_lock: 'LIQUIDITY_LOCK_API_KEY',
+  dexscreener: 'DEXSCREENER_API_KEY',
+  geckoterminal: 'GECKOTERMINAL_API_KEY',
+  honeypot_rugcheck: 'HONEYPOT_API_KEY',
+  jupiter: 'JUPITER_API_KEY',
+  raydium: 'RAYDIUM_API_KEY',
+  pumpfun: 'PUMPFUN_API_KEY',
+  rpc_provider: 'SOLANA_RPC_URL',
+  trade_execution: 'TRADE_EXECUTION_API_KEY',
+};
+
+// API validation endpoints for testing connectivity
+export const API_VALIDATION_ENDPOINTS: Record<string, { url: string; method: string; requiresKey: boolean }> = {
+  birdeye: { url: 'https://public-api.birdeye.so/public/tokenlist?sort_by=v24hUSD&sort_type=desc&offset=0&limit=1', method: 'GET', requiresKey: true },
+  dexscreener: { url: 'https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112', method: 'GET', requiresKey: false },
+  geckoterminal: { url: 'https://api.geckoterminal.com/api/v2/networks', method: 'GET', requiresKey: false },
+  jupiter: { url: 'https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000&slippageBps=50', method: 'GET', requiresKey: false },
+  raydium: { url: 'https://api-v3.raydium.io/main/version', method: 'GET', requiresKey: false },
+  pumpfun: { url: 'https://frontend-api.pump.fun/coins?offset=0&limit=1', method: 'GET', requiresKey: false },
+  honeypot_rugcheck: { url: 'https://api.rugcheck.xyz/v1/tokens/So11111111111111111111111111111111111111112/report', method: 'GET', requiresKey: false },
+  rpc_provider: { url: 'https://api.mainnet-beta.solana.com', method: 'POST', requiresKey: false },
+};
+
+// Encryption/decryption for API keys stored in database
+export const encryptKey = (key: string): string => {
+  return 'enc:' + btoa(key);
+};
+
+export const decryptKey = (encrypted: string | null): string | null => {
+  if (!encrypted) return null;
+  if (!encrypted.startsWith('enc:')) return encrypted; // Not encrypted, return as-is
+  try {
+    return atob(encrypted.substring(4));
+  } catch {
+    return null;
+  }
+};
+
+// Get Supabase client for service-level operations
+export const getServiceClient = () => {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  return createClient(supabaseUrl, supabaseKey);
+};
+
+// Get API key for a specific type - checks database first, then environment
+export async function getApiKey(apiType: string): Promise<string | null> {
+  const supabase = getServiceClient();
+  
+  // First check database for stored key
+  const { data: config } = await supabase
+    .from('api_configurations')
+    .select('api_key_encrypted')
+    .eq('api_type', apiType)
+    .eq('is_enabled', true)
+    .maybeSingle();
+  
+  if (config?.api_key_encrypted) {
+    const decrypted = decryptKey(config.api_key_encrypted);
+    if (decrypted) return decrypted;
+  }
+  
+  // Fall back to environment variable
+  const envKey = API_SECRET_MAPPING[apiType];
+  return envKey ? Deno.env.get(envKey) || null : null;
+}
+
+// Get API configuration including base URL
+export async function getApiConfig(apiType: string): Promise<{
+  baseUrl: string | null;
+  apiKey: string | null;
+  isEnabled: boolean;
+  rateLimitPerMinute: number;
+} | null> {
+  const supabase = getServiceClient();
+  
+  const { data: config } = await supabase
+    .from('api_configurations')
+    .select('base_url, api_key_encrypted, is_enabled, rate_limit_per_minute')
+    .eq('api_type', apiType)
+    .maybeSingle();
+  
+  if (!config) {
+    // Return null if no configuration exists
+    return null;
+  }
+  
+  const apiKey = config.api_key_encrypted 
+    ? decryptKey(config.api_key_encrypted) 
+    : Deno.env.get(API_SECRET_MAPPING[apiType]) || null;
+  
+  return {
+    baseUrl: config.base_url,
+    apiKey,
+    isEnabled: config.is_enabled ?? true,
+    rateLimitPerMinute: config.rate_limit_per_minute ?? 60,
+  };
+}
+
+// Validate API key by making a test request
+export async function validateApiKey(apiType: string, apiKey?: string): Promise<{
+  valid: boolean;
+  message: string;
+  latencyMs?: number;
+}> {
+  const validationConfig = API_VALIDATION_ENDPOINTS[apiType];
+  
+  if (!validationConfig) {
+    return { valid: false, message: `No validation endpoint configured for ${apiType}` };
+  }
+  
+  // Get API key if not provided
+  const keyToTest = apiKey || await getApiKey(apiType);
+  
+  if (validationConfig.requiresKey && !keyToTest) {
+    return { valid: false, message: `API key required for ${apiType} but not configured` };
+  }
+  
+  const startTime = Date.now();
+  
+  try {
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'User-Agent': 'MemeSniper/1.0',
+    };
+    
+    // Add API key to headers based on API type
+    if (keyToTest) {
+      switch (apiType) {
+        case 'birdeye':
+          headers['X-API-KEY'] = keyToTest;
+          break;
+        case 'dextools':
+          headers['X-RapidAPI-Key'] = keyToTest;
+          break;
+        case 'jupiter':
+          headers['x-api-key'] = keyToTest;
+          break;
+        default:
+          headers['Authorization'] = `Bearer ${keyToTest}`;
+      }
+    }
+    
+    let response: Response;
+    
+    if (apiType === 'rpc_provider') {
+      // Special handling for RPC - make a simple getHealth request
+      const rpcUrl = keyToTest || validationConfig.url;
+      response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getHealth',
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } else {
+      response = await fetch(validationConfig.url, {
+        method: validationConfig.method,
+        headers,
+        signal: AbortSignal.timeout(10000),
+      });
+    }
+    
+    const latencyMs = Date.now() - startTime;
+    
+    if (response.ok) {
+      return { valid: true, message: `${apiType} API is working`, latencyMs };
+    } else if (response.status === 401 || response.status === 403) {
+      return { valid: false, message: `Invalid or expired API key for ${apiType}`, latencyMs };
+    } else if (response.status === 429) {
+      return { valid: true, message: `${apiType} API is rate limited but key is valid`, latencyMs };
+    } else {
+      return { valid: false, message: `${apiType} API returned HTTP ${response.status}`, latencyMs };
+    }
+  } catch (error: any) {
+    const latencyMs = Date.now() - startTime;
+    if (error.name === 'TimeoutError') {
+      return { valid: false, message: `${apiType} API request timed out`, latencyMs };
+    }
+    return { valid: false, message: `${apiType} API error: ${error.message}`, latencyMs };
+  }
+}
+
+// Get all configured API keys status
+export async function getAllApiKeyStatus(): Promise<Record<string, {
+  configured: boolean;
+  secretName: string;
+  source: 'database' | 'environment' | 'none';
+}>> {
+  const supabase = getServiceClient();
+  
+  const { data: configs } = await supabase
+    .from('api_configurations')
+    .select('api_type, api_key_encrypted');
+  
+  const dbKeys = new Map(configs?.map(c => [c.api_type, c.api_key_encrypted]) || []);
+  
+  const status: Record<string, { configured: boolean; secretName: string; source: 'database' | 'environment' | 'none' }> = {};
+  
+  for (const [apiType, secretName] of Object.entries(API_SECRET_MAPPING)) {
+    const dbKey = dbKeys.get(apiType);
+    const hasDbKey = dbKey && decryptKey(dbKey);
+    const envValue = Deno.env.get(secretName);
+    
+    let source: 'database' | 'environment' | 'none' = 'none';
+    if (hasDbKey) {
+      source = 'database';
+    } else if (envValue && envValue.length > 0) {
+      source = 'environment';
+    }
+    
+    status[apiType] = {
+      configured: source !== 'none',
+      secretName,
+      source,
+    };
+  }
+  
+  return status;
+}

@@ -86,6 +86,39 @@ export type Database = {
         }
         Relationships: []
       }
+      api_health_metrics: {
+        Row: {
+          api_type: string
+          created_at: string
+          endpoint: string
+          error_message: string | null
+          id: string
+          is_success: boolean | null
+          response_time_ms: number | null
+          status_code: number | null
+        }
+        Insert: {
+          api_type: string
+          created_at?: string
+          endpoint: string
+          error_message?: string | null
+          id?: string
+          is_success?: boolean | null
+          response_time_ms?: number | null
+          status_code?: number | null
+        }
+        Update: {
+          api_type?: string
+          created_at?: string
+          endpoint?: string
+          error_message?: string | null
+          id?: string
+          is_success?: boolean | null
+          response_time_ms?: number | null
+          status_code?: number | null
+        }
+        Relationships: []
+      }
       copy_trades: {
         Row: {
           action: string
@@ -604,6 +637,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cleanup_old_api_health_metrics: { Args: never; Returns: undefined }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

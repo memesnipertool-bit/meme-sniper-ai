@@ -1,36 +1,10 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { getApiKey, API_VALIDATION_ENDPOINTS } from "../_shared/api-keys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-// Jupiter API configuration - uses paid endpoint if API key is available
-const JUPITER_API_KEY = Deno.env.get("JUPITER_API_KEY");
-const JUPITER_HEALTH_URL = JUPITER_API_KEY 
-  ? "https://public.jupiterapi.com/health"  // Paid API health endpoint
-  : "https://quote-api.jup.ag/v6/health";   // Free public API
-
-interface ApiEndpoint {
-  name: string;
-  url: string;
-  type: string;
-  headers?: Record<string, string>;
-}
-
-const API_ENDPOINTS: ApiEndpoint[] = [
-  { 
-    name: 'Jupiter', 
-    url: JUPITER_HEALTH_URL, 
-    type: 'swap',
-    headers: JUPITER_API_KEY ? { 'x-api-key': JUPITER_API_KEY } : undefined
-  },
-  { name: 'Raydium', url: 'https://api-v3.raydium.io/main/version', type: 'swap' },
-  { name: 'Pump.fun', url: 'https://frontend-api.pump.fun/health', type: 'scan' },
-  { name: 'DexScreener', url: 'https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112', type: 'scan' },
-];
-
-console.log(`[api-health] Jupiter API: ${JUPITER_API_KEY ? 'AUTHENTICATED' : 'PUBLIC'}`);
 
 interface ApiStatus {
   name: string;
@@ -38,27 +12,83 @@ interface ApiStatus {
   latency: number | null;
   lastCheck: string;
   lastError?: string;
+  hasApiKey?: boolean;
 }
 
-async function checkEndpoint(endpoint: ApiEndpoint): Promise<ApiStatus> {
+// API endpoints to check with their display names
+const API_ENDPOINTS: { name: string; type: string }[] = [
+  { name: 'Jupiter', type: 'jupiter' },
+  { name: 'Raydium', type: 'raydium' },
+  { name: 'Pump.fun', type: 'pumpfun' },
+  { name: 'DexScreener', type: 'dexscreener' },
+  { name: 'Birdeye', type: 'birdeye' },
+  { name: 'RugCheck', type: 'honeypot_rugcheck' },
+];
+
+async function checkEndpoint(endpoint: { name: string; type: string }): Promise<ApiStatus> {
   const start = Date.now();
+  const validationConfig = API_VALIDATION_ENDPOINTS[endpoint.type];
+  
+  if (!validationConfig) {
+    return {
+      name: endpoint.name,
+      status: 'offline',
+      latency: null,
+      lastCheck: new Date().toISOString(),
+      lastError: 'No validation endpoint configured',
+    };
+  }
   
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
     
-    // Build headers, including any API keys
+    // Get API key from database/env if configured
+    const apiKey = await getApiKey(endpoint.type);
+    
+    // Build headers
     const headers: Record<string, string> = {
       'Accept': 'application/json',
       'User-Agent': 'MemeSniper/1.0',
-      ...(endpoint.headers || {}),
     };
     
-    const response = await fetch(endpoint.url, {
-      method: 'GET',
-      signal: controller.signal,
-      headers,
-    });
+    // Add API key based on type
+    if (apiKey) {
+      switch (endpoint.type) {
+        case 'birdeye':
+          headers['X-API-KEY'] = apiKey;
+          break;
+        case 'jupiter':
+          headers['x-api-key'] = apiKey;
+          break;
+        case 'dextools':
+          headers['X-RapidAPI-Key'] = apiKey;
+          break;
+      }
+    }
+    
+    let response: Response;
+    
+    if (endpoint.type === 'rpc_provider') {
+      // Special handling for RPC
+      const rpcUrl = apiKey || validationConfig.url;
+      response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getHealth',
+        }),
+        signal: controller.signal,
+      });
+    } else {
+      response = await fetch(validationConfig.url, {
+        method: validationConfig.method,
+        signal: controller.signal,
+        headers,
+      });
+    }
     
     clearTimeout(timeout);
     const latency = Date.now() - start;
@@ -69,16 +99,20 @@ async function checkEndpoint(endpoint: ApiEndpoint): Promise<ApiStatus> {
         status: latency > 3000 ? 'degraded' : 'online',
         latency,
         lastCheck: new Date().toISOString(),
+        hasApiKey: !!apiKey,
       };
     } else {
-      // For Jupiter, 401/403 means API key issue
-      if (endpoint.name === 'Jupiter' && (response.status === 401 || response.status === 403)) {
+      // Check for auth errors
+      if (response.status === 401 || response.status === 403) {
         return {
           name: endpoint.name,
           status: 'degraded',
           latency,
           lastCheck: new Date().toISOString(),
-          lastError: `API key invalid or expired (${response.status})`,
+          lastError: validationConfig.requiresKey 
+            ? `API key invalid or missing (${response.status})` 
+            : `Access denied (${response.status})`,
+          hasApiKey: !!apiKey,
         };
       }
       return {
@@ -87,6 +121,7 @@ async function checkEndpoint(endpoint: ApiEndpoint): Promise<ApiStatus> {
         latency,
         lastCheck: new Date().toISOString(),
         lastError: `HTTP ${response.status}`,
+        hasApiKey: !!apiKey,
       };
     }
   } catch (error: any) {
@@ -101,20 +136,21 @@ async function checkEndpoint(endpoint: ApiEndpoint): Promise<ApiStatus> {
 }
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    console.log('[api-health] Checking API endpoints...');
+    console.log('[api-health] Checking API endpoints with configured keys...');
     
     // Check all endpoints in parallel
     const results = await Promise.all(
       API_ENDPOINTS.map(endpoint => checkEndpoint(endpoint))
     );
     
-    const summary = results.map(r => `${r.name}: ${r.status}${r.latency ? ` (${r.latency}ms)` : ''}`).join(', ');
+    const summary = results.map(r => 
+      `${r.name}: ${r.status}${r.latency ? ` (${r.latency}ms)` : ''}${r.hasApiKey ? ' [key]' : ''}`
+    ).join(', ');
     console.log(`[api-health] Results: ${summary}`);
     
     return new Response(

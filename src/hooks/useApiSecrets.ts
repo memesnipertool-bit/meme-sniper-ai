@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 export interface SecretStatus {
   configured: boolean;
   secretName: string;
+  source?: 'database' | 'environment' | 'none';
 }
 
 export interface ApiSecretInfo {
@@ -13,6 +14,12 @@ export interface ApiSecretInfo {
   secretName: string;
   configured: boolean;
   maskedKey?: string | null;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  message: string;
+  latencyMs?: number;
 }
 
 export function useApiSecrets() {
@@ -68,7 +75,7 @@ export function useApiSecrets() {
     }
   };
 
-  const validateSecret = async (apiType: string): Promise<{ valid: boolean; message: string } | null> => {
+  const validateSecret = async (apiType: string): Promise<ValidationResult | null> => {
     if (!isAdmin) return null;
 
     try {
@@ -77,10 +84,30 @@ export function useApiSecrets() {
       });
 
       if (error) throw error;
-      return { valid: data.valid, message: data.message || data.error };
+      return { 
+        valid: data.valid, 
+        message: data.message || data.error,
+        latencyMs: data.latencyMs,
+      };
     } catch (error: any) {
       console.error('Error validating secret:', error);
       return { valid: false, message: error.message };
+    }
+  };
+
+  const validateAllSecrets = async (): Promise<Record<string, ValidationResult> | null> => {
+    if (!isAdmin) return null;
+
+    try {
+      const { data, error } = await supabase.functions.invoke('api-secrets', {
+        body: { action: 'validate_all' },
+      });
+
+      if (error) throw error;
+      return data.results || {};
+    } catch (error: any) {
+      console.error('Error validating all secrets:', error);
+      return null;
     }
   };
 
@@ -172,6 +199,7 @@ export function useApiSecrets() {
     fetchSecretStatus,
     getApiKeyInfo,
     validateSecret,
+    validateAllSecrets,
     saveApiKey,
     deleteApiKey,
     listRequiredSecrets,

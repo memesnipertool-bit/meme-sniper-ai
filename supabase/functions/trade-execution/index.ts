@@ -1,19 +1,35 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getApiKey, getApiConfig } from "../_shared/api-keys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Jupiter API configuration
-// Uses authenticated endpoint if JUPITER_API_KEY is set for higher rate limits
-const JUPITER_API_KEY = Deno.env.get("JUPITER_API_KEY");
-const JUPITER_BASE_URL = JUPITER_API_KEY 
-  ? "https://public.jupiterapi.com" // Paid API with higher limits
-  : "https://quote-api.jup.ag/v6";  // Free public API (rate limited)
+// API configuration - dynamically fetched from database
+let JUPITER_API_KEY: string | null = null;
+let JUPITER_BASE_URL = "https://quote-api.jup.ag/v6"; // Default to free public API
+let JUPITER_QUOTE_API = `${JUPITER_BASE_URL}/quote`;
+let JUPITER_SWAP_API = `${JUPITER_BASE_URL}/swap`;
 
-const JUPITER_QUOTE_API = `${JUPITER_BASE_URL}/quote`;
-const JUPITER_SWAP_API = `${JUPITER_BASE_URL}/swap`;
+// Initialize API keys from database
+async function initializeApiKeys() {
+  try {
+    // Get Jupiter API key from database/env
+    JUPITER_API_KEY = await getApiKey('jupiter');
+    
+    if (JUPITER_API_KEY) {
+      JUPITER_BASE_URL = "https://public.jupiterapi.com"; // Paid API with higher limits
+      JUPITER_QUOTE_API = `${JUPITER_BASE_URL}/quote`;
+      JUPITER_SWAP_API = `${JUPITER_BASE_URL}/swap`;
+      console.log('[Trade] Jupiter API: AUTHENTICATED (paid) - using jupiterapi.com');
+    } else {
+      console.log('[Trade] Jupiter API: PUBLIC (rate limited) - using jup.ag');
+    }
+  } catch (error) {
+    console.error('[Trade] Failed to initialize API keys:', error);
+  }
+}
 
 // Raydium API endpoints (Fallback)
 const RAYDIUM_QUOTE_API = "https://transaction-v1.raydium.io/compute/swap-base-in";
@@ -28,9 +44,6 @@ const PUMPFUN_TRADE_API = "https://pumpportal.fun/api/trade-local";
 // Common token addresses
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-
-// Log which Jupiter endpoint is being used
-console.log(`[Trade] Jupiter API: ${JUPITER_API_KEY ? 'AUTHENTICATED (paid)' : 'PUBLIC (rate limited)'} - ${JUPITER_BASE_URL}`);
 
 interface QuoteRequest {
   inputMint: string;
@@ -484,6 +497,9 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Initialize API keys from database on each request
+    await initializeApiKeys();
+    
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
