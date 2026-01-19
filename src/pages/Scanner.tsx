@@ -9,6 +9,7 @@ import ActivePositionsPanel from "@/components/scanner/ActivePositionsPanel";
 import BotActivityLog, { addBotLog, clearBotLogs } from "@/components/scanner/BotActivityLog";
 import RecoveryControls from "@/components/scanner/RecoveryControls";
 import ApiHealthWidget from "@/components/scanner/ApiHealthWidget";
+import PaidApiAlert from "@/components/scanner/PaidApiAlert";
 import StatsCard from "@/components/StatsCard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -1054,6 +1055,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
               {/* Bot Activity Log */}
               <BotActivityLog maxEntries={50} />
+
+              {/* Paid API Alert - Shows when bot is active in live mode */}
+              <PaidApiAlert isBotActive={isBotActive} isDemo={isDemo} />
 
               {/* API Health Widget */}
               <ApiHealthWidget isDemo={isDemo} />
