@@ -594,6 +594,7 @@ export type Database = {
           priority: string | null
           profit_take_percentage: number | null
           stop_loss_percentage: number | null
+          target_buyer_positions: Json | null
           token_blacklist: Json | null
           token_whitelist: Json | null
           trade_amount: number | null
@@ -609,6 +610,7 @@ export type Database = {
           priority?: string | null
           profit_take_percentage?: number | null
           stop_loss_percentage?: number | null
+          target_buyer_positions?: Json | null
           token_blacklist?: Json | null
           token_whitelist?: Json | null
           trade_amount?: number | null
@@ -624,6 +626,7 @@ export type Database = {
           priority?: string | null
           profit_take_percentage?: number | null
           stop_loss_percentage?: number | null
+          target_buyer_positions?: Json | null
           token_blacklist?: Json | null
           token_whitelist?: Json | null
           trade_amount?: number | null
