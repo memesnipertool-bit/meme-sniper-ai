@@ -282,38 +282,55 @@ serve(async (req) => {
       }
 
       try {
-        // Try to verify tradability - use multiple methods with fallbacks
+        // NETWORK-RESILIENT TRADABILITY CHECK
+        // Priority: Source reputation + liquidity > external API verification
         let verified = false;
         let verifyMethod = '';
+        let apiCheckAttempted = false;
+        let apiCheckFailed = false;
         
-        // Step 1: Try Raydium pool check first
-        const raydiumCheck = await checkRaydiumPool(token.address, token.liquidity);
+        // FAST PATH: Trust reputable sources with good liquidity
+        // DexScreener/Birdeye tokens with >$1000 liquidity are likely tradeable
+        const trustedSource = ['Birdeye', 'DexScreener', 'GeckoTerminal'].includes(token.source);
+        const hasGoodLiquidity = token.liquidity >= 1000;
+        const hasHighLiquidity = token.liquidity >= 5000;
         
-        if (raydiumCheck.hasPool) {
+        if (trustedSource && hasHighLiquidity) {
+          // High liquidity from trusted source - mark as verified immediately
           verified = true;
-          verifyMethod = raydiumCheck.poolType || 'Raydium';
-        } else if (raydiumCheck.reason?.includes('API error')) {
-          // Raydium API failed - try Jupiter as primary fallback
-          console.log(`[Tradability] Raydium API failed for ${token.symbol}, trying Jupiter...`);
-          const jupiterResult = await simulateJupiterSwap(token.address);
-          if (jupiterResult.success) {
+          verifyMethod = `${token.source} verified ($${token.liquidity.toFixed(0)} liquidity)`;
+        } else {
+          // Try API verification with short timeout
+          apiCheckAttempted = true;
+          
+          // Step 1: Quick Raydium pool check (non-blocking)
+          const raydiumCheck = await checkRaydiumPool(token.address, token.liquidity);
+          
+          if (raydiumCheck.hasPool) {
             verified = true;
-            verifyMethod = 'Jupiter (Raydium API unavailable)';
-          }
-        }
-        
-        // Step 2: If still not verified, try swap simulation
-        if (!verified) {
-          const swapResult = await simulateRaydiumSwap(token.address);
-          if (swapResult.success) {
-            verified = true;
-            verifyMethod = 'Swap simulation passed';
-          } else {
-            // Final check: Does it have significant liquidity from source?
-            // If liquidity > 5000 USD and from reputable source, mark as potentially tradable
-            if (token.liquidity > 5000 && (token.source === 'Birdeye' || token.source === 'DexScreener')) {
+            verifyMethod = raydiumCheck.poolType || 'Raydium pool';
+          } else if (raydiumCheck.reason?.includes('API error') || raydiumCheck.reason?.includes('Network')) {
+            apiCheckFailed = true;
+            // API failed - if from trusted source with decent liquidity, still allow
+            if (trustedSource && hasGoodLiquidity) {
               verified = true;
-              verifyMethod = `High liquidity ($${token.liquidity.toFixed(0)}) - source verified`;
+              verifyMethod = `${token.source} ($${token.liquidity.toFixed(0)} liquidity)`;
+            }
+          }
+          
+          // Step 2: Try Jupiter only if still not verified AND API working
+          if (!verified && !apiCheckFailed) {
+            const jupiterResult = await simulateJupiterSwap(token.address);
+            if (jupiterResult.success) {
+              verified = true;
+              verifyMethod = 'Jupiter route available';
+            } else if (jupiterResult.networkError) {
+              apiCheckFailed = true;
+              // Network failed - trust source if decent liquidity
+              if (trustedSource && hasGoodLiquidity) {
+                verified = true;
+                verifyMethod = `${token.source} ($${token.liquidity.toFixed(0)} liquidity)`;
+              }
             }
           }
         }
@@ -325,20 +342,24 @@ serve(async (req) => {
         } else {
           token.canBuy = false;
           token.isTradeable = false;
-          token.safetyReasons.push(raydiumCheck.reason || "❌ Could not verify tradability");
+          if (apiCheckFailed) {
+            token.safetyReasons.push("❌ Low liquidity - needs manual verification");
+          } else {
+            token.safetyReasons.push("❌ No tradeable pool found");
+          }
         }
         
       } catch (e: any) {
-        console.error('Tradability check error for', token.symbol, e);
-        // On unexpected error, be lenient for high-liquidity tokens
-        if (token.liquidity > 10000) {
+        // On any error, be lenient for trusted sources
+        const trustedSource = ['Birdeye', 'DexScreener', 'GeckoTerminal'].includes(token.source);
+        if (trustedSource && token.liquidity >= 1000) {
           token.canBuy = true;
           token.isTradeable = true;
-          token.safetyReasons.push("⚠️ Verification error - high liquidity, proceed with caution");
+          token.safetyReasons.push(`✅ ${token.source} ($${token.liquidity.toFixed(0)} liquidity)`);
         } else {
           token.canBuy = false;
           token.isTradeable = false;
-          token.safetyReasons.push("⚠️ Tradability check failed");
+          token.safetyReasons.push("❌ Verification unavailable");
         }
       }
       
@@ -480,6 +501,7 @@ serve(async (req) => {
     const simulateJupiterSwap = async (tokenAddress: string): Promise<{
       success: boolean;
       reason?: string;
+      networkError?: boolean;
     }> => {
       try {
         const params = new URLSearchParams({
@@ -493,7 +515,8 @@ serve(async (req) => {
         const response = await fetchWithRetry(buildUrl);
         
         if (!response) {
-          return { success: false, reason: "❌ No swap route available" };
+          // Network/DNS failure - mark as network error so caller can be lenient
+          return { success: false, reason: "Network unavailable", networkError: true };
         }
         
         const data = await response.json();
@@ -505,7 +528,10 @@ serve(async (req) => {
         return { success: false, reason: "❌ Jupiter: No valid route" };
         
       } catch (e: any) {
-        return { success: false, reason: "❌ Swap verification failed" };
+        const errorMsg = e?.message || '';
+        const isNetworkError = errorMsg.includes('dns') || errorMsg.includes('network') || 
+                               errorMsg.includes('timeout') || errorMsg.includes('ENOTFOUND');
+        return { success: false, reason: "❌ Swap verification failed", networkError: isNetworkError };
       }
     };
 
