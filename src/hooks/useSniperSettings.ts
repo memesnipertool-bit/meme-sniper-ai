@@ -47,7 +47,7 @@ export function useSniperSettings() {
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('user_sniper_settings')
+        .from('user_sniper_settings' as never)
         .select('*')
         .eq('user_id', user.id)
         .maybeSingle();
@@ -55,9 +55,19 @@ export function useSniperSettings() {
       if (error) throw error;
 
       if (data) {
+        const typedData = data as unknown as Record<string, unknown>;
         setSettings({
-          ...data,
-          priority: data.priority as SnipingPriority,
+          id: typedData.id as string,
+          user_id: typedData.user_id as string,
+          min_liquidity: typedData.min_liquidity as number,
+          profit_take_percentage: typedData.profit_take_percentage as number,
+          stop_loss_percentage: typedData.stop_loss_percentage as number,
+          trade_amount: typedData.trade_amount as number,
+          max_concurrent_trades: typedData.max_concurrent_trades as number,
+          priority: typedData.priority as SnipingPriority,
+          category_filters: (typedData.category_filters as string[]) || [],
+          token_blacklist: (typedData.token_blacklist as string[]) || [],
+          token_whitelist: (typedData.token_whitelist as string[]) || [],
         });
       } else {
         // Return default settings for new users
@@ -66,10 +76,11 @@ export function useSniperSettings() {
           user_id: user.id,
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error loading settings',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
     } finally {
@@ -89,24 +100,35 @@ export function useSniperSettings() {
       };
 
       const { data, error } = await supabase
-        .from('user_sniper_settings')
-        .upsert(settingsToSave, { onConflict: 'user_id' })
+        .from('user_sniper_settings' as never)
+        .upsert(settingsToSave as never, { onConflict: 'user_id' })
         .select()
         .single();
 
       if (error) throw error;
 
+      const typedData = data as unknown as Record<string, unknown>;
       setSettings({
-        ...data,
-        priority: data.priority as SnipingPriority,
+        id: typedData.id as string,
+        user_id: typedData.user_id as string,
+        min_liquidity: typedData.min_liquidity as number,
+        profit_take_percentage: typedData.profit_take_percentage as number,
+        stop_loss_percentage: typedData.stop_loss_percentage as number,
+        trade_amount: typedData.trade_amount as number,
+        max_concurrent_trades: typedData.max_concurrent_trades as number,
+        priority: typedData.priority as SnipingPriority,
+        category_filters: (typedData.category_filters as string[]) || [],
+        token_blacklist: (typedData.token_blacklist as string[]) || [],
+        token_whitelist: (typedData.token_whitelist as string[]) || [],
       });
 
       toast({ title: 'Settings saved successfully' });
       return data;
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error saving settings',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
       throw error;

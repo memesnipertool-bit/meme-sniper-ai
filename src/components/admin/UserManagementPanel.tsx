@@ -182,7 +182,7 @@ export function UserManagementPanel() {
 
       // Fetch recent activity logs from user_activity_logs
       const { data: activityLogs } = await supabase
-        .from("user_activity_logs")
+        .from("user_activity_logs" as never)
         .select("*")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
@@ -190,7 +190,7 @@ export function UserManagementPanel() {
 
       // Also fetch trading activity from system_logs
       const { data: systemLogs } = await supabase
-        .from("system_logs")
+        .from("system_logs" as never)
         .select("*")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
@@ -272,13 +272,13 @@ export function UserManagementPanel() {
       if (error) throw error;
 
       // Log the activity
-      await supabase.from("user_activity_logs").insert({
+      await supabase.from("user_activity_logs" as never).insert({
         user_id: selectedUser.user_id,
         activity_type: "account_suspended",
         activity_category: "admin_action",
         description: `Account suspended: ${suspendReason || "No reason provided"}`,
         metadata: { suspended_by: "admin" },
-      });
+      } as never);
 
       setUsers((prev) =>
         prev.map((u) =>
@@ -314,13 +314,13 @@ export function UserManagementPanel() {
       if (error) throw error;
 
       // Log the activity
-      await supabase.from("user_activity_logs").insert({
+      await supabase.from("user_activity_logs" as never).insert({
         user_id: userId,
         activity_type: "account_unsuspended",
         activity_category: "admin_action",
         description: "Account reactivated by admin",
         metadata: { unsuspended_by: "admin" },
-      });
+      } as never);
 
       setUsers((prev) =>
         prev.map((u) =>

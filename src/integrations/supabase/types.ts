@@ -41,6 +41,117 @@ export type Database = {
         }
         Relationships: []
       }
+      api_configurations: {
+        Row: {
+          api_key_encrypted: string | null
+          api_name: string
+          api_type: string
+          base_url: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_enabled: boolean | null
+          last_checked_at: string | null
+          rate_limit_per_minute: number | null
+          status: string | null
+          updated_at: string
+        }
+        Insert: {
+          api_key_encrypted?: string | null
+          api_name: string
+          api_type: string
+          base_url: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          last_checked_at?: string | null
+          rate_limit_per_minute?: number | null
+          status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          api_key_encrypted?: string | null
+          api_name?: string
+          api_type?: string
+          base_url?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          last_checked_at?: string | null
+          rate_limit_per_minute?: number | null
+          status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      copy_trades: {
+        Row: {
+          action: string
+          amount: number
+          created_at: string
+          id: string
+          leader_address: string
+          leader_name: string | null
+          price: number
+          status: string | null
+          token_address: string
+          token_symbol: string
+          tx_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          amount: number
+          created_at?: string
+          id?: string
+          leader_address: string
+          leader_name?: string | null
+          price: number
+          status?: string | null
+          token_address: string
+          token_symbol: string
+          tx_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          amount?: number
+          created_at?: string
+          id?: string
+          leader_address?: string
+          leader_name?: string | null
+          price?: number
+          status?: string | null
+          token_address?: string
+          token_symbol?: string
+          tx_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      disclaimer_acknowledgments: {
+        Row: {
+          acknowledged_at: string
+          id: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          acknowledged_at?: string
+          id?: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          acknowledged_at?: string
+          id?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           created_at: string
@@ -74,12 +185,23 @@ export type Database = {
       positions: {
         Row: {
           amount: number
+          chain: string | null
+          closed_at: string | null
           created_at: string
           current_price: number | null
+          current_value: number | null
           entry_price: number
+          entry_value: number | null
+          exit_price: number | null
+          exit_reason: string | null
+          exit_tx_id: string | null
           id: string
           pnl_percentage: number | null
+          profit_loss_percent: number | null
+          profit_loss_value: number | null
+          profit_take_percent: number | null
           status: string | null
+          stop_loss_percent: number | null
           token_address: string
           token_name: string | null
           token_symbol: string | null
@@ -88,12 +210,23 @@ export type Database = {
         }
         Insert: {
           amount: number
+          chain?: string | null
+          closed_at?: string | null
           created_at?: string
           current_price?: number | null
+          current_value?: number | null
           entry_price: number
+          entry_value?: number | null
+          exit_price?: number | null
+          exit_reason?: string | null
+          exit_tx_id?: string | null
           id?: string
           pnl_percentage?: number | null
+          profit_loss_percent?: number | null
+          profit_loss_value?: number | null
+          profit_take_percent?: number | null
           status?: string | null
+          stop_loss_percent?: number | null
           token_address: string
           token_name?: string | null
           token_symbol?: string | null
@@ -102,12 +235,23 @@ export type Database = {
         }
         Update: {
           amount?: number
+          chain?: string | null
+          closed_at?: string | null
           created_at?: string
           current_price?: number | null
+          current_value?: number | null
           entry_price?: number
+          entry_value?: number | null
+          exit_price?: number | null
+          exit_reason?: string | null
+          exit_tx_id?: string | null
           id?: string
           pnl_percentage?: number | null
+          profit_loss_percent?: number | null
+          profit_loss_value?: number | null
+          profit_take_percent?: number | null
           status?: string | null
+          stop_loss_percent?: number | null
           token_address?: string
           token_name?: string | null
           token_symbol?: string | null
@@ -124,6 +268,7 @@ export type Database = {
           email: string | null
           id: string
           is_suspended: boolean | null
+          suspended_at: string | null
           suspension_reason: string | null
           two_factor_enabled: boolean | null
           updated_at: string
@@ -136,6 +281,7 @@ export type Database = {
           email?: string | null
           id?: string
           is_suspended?: boolean | null
+          suspended_at?: string | null
           suspension_reason?: string | null
           two_factor_enabled?: boolean | null
           updated_at?: string
@@ -148,6 +294,7 @@ export type Database = {
           email?: string | null
           id?: string
           is_suspended?: boolean | null
+          suspended_at?: string | null
           suspension_reason?: string | null
           two_factor_enabled?: boolean | null
           updated_at?: string
@@ -200,6 +347,39 @@ export type Database = {
         }
         Relationships: []
       }
+      system_logs: {
+        Row: {
+          created_at: string
+          event_category: string
+          event_type: string
+          id: string
+          message: string | null
+          metadata: Json | null
+          severity: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_category: string
+          event_type: string
+          id?: string
+          message?: string | null
+          metadata?: Json | null
+          severity?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_category?: string
+          event_type?: string
+          id?: string
+          message?: string | null
+          metadata?: Json | null
+          severity?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       trade_history: {
         Row: {
           amount: number
@@ -245,6 +425,108 @@ export type Database = {
         }
         Relationships: []
       }
+      trade_signals: {
+        Row: {
+          chain: string | null
+          created_at: string
+          executed_at: string | null
+          expires_at: string
+          id: string
+          is_pump_fun: boolean | null
+          liquidity: number | null
+          metadata: Json | null
+          price_usd: number | null
+          priority: string | null
+          reasons: Json | null
+          risk_score: number | null
+          slippage: number | null
+          source: string | null
+          status: string | null
+          token_address: string
+          token_name: string
+          token_symbol: string
+          trade_amount: number
+          tx_signature: string | null
+          user_id: string
+        }
+        Insert: {
+          chain?: string | null
+          created_at?: string
+          executed_at?: string | null
+          expires_at: string
+          id?: string
+          is_pump_fun?: boolean | null
+          liquidity?: number | null
+          metadata?: Json | null
+          price_usd?: number | null
+          priority?: string | null
+          reasons?: Json | null
+          risk_score?: number | null
+          slippage?: number | null
+          source?: string | null
+          status?: string | null
+          token_address: string
+          token_name: string
+          token_symbol: string
+          trade_amount: number
+          tx_signature?: string | null
+          user_id: string
+        }
+        Update: {
+          chain?: string | null
+          created_at?: string
+          executed_at?: string | null
+          expires_at?: string
+          id?: string
+          is_pump_fun?: boolean | null
+          liquidity?: number | null
+          metadata?: Json | null
+          price_usd?: number | null
+          priority?: string | null
+          reasons?: Json | null
+          risk_score?: number | null
+          slippage?: number | null
+          source?: string | null
+          status?: string | null
+          token_address?: string
+          token_name?: string
+          token_symbol?: string
+          trade_amount?: number
+          tx_signature?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_activity_logs: {
+        Row: {
+          activity_category: string
+          activity_type: string
+          created_at: string
+          description: string | null
+          id: string
+          metadata: Json | null
+          user_id: string
+        }
+        Insert: {
+          activity_category: string
+          activity_type: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          metadata?: Json | null
+          user_id: string
+        }
+        Update: {
+          activity_category?: string
+          activity_type?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          metadata?: Json | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -264,6 +546,54 @@ export type Database = {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_sniper_settings: {
+        Row: {
+          category_filters: Json | null
+          created_at: string
+          id: string
+          max_concurrent_trades: number | null
+          min_liquidity: number | null
+          priority: string | null
+          profit_take_percentage: number | null
+          stop_loss_percentage: number | null
+          token_blacklist: Json | null
+          token_whitelist: Json | null
+          trade_amount: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category_filters?: Json | null
+          created_at?: string
+          id?: string
+          max_concurrent_trades?: number | null
+          min_liquidity?: number | null
+          priority?: string | null
+          profit_take_percentage?: number | null
+          stop_loss_percentage?: number | null
+          token_blacklist?: Json | null
+          token_whitelist?: Json | null
+          trade_amount?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category_filters?: Json | null
+          created_at?: string
+          id?: string
+          max_concurrent_trades?: number | null
+          min_liquidity?: number | null
+          priority?: string | null
+          profit_take_percentage?: number | null
+          stop_loss_percentage?: number | null
+          token_blacklist?: Json | null
+          token_whitelist?: Json | null
+          trade_amount?: number | null
           updated_at?: string
           user_id?: string
         }

@@ -40,16 +40,17 @@ export function useApiConfigurations() {
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('api_configurations')
+        .from('api_configurations' as never)
         .select('*')
         .order('api_type');
 
       if (error) throw error;
-      setConfigurations((data as ApiConfiguration[]) || []);
-    } catch (error: any) {
+      setConfigurations((data as unknown as ApiConfiguration[]) || []);
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error fetching API configurations',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
     } finally {
@@ -61,19 +62,20 @@ export function useApiConfigurations() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const { data, error } = await supabase
-        .from('api_configurations')
-        .insert({ ...config, created_by: user?.id })
+        .from('api_configurations' as never)
+        .insert({ ...config, created_by: user?.id } as never)
         .select()
         .single();
 
       if (error) throw error;
-      setConfigurations(prev => [...prev, data as ApiConfiguration]);
+      setConfigurations(prev => [...prev, data as unknown as ApiConfiguration]);
       toast({ title: 'API configuration added successfully' });
       return data;
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error adding API configuration',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
       throw error;
@@ -83,20 +85,21 @@ export function useApiConfigurations() {
   const updateConfiguration = async (id: string, updates: Partial<ApiConfiguration>) => {
     try {
       const { data, error } = await supabase
-        .from('api_configurations')
-        .update(updates)
+        .from('api_configurations' as never)
+        .update(updates as never)
         .eq('id', id)
         .select()
         .single();
 
       if (error) throw error;
-      setConfigurations(prev => prev.map(c => c.id === id ? (data as ApiConfiguration) : c));
+      setConfigurations(prev => prev.map(c => c.id === id ? (data as unknown as ApiConfiguration) : c));
       toast({ title: 'API configuration updated successfully' });
       return data;
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error updating API configuration',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
       throw error;
@@ -106,17 +109,18 @@ export function useApiConfigurations() {
   const deleteConfiguration = async (id: string) => {
     try {
       const { error } = await supabase
-        .from('api_configurations')
+        .from('api_configurations' as never)
         .delete()
         .eq('id', id);
 
       if (error) throw error;
       setConfigurations(prev => prev.filter(c => c.id !== id));
       toast({ title: 'API configuration deleted successfully' });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error deleting API configuration',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
       throw error;
