@@ -10,6 +10,7 @@ import BotActivityLog, { addBotLog, clearBotLogs } from "@/components/scanner/Bo
 import RecoveryControls from "@/components/scanner/RecoveryControls";
 import ApiHealthWidget from "@/components/scanner/ApiHealthWidget";
 import PaidApiAlert from "@/components/scanner/PaidApiAlert";
+import BotPreflightCheck from "@/components/scanner/BotPreflightCheck";
 import StatsCard from "@/components/StatsCard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -986,6 +987,20 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
             {/* Right Column - Bot Settings & Performance (shows first on mobile for quick access) */}
             <div className="space-y-4 md:space-y-6 order-1 lg:order-2">
+              {/* Bot Preflight Check - shows blocking issues in live mode */}
+              <BotPreflightCheck
+                isBotActive={isBotActive}
+                isDemo={isDemo}
+                walletConnected={wallet.isConnected}
+                walletNetwork={wallet.network}
+                walletBalance={wallet.balance}
+                tradeAmount={settings?.trade_amount ?? null}
+                maxConcurrentTrades={settings?.max_concurrent_trades ?? null}
+                autoEntryEnabled={autoEntryEnabled}
+                openPositionsCount={openPositions.length}
+                onConnectWallet={connectPhantom}
+              />
+              
               {/* Trade Signals Panel - Live mode only */}
               {!isDemo && (
                 <TradeSignalPanel />
