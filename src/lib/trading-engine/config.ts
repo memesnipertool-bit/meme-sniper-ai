@@ -16,6 +16,7 @@ export const DEFAULT_RISK_FILTERS: RiskFilters = {
 };
 
 // Default trading configuration - with fallback support
+// IMPORTANT: No aggressive retry loops (<1 second)
 export const DEFAULT_TRADING_CONFIG: TradingConfig = {
   // Liquidity detection - balanced thresholds
   minLiquidity: 5, // 5 SOL minimum - allows new tokens while filtering dust
@@ -26,9 +27,10 @@ export const DEFAULT_TRADING_CONFIG: TradingConfig = {
   slippage: 0.15, // 15% slippage for new tokens
   priorityFee: 100000, // 0.0001 SOL priority fee
   
-  // Retry configuration
+  // Retry configuration - NO tight loops
+  // Minimum 1 second delay between retries with exponential backoff
   maxRetries: 3,
-  retryDelayMs: 1000,
+  retryDelayMs: 1000, // Base delay: 1 second (will use exponential backoff)
   
   // Polling configuration
   jupiterPollIntervalMs: 5000, // Poll every 5 seconds
