@@ -27,7 +27,7 @@ export interface TradeSignal {
   executed_at: string | null;
   expires_at: string;
   created_at: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export function useTradeSignals() {
@@ -46,7 +46,7 @@ export function useTradeSignals() {
 
     try {
       const { data, error } = await supabase
-        .from('trade_signals')
+        .from('trade_signals' as never)
         .select('*')
         .eq('user_id', user.id)
         .eq('status', 'pending')
@@ -57,7 +57,7 @@ export function useTradeSignals() {
       
       // Type assertion since we know the structure
       setSignals((data as unknown as TradeSignal[]) || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error fetching trade signals:', error);
     } finally {
       setLoading(false);
@@ -131,12 +131,12 @@ export function useTradeSignals() {
       });
       
       await supabase
-        .from('trade_signals')
+        .from('trade_signals' as never)
         .update({ 
           status: 'executed', 
           executed_at: new Date().toISOString(),
           tx_signature: `demo_${Date.now()}`,
-        })
+        } as never)
         .eq('id', signal.id);
       
       return { success: true, txSignature: `demo_${Date.now()}` };
@@ -179,12 +179,12 @@ export function useTradeSignals() {
 
       // Step 4: Update signal status
       await supabase
-        .from('trade_signals')
+        .from('trade_signals' as never)
         .update({ 
           status: 'executed', 
           executed_at: new Date().toISOString(),
           tx_signature: signResult.signature,
-        })
+        } as never)
         .eq('id', signal.id);
 
       // Step 5: Update position status if created
@@ -202,25 +202,26 @@ export function useTradeSignals() {
 
       return { success: true, txSignature: signResult.signature };
 
-    } catch (error: any) {
-      console.error('Trade execution error:', error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error('Trade execution error:', err);
       
       // Mark signal as failed/cancelled
       await supabase
-        .from('trade_signals')
+        .from('trade_signals' as never)
         .update({ 
           status: 'cancelled',
-          metadata: { error: error.message },
-        })
+          metadata: { error: err.message },
+        } as never)
         .eq('id', signal.id);
 
       toast({
         title: 'Trade Failed',
-        description: error.message || 'Failed to execute trade',
+        description: err.message || 'Failed to execute trade',
         variant: 'destructive',
       });
 
-      return { success: false, error: error.message };
+      return { success: false, error: err.message };
     } finally {
       setExecuting(null);
     }
@@ -230,12 +231,12 @@ export function useTradeSignals() {
   const cancelSignal = useCallback(async (signalId: string) => {
     try {
       await supabase
-        .from('trade_signals')
-        .update({ status: 'cancelled' })
+        .from('trade_signals' as never)
+        .update({ status: 'cancelled' } as never)
         .eq('id', signalId);
 
       setSignals(prev => prev.filter(s => s.id !== signalId));
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error cancelling signal:', error);
     }
   }, []);
@@ -246,14 +247,14 @@ export function useTradeSignals() {
 
     try {
       await supabase
-        .from('trade_signals')
-        .update({ status: 'expired' })
+        .from('trade_signals' as never)
+        .update({ status: 'expired' } as never)
         .eq('user_id', user.id)
         .eq('status', 'pending')
         .lt('expires_at', new Date().toISOString());
 
       fetchSignals();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error cleaning up signals:', error);
     }
   }, [user, fetchSignals]);

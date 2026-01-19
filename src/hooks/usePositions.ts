@@ -6,18 +6,19 @@ export interface Position {
   id: string;
   user_id: string;
   token_address: string;
-  token_symbol: string;
-  token_name: string;
+  token_symbol: string | null;
+  token_name: string | null;
   chain: string;
   entry_price: number;
-  current_price: number;
+  current_price: number | null;
   amount: number;
-  entry_value: number;
-  current_value: number;
+  entry_value: number | null;
+  current_value: number | null;
   profit_loss_percent: number;
-  profit_loss_value: number;
+  profit_loss_value: number | null;
   profit_take_percent: number;
   stop_loss_percent: number;
+  pnl_percentage: number | null;
   status: 'open' | 'closed' | 'pending';
   exit_reason: string | null;
   exit_price: number | null;
@@ -64,11 +65,12 @@ export function usePositions() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setPositions((data as Position[]) || []);
-    } catch (error: any) {
+      setPositions((data as unknown as Position[]) || []);
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error fetching positions',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
     } finally {
@@ -114,11 +116,11 @@ export function usePositions() {
 
       if (error) throw error;
 
-      const newPosition = data as Position;
+      const newPosition = data as unknown as Position;
       setPositions(prev => [newPosition, ...prev]);
       
-      // Log activity
-      supabase.from('user_activity_logs').insert({
+      // Log activity (fire and forget)
+      supabase.from('user_activity_logs' as never).insert({
         user_id: user.id,
         activity_type: 'position_opened',
         activity_category: 'trading',
@@ -132,7 +134,7 @@ export function usePositions() {
           profit_take_percent: profitTakePercent,
           stop_loss_percent: stopLossPercent,
         },
-      }).then(({ error: logError }) => {
+      } as never).then(({ error: logError }) => {
         if (logError) console.error('Failed to log activity:', logError);
       });
       
@@ -142,10 +144,11 @@ export function usePositions() {
       });
 
       return newPosition;
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error creating position',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
       return null;
@@ -193,10 +196,11 @@ export function usePositions() {
       }
 
       return { results: data.results, summary };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error checking exit conditions',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
       return null;
@@ -212,7 +216,8 @@ export function usePositions() {
       if (!position) throw new Error('Position not found');
 
       const currentValue = position.amount * exitPrice;
-      const profitLossValue = currentValue - position.entry_value;
+      const entryValue = position.entry_value || (position.amount * position.entry_price);
+      const profitLossValue = currentValue - entryValue;
       const profitLossPercent = ((exitPrice - position.entry_price) / position.entry_price) * 100;
 
       const { error } = await supabase
@@ -234,7 +239,7 @@ export function usePositions() {
       // Log activity
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        supabase.from('user_activity_logs').insert({
+        supabase.from('user_activity_logs' as never).insert({
           user_id: user.id,
           activity_type: 'position_closed',
           activity_category: 'trading',
@@ -248,7 +253,7 @@ export function usePositions() {
             profit_loss_value: profitLossValue,
             exit_reason: 'manual',
           },
-        }).then(({ error: logError }) => {
+        } as never).then(({ error: logError }) => {
           if (logError) console.error('Failed to log activity:', logError);
         });
       }
@@ -259,10 +264,11 @@ export function usePositions() {
         title: 'Position Closed',
         description: `${position.token_symbol} closed with ${profitLossPercent >= 0 ? '+' : ''}${profitLossPercent.toFixed(2)}%`,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error closing position',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
     }

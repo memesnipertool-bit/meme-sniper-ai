@@ -26,17 +26,18 @@ export function useCopyTrades() {
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('copy_trades')
+        .from('copy_trades' as never)
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (error) throw error;
-      setTrades((data as CopyTrade[]) || []);
-    } catch (error: any) {
+      setTrades((data as unknown as CopyTrade[]) || []);
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error fetching copy trades',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
     } finally {
@@ -50,19 +51,20 @@ export function useCopyTrades() {
       if (!user) throw new Error('Not authenticated');
 
       const { data, error } = await supabase
-        .from('copy_trades')
-        .insert({ ...trade, user_id: user.id })
+        .from('copy_trades' as never)
+        .insert({ ...trade, user_id: user.id } as never)
         .select()
         .single();
 
       if (error) throw error;
       
-      setTrades(prev => [data as CopyTrade, ...prev]);
-      return data as CopyTrade;
-    } catch (error: any) {
+      setTrades(prev => [data as unknown as CopyTrade, ...prev]);
+      return data as unknown as CopyTrade;
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'Error adding copy trade',
-        description: error.message,
+        description: err.message,
         variant: 'destructive',
       });
       return null;

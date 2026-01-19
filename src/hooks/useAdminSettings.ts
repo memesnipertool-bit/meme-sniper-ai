@@ -141,16 +141,17 @@ export function useAdminSettings() {
 
       if (error) throw error;
 
-      const loadedSettings: Partial<AdminSettings> = {};
-      (data || []).forEach((row: any) => {
-        if (row.setting_key in defaultSettings) {
-          loadedSettings[row.setting_key as keyof AdminSettings] = row.setting_value;
-        }
+      const loadedSettings: Record<string, unknown> = {};
+      (data || []).forEach((row: { setting_key: string; setting_value: unknown }) => {
+        loadedSettings[row.setting_key] = row.setting_value;
       });
 
       setSettings({
-        ...defaultSettings,
-        ...loadedSettings,
+        scanner_settings: (loadedSettings.scanner_settings as ScannerSettings) || defaultSettings.scanner_settings,
+        liquidity_rules: (loadedSettings.liquidity_rules as LiquidityRules) || defaultSettings.liquidity_rules,
+        risk_filters: (loadedSettings.risk_filters as RiskFilters) || defaultSettings.risk_filters,
+        trading_engine: (loadedSettings.trading_engine as TradingEngine) || defaultSettings.trading_engine,
+        copy_trading: (loadedSettings.copy_trading as CopyTrading) || defaultSettings.copy_trading,
       });
     } catch (err) {
       console.error('Failed to fetch admin settings:', err);
@@ -175,10 +176,10 @@ export function useAdminSettings() {
       const { error } = await supabase
         .from('admin_settings')
         .upsert({
-          setting_key: key,
+          setting_key: key as string,
           setting_value: value as unknown,
           updated_by: user.id,
-        }, {
+        } as never, {
           onConflict: 'setting_key',
         });
 
@@ -191,7 +192,7 @@ export function useAdminSettings() {
 
       toast({
         title: 'Settings Saved',
-        description: `${key.replace(/_/g, ' ')} updated successfully`,
+        description: `${String(key).replace(/_/g, ' ')} updated successfully`,
       });
 
       return true;

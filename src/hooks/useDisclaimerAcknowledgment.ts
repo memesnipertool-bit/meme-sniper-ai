@@ -17,7 +17,7 @@ export const useDisclaimerAcknowledgment = () => {
 
       try {
         const { data, error } = await supabase
-          .from("disclaimer_acknowledgments")
+          .from("disclaimer_acknowledgments" as never)
           .select("id")
           .eq("user_id", user.id)
           .maybeSingle();
@@ -44,11 +44,11 @@ export const useDisclaimerAcknowledgment = () => {
 
     try {
       const { error } = await supabase
-        .from("disclaimer_acknowledgments")
+        .from("disclaimer_acknowledgments" as never)
         .insert({
           user_id: user.id,
           user_agent: navigator.userAgent,
-        });
+        } as never);
 
       if (error) {
         console.error("Error saving acknowledgment:", error);
