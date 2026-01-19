@@ -356,7 +356,6 @@ function getDefaultBaseUrl(apiType: string): string {
     pumpfun: 'https://frontend-api.pump.fun',
     rpc_provider: 'https://api.mainnet-beta.solana.com',
     liquidity_lock: 'https://api.team.finance',
-    trade_execution: '',
   };
   return defaults[apiType] || '';
 }
