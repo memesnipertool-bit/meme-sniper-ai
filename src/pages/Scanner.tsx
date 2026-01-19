@@ -22,6 +22,7 @@ import { useAutoSniper, TokenData } from "@/hooks/useAutoSniper";
 import { useAutoExit } from "@/hooks/useAutoExit";
 import { useDemoAutoExit } from "@/hooks/useDemoAutoExit";
 import { useWallet } from "@/hooks/useWallet";
+import { useWalletModal } from "@/hooks/useWalletModal";
 import { useTradeExecution, SOL_MINT, type TradeParams, type PriorityLevel } from "@/hooks/useTradeExecution";
 import { useTradingEngine } from "@/hooks/useTradingEngine";
 import { usePositions } from "@/hooks/usePositions";
@@ -43,6 +44,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   const { executeTrade, sellPosition } = useTradeExecution();
   const { snipeToken, exitPosition, status: engineStatus, isExecuting: engineExecuting } = useTradingEngine();
   const { wallet, connectPhantom, disconnect, signAndSendTransaction, refreshBalance } = useWallet();
+  const { openModal: openWalletModal } = useWalletModal();
   const { openPositions: realOpenPositions, closedPositions: realClosedPositions, fetchPositions, closePosition: markPositionClosed } = usePositions();
   const { toast } = useToast();
   const { addNotification } = useNotifications();
@@ -149,6 +151,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         description: "Connect a Solana wallet to exit live trades.",
         variant: "destructive",
       });
+      // Open wallet modal programmatically
+      openWalletModal();
       return;
     }
 
@@ -472,7 +476,13 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       // Live mode: evaluate first, then execute via wallet signature (no private keys stored)
       (async () => {
         if (!wallet.isConnected || wallet.network !== 'solana' || !wallet.address) {
-          console.log('[Live Bot] No wallet connected, skipping trade');
+          console.log('[Live Bot] No wallet connected, opening wallet modal...');
+          addBotLog({
+            level: 'warning',
+            category: 'trade',
+            message: 'Wallet not connected - please connect to trade',
+          });
+          openWalletModal();
           return;
         }
 

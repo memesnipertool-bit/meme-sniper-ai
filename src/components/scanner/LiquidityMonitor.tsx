@@ -241,11 +241,28 @@ const PoolRow = memo(({ pool, colorIndex, isNew }: { pool: ScannedToken; colorIn
             <div className="mt-2 p-2 bg-background/30 rounded text-xs">
               <span className="text-muted-foreground block mb-1">Safety Checks:</span>
               <div className="flex flex-wrap gap-1">
-                {pool.safetyReasons.map((reason, idx) => (
-                  <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 h-5">
-                    {reason}
-                  </Badge>
-                ))}
+                {/* Deduplicate and sort safety reasons */}
+                {[...new Set(pool.safetyReasons)]
+                  .sort((a, b) => {
+                    // Priority: ✅ first, then ⚠️, then ❌, then others
+                    const priority = (s: string) => s.startsWith('✅') ? 0 : s.startsWith('⚠️') ? 1 : s.startsWith('❌') ? 2 : 3;
+                    return priority(a) - priority(b);
+                  })
+                  .slice(0, 5) // Limit to 5 most important
+                  .map((reason, idx) => (
+                    <Badge 
+                      key={idx} 
+                      variant="outline" 
+                      className={cn(
+                        "text-[10px] px-1.5 py-0 h-5",
+                        reason.startsWith('✅') && "border-success/40 text-success bg-success/5",
+                        reason.startsWith('⚠️') && "border-warning/40 text-warning bg-warning/5",
+                        reason.startsWith('❌') && "border-destructive/40 text-destructive bg-destructive/5"
+                      )}
+                    >
+                      {reason}
+                    </Badge>
+                  ))}
               </div>
             </div>
           )}

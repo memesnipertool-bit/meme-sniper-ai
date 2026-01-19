@@ -954,9 +954,10 @@ serve(async (req) => {
       return token.chain === 'solana';
     });
 
-    // Validate tokens in parallel (limit to first 15 for performance)
-    const tokensToValidate = solanaOnlyTokens.slice(0, 15);
-    const validatedTokens = await Promise.all(
+    // Validate tokens in parallel (limit to first 10 for faster response)
+    // Use Promise.allSettled to prevent one slow token from blocking all
+    const tokensToValidate = solanaOnlyTokens.slice(0, 10);
+    const validationResults = await Promise.allSettled(
       tokensToValidate.map(async (token) => {
         // Skip Pump.fun tokens from additional validation (they have bonding curve)
         if (token.isPumpFun) return token;
@@ -967,15 +968,30 @@ serve(async (req) => {
           checkTradability(token),
         ]);
         
+        // Merge and deduplicate safety reasons
+        const mergedReasons = [...safetyChecked.safetyReasons, ...tradabilityChecked.safetyReasons];
+        const uniqueReasons = [...new Set(mergedReasons)].filter(Boolean);
+        
         return {
           ...token,
           ...safetyChecked,
           canBuy: tradabilityChecked.canBuy,
           isTradeable: safetyChecked.isTradeable && tradabilityChecked.canBuy,
-          safetyReasons: [...safetyChecked.safetyReasons, ...tradabilityChecked.safetyReasons],
+          safetyReasons: uniqueReasons,
         };
       })
     );
+
+    // Extract successful validations, use original token for failures
+    const validatedTokens = validationResults.map((result, idx) => {
+      if (result.status === 'fulfilled') return result.value;
+      // On validation failure, return original with warning
+      const original = tokensToValidate[idx];
+      return {
+        ...original,
+        safetyReasons: [...(original.safetyReasons || []), '⚠️ Validation timeout'],
+      };
+    });
 
     // Filter out non-tradeable tokens and sort by potential
     const tradeableTokens = validatedTokens.filter(t => t.isTradeable);

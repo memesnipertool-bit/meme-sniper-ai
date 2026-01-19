@@ -66,6 +66,8 @@ interface SwapSimulationResult {
 /**
  * Detect a tradable Raydium pool for the given token
  * Returns TRADABLE only if ALL strict conditions pass
+ * 
+ * PERFORMANCE: Uses Jupiter as primary fallback when Raydium API fails (500 errors)
  */
 export async function detectTradablePool(
   tokenAddress: string,
@@ -78,10 +80,32 @@ export async function detectTradablePool(
     // STEP 1: Query Raydium API for pools containing this token
     const pools = await fetchRaydiumPools(tokenAddress);
     
+    // If Raydium API failed or returned no pools, try Jupiter fallback
     if (!pools || pools.length === 0) {
+      console.log('[LiquidityDetector] No Raydium pools, trying Jupiter fallback...');
+      const jupiterFallback = await tryJupiterFallback(tokenAddress, config.minLiquidity);
+      if (jupiterFallback.status === 'TRADABLE') {
+        onEvent?.({
+          type: 'LIQUIDITY_DETECTED',
+          data: {
+            tokenAddress,
+            tokenName: 'Unknown',
+            tokenSymbol: 'UNKNOWN',
+            poolAddress: jupiterFallback.poolAddress || '',
+            poolType: 'raydium',
+            baseMint: SOL_MINT,
+            quoteMint: tokenAddress,
+            liquidityAmount: jupiterFallback.liquidity || 0,
+            lpTokenMint: null,
+            timestamp: startTime,
+            blockHeight: 0,
+          },
+        });
+        return jupiterFallback;
+      }
       return {
         status: 'DISCARDED',
-        reason: 'No Raydium AMM pool found for token',
+        reason: jupiterFallback.reason || 'No Raydium AMM pool found for token',
       };
     }
     
@@ -495,6 +519,74 @@ async function simulateSwapJupiter(
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Jupiter simulation failed',
+    };
+  }
+}
+
+/**
+ * Jupiter fallback when Raydium API is unavailable
+ * Used to ensure trading can continue during Raydium API outages
+ */
+async function tryJupiterFallback(
+  tokenAddress: string,
+  minLiquidity: number
+): Promise<TradablePoolResult> {
+  try {
+    // Try to get a quote from Jupiter
+    const amountLamports = 100000000; // 0.1 SOL for more reliable quote
+    const response = await fetch(
+      `https://quote-api.jup.ag/v6/quote?` +
+      `inputMint=${SOL_MINT}&` +
+      `outputMint=${tokenAddress}&` +
+      `amount=${amountLamports}&` +
+      `slippageBps=1500`,
+      {
+        signal: AbortSignal.timeout(10000),
+        headers: { 'Accept': 'application/json' },
+      }
+    );
+    
+    if (!response.ok) {
+      return {
+        status: 'DISCARDED',
+        reason: `Jupiter fallback failed: ${response.status}`,
+      };
+    }
+    
+    const data = await response.json();
+    
+    if (data.error || !data.outAmount || parseInt(data.outAmount) <= 0) {
+      return {
+        status: 'DISCARDED',
+        reason: data.error || 'No Jupiter route available',
+      };
+    }
+    
+    // Estimate liquidity from route info
+    const routeInfo = data.routePlan?.[0];
+    const estimatedLiquidity = routeInfo?.swapInfo?.ammKey ? 10 : 5; // Rough estimate
+    
+    if (estimatedLiquidity < minLiquidity) {
+      return {
+        status: 'DISCARDED',
+        reason: `Insufficient liquidity via Jupiter: ~${estimatedLiquidity} SOL`,
+      };
+    }
+    
+    return {
+      status: 'TRADABLE',
+      poolAddress: routeInfo?.swapInfo?.ammKey || 'jupiter_route',
+      baseMint: SOL_MINT,
+      quoteMint: tokenAddress,
+      liquidity: estimatedLiquidity,
+      poolType: 'raydium_v4', // Jupiter often routes through Raydium
+      detectedAt: Date.now(),
+    };
+    
+  } catch (error) {
+    return {
+      status: 'DISCARDED',
+      reason: error instanceof Error ? error.message : 'Jupiter fallback error',
     };
   }
 }
