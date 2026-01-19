@@ -17,9 +17,9 @@ export const DEFAULT_RISK_FILTERS: RiskFilters = {
 
 // Default trading configuration
 export const DEFAULT_TRADING_CONFIG: TradingConfig = {
-  // Liquidity detection
-  minLiquidity: 5, // 5 SOL minimum
-  maxRiskScore: 60, // Max 60/100 risk score
+  // Liquidity detection - lowered for meme tokens
+  minLiquidity: 1, // 1 SOL minimum (lowered from 5 for new tokens)
+  maxRiskScore: 70, // Max 70/100 risk score (slightly more permissive)
   
   // Trading parameters
   buyAmount: 0.1, // 0.1 SOL default
