@@ -475,8 +475,16 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     } else {
       // Live mode: evaluate first, then execute via wallet signature (no private keys stored)
       (async () => {
+        console.log('[Live Bot] Starting live execution check...');
+        console.log('[Live Bot] Wallet state:', { 
+          isConnected: wallet.isConnected, 
+          network: wallet.network, 
+          address: wallet.address?.slice(0, 8), 
+          balance: wallet.balance 
+        });
+        
         if (!wallet.isConnected || wallet.network !== 'solana' || !wallet.address) {
-          console.log('[Live Bot] No wallet connected, opening wallet modal...');
+          console.log('[Live Bot] BLOCKED: No wallet connected, opening wallet modal...');
           addBotLog({
             level: 'warning',
             category: 'trade',
@@ -489,27 +497,34 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         // Ensure we have enough SOL for the trade amount + a small fee buffer
         const balanceSol = parseFloat(String(wallet.balance || '').replace(/[^\d.]/g, '')) || 0;
         const tradeAmountSol = settings.trade_amount || 0;
+        console.log('[Live Bot] Balance check:', { balanceSol, tradeAmountSol });
         const feeBufferSol = 0.01;
 
         if (tradeAmountSol <= 0) {
-          console.log('[Live Bot] Invalid trade amount:', tradeAmountSol);
+          console.log('[Live Bot] BLOCKED: Invalid trade amount:', tradeAmountSol);
           return;
         }
 
         if (balanceSol < tradeAmountSol + feeBufferSol) {
-          console.log(`[Live Bot] Insufficient balance: have ${balanceSol}, need ${tradeAmountSol + feeBufferSol}`);
+          console.log(`[Live Bot] BLOCKED: Insufficient balance: have ${balanceSol}, need ${tradeAmountSol + feeBufferSol}`);
+          addBotLog({
+            level: 'warning',
+            category: 'trade',
+            message: 'Insufficient balance for trade',
+            details: `Balance: ${balanceSol.toFixed(4)} SOL, need: ${(tradeAmountSol + feeBufferSol).toFixed(4)} SOL`,
+          });
           return;
         }
 
         if (liveTradeInFlightRef.current) {
-          console.log('[Live Bot] Trade already in flight, skipping');
+          console.log('[Live Bot] BLOCKED: Trade already in flight, skipping');
           return;
         }
 
-        console.log(`[Live Bot] Evaluating ${tokenData.length} tokens for trade...`);
+        console.log(`[Live Bot] ✅ All checks passed. Evaluating ${tokenData.length} tokens...`);
         const evaluation = await evaluateTokens(tokenData, false, undefined, { suppressOpportunityToast: true });
         if (!evaluation) {
-          console.log('[Live Bot] Evaluation returned null, will retry later');
+          console.log('[Live Bot] BLOCKED: Evaluation returned null (throttled or error)');
           return;
         }
 
@@ -518,7 +533,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
         const approved = evaluation.decisions?.filter((d) => d.approved) || [];
         
-        console.log(`[Live Bot] Evaluation result: ${approved.length} approved out of ${evaluation?.decisions?.length || 0}`);
+        console.log(`[Live Bot] Evaluation complete: ${approved.length}/${evaluation?.decisions?.length || 0} approved`);
         
         if (approved.length === 0) {
           addBotLog({ 
@@ -527,12 +542,14 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             message: `${evaluation.decisions?.length || 0} tokens evaluated, 0 approved`,
             details: evaluation.decisions?.map(d => `${d.token.symbol}: ${d.reasons.slice(0, 2).join(', ')}`).join('\n'),
           });
-          console.log('[Live Bot] No approved tokens, skipping trade');
+          console.log('[Live Bot] BLOCKED: No approved tokens');
           return;
         }
 
         // Execute up to available slots (cap per cycle to avoid wallet spam)
         const availableSlots = Math.max(0, (settings.max_concurrent_trades || 0) - openPositions.length);
+        console.log('[Live Bot] Slot check:', { availableSlots, maxConcurrent: settings.max_concurrent_trades, openPositions: openPositions.length });
+        
         if (availableSlots <= 0) {
           addBotLog({ 
             level: 'skip', 
@@ -564,6 +581,14 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         }
 
         const toExecute = approved.slice(0, tradesThisCycle);
+        console.log(`[Live Bot] 🎯 EXECUTING ${toExecute.length} trades:`, toExecute.map(t => t.token.symbol).join(', '));
+        
+        addBotLog({
+          level: 'info',
+          category: 'trade',
+          message: `Starting ${toExecute.length} live trades`,
+          details: toExecute.map(t => t.token.symbol).join(', '),
+        });
 
         liveTradeInFlightRef.current = true;
         try {
