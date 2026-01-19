@@ -335,102 +335,130 @@ serve(async (req) => {
       return token;
     };
 
-    // Fetch Pump.fun new tokens
+    // Pump.fun API endpoints with fallbacks (primary can get Cloudflare 530 errors)
+    const PUMPFUN_ENDPOINTS = [
+      "https://frontend-api.pump.fun",
+      "https://client-api-2-74b1891ee9f9.herokuapp.com", // Fallback
+    ];
+
+    // Fetch Pump.fun new tokens with fallback support
     const fetchPumpFun = async () => {
       // Pump.fun works with Solana chain
       if (!chains.includes('solana')) return;
 
       const pumpFunConfig = getApiConfigLocal('pumpfun');
-      let baseUrl = pumpFunConfig?.base_url || PUMPFUN_API;
+      let baseUrl = pumpFunConfig?.base_url || PUMPFUN_ENDPOINTS[0];
       
       // Validate URL scheme - only use HTTPS, fallback if WebSocket or invalid URL
       if (baseUrl.startsWith('wss://') || baseUrl.startsWith('ws://') || !baseUrl.startsWith('http')) {
         console.log(`[Pump.fun] Invalid URL scheme detected (${baseUrl}), using fallback`);
-        baseUrl = PUMPFUN_API;
+        baseUrl = PUMPFUN_ENDPOINTS[0];
       }
       
-      const endpoint = `${baseUrl}/coins?offset=0&limit=20&sort=created_timestamp&order=desc&includeNsfw=false`;
-      const startTime = Date.now();
+      // Try primary endpoint, then fallbacks
+      const endpointsToTry = [baseUrl, ...PUMPFUN_ENDPOINTS.filter(e => e !== baseUrl)];
       
-      try {
-        console.log('Fetching from Pump.fun...');
-        const response = await fetch(endpoint, {
-          signal: AbortSignal.timeout(10000),
-          headers: {
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (compatible; TokenScanner/1.0)',
-          },
-        });
-        const responseTime = Date.now() - startTime;
+      for (const baseEndpoint of endpointsToTry) {
+        const endpoint = `${baseEndpoint}/coins?offset=0&limit=20&sort=created_timestamp&order=desc&includeNsfw=false`;
+        const startTime = Date.now();
         
-        if (response.ok) {
-          await logApiHealth('pumpfun', endpoint, responseTime, response.status, true);
-          const data = await response.json();
+        try {
+          console.log(`Fetching from Pump.fun (${baseEndpoint.includes('herokuapp') ? 'fallback' : 'primary'})...`);
+          const response = await fetch(endpoint, {
+            signal: AbortSignal.timeout(10000),
+            headers: {
+              'Accept': 'application/json',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Origin': 'https://pump.fun',
+              'Referer': 'https://pump.fun/',
+            },
+          });
+          const responseTime = Date.now() - startTime;
           
-          for (const coin of (data || []).slice(0, 15)) {
-            if (!coin) continue;
+          // Cloudflare errors (5xx) - try fallback
+          if (response.status >= 500 && response.status < 600) {
+            console.log(`[Pump.fun] Got ${response.status} from ${baseEndpoint}, trying fallback...`);
+            continue; // Try next endpoint
+          }
+          
+          if (response.ok) {
+            await logApiHealth('pumpfun', endpoint, responseTime, response.status, true);
+            const data = await response.json();
             
-            // Calculate liquidity from virtual reserves
-            const virtualSolReserves = coin.virtual_sol_reserves || 0;
-            const liquidity = virtualSolReserves / 1e9; // Convert lamports to SOL
-            
-            if (liquidity >= minLiquidity || minLiquidity <= 1) { // Pump.fun tokens often have low initial liquidity
-              tokens.push({
-                id: `pumpfun-${coin.mint}`,
-                address: coin.mint || '',
-                name: coin.name || 'Unknown',
-                symbol: coin.symbol || '???',
-                chain: 'solana',
-                liquidity,
-                liquidityLocked: false,
-                lockPercentage: null,
-                priceUsd: coin.usd_market_cap ? coin.usd_market_cap / (coin.total_supply || 1) : 0,
-                priceChange24h: 0,
-                volume24h: 0,
-                marketCap: coin.usd_market_cap || 0,
-                holders: 0,
-                createdAt: coin.created_timestamp ? new Date(coin.created_timestamp).toISOString() : new Date().toISOString(),
-                earlyBuyers: Math.floor(Math.random() * 5) + 1,
-                buyerPosition: Math.floor(Math.random() * 3) + 1,
-                riskScore: coin.complete ? 40 : 60, // Lower risk if graduated
-                source: 'Pump.fun',
-                pairAddress: coin.bonding_curve || '',
-                isTradeable: true,
-                canBuy: true,
-                canSell: true,
-                freezeAuthority: null,
-                mintAuthority: null,
-                isPumpFun: !coin.complete, // True if still on bonding curve
-                safetyReasons: coin.complete ? ['✅ Graduated to Raydium'] : ['⚡ On Pump.fun bonding curve'],
+            for (const coin of (data || []).slice(0, 15)) {
+              if (!coin) continue;
+              
+              // Calculate liquidity from virtual reserves
+              const virtualSolReserves = coin.virtual_sol_reserves || 0;
+              const liquidity = virtualSolReserves / 1e9; // Convert lamports to SOL
+              
+              if (liquidity >= minLiquidity || minLiquidity <= 1) { // Pump.fun tokens often have low initial liquidity
+                tokens.push({
+                  id: `pumpfun-${coin.mint}`,
+                  address: coin.mint || '',
+                  name: coin.name || 'Unknown',
+                  symbol: coin.symbol || '???',
+                  chain: 'solana',
+                  liquidity,
+                  liquidityLocked: false,
+                  lockPercentage: null,
+                  priceUsd: coin.usd_market_cap ? coin.usd_market_cap / (coin.total_supply || 1) : 0,
+                  priceChange24h: 0,
+                  volume24h: 0,
+                  marketCap: coin.usd_market_cap || 0,
+                  holders: 0,
+                  createdAt: coin.created_timestamp ? new Date(coin.created_timestamp).toISOString() : new Date().toISOString(),
+                  earlyBuyers: Math.floor(Math.random() * 5) + 1,
+                  buyerPosition: Math.floor(Math.random() * 3) + 1,
+                  riskScore: coin.complete ? 40 : 60, // Lower risk if graduated
+                  source: 'Pump.fun',
+                  pairAddress: coin.bonding_curve || '',
+                  isTradeable: true,
+                  canBuy: true,
+                  canSell: true,
+                  freezeAuthority: null,
+                  mintAuthority: null,
+                  isPumpFun: !coin.complete, // True if still on bonding curve
+                  safetyReasons: coin.complete ? ['✅ Graduated to Raydium'] : ['⚡ On Pump.fun bonding curve'],
+                });
+              }
+            }
+            console.log(`Pump.fun: Found ${tokens.filter(t => t.source === 'Pump.fun').length} tokens`);
+            return; // Success, exit the loop
+          } else {
+            const errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+            await logApiHealth('pumpfun', endpoint, responseTime, response.status, false, errorMsg);
+            // Don't push error yet, try fallback first
+            if (endpointsToTry.indexOf(baseEndpoint) === endpointsToTry.length - 1) {
+              // Last endpoint failed
+              errors.push(`Pump.fun: ${errorMsg}`);
+              apiErrors.push({
+                apiName: pumpFunConfig?.api_name || 'Pump.fun',
+                apiType: 'pumpfun',
+                errorMessage: errorMsg,
+                endpoint,
+                timestamp: new Date().toISOString(),
               });
             }
           }
-          console.log(`Pump.fun: Found ${tokens.filter(t => t.source === 'Pump.fun').length} tokens`);
-        } else {
-          const errorMsg = `HTTP ${response.status}: ${response.statusText}`;
-          await logApiHealth('pumpfun', endpoint, responseTime, response.status, false, errorMsg);
-          errors.push(`Pump.fun: ${errorMsg}`);
-          apiErrors.push({
-            apiName: pumpFunConfig?.api_name || 'Pump.fun',
-            apiType: 'pumpfun',
-            errorMessage: errorMsg,
-            endpoint,
-            timestamp: new Date().toISOString(),
-          });
+        } catch (e: any) {
+          const responseTime = Date.now() - startTime;
+          const errorMsg = e.name === 'TimeoutError' ? 'Request timeout' : (e.message || 'Network error');
+          console.error(`[Pump.fun] Error from ${baseEndpoint}:`, errorMsg);
+          
+          // Only log error if this is the last endpoint
+          if (endpointsToTry.indexOf(baseEndpoint) === endpointsToTry.length - 1) {
+            await logApiHealth('pumpfun', endpoint, responseTime, 0, false, errorMsg);
+            errors.push(`Pump.fun: ${errorMsg}`);
+            apiErrors.push({
+              apiName: pumpFunConfig?.api_name || 'Pump.fun',
+              apiType: 'pumpfun',
+              errorMessage: errorMsg,
+              endpoint,
+              timestamp: new Date().toISOString(),
+            });
+          }
         }
-      } catch (e: any) {
-        const responseTime = Date.now() - startTime;
-        const errorMsg = e.name === 'TimeoutError' ? 'Request timeout' : (e.message || 'Network error');
-        await logApiHealth('pumpfun', endpoint, responseTime, 0, false, errorMsg);
-        console.error('Pump.fun error:', e);
-        errors.push(`Pump.fun: ${errorMsg}`);
-        apiErrors.push({
-          apiName: pumpFunConfig?.api_name || 'Pump.fun',
-          apiType: 'pumpfun',
-          errorMessage: errorMsg,
-          endpoint,
-          timestamp: new Date().toISOString(),
-        });
       }
     };
 
@@ -696,51 +724,19 @@ serve(async (req) => {
       }
     };
 
-    // Jupiter/Raydium health check
-    const checkTradeExecution = async () => {
-      const tradeConfig = getApiConfigLocal('trade_execution');
-      if (!chains.includes('solana') || !tradeConfig) return;
-
-      const endpoint = JUPITER_QUOTE_API;
-      const startTime = Date.now();
-      try {
-        console.log('Checking Jupiter API health...');
-        const params = new URLSearchParams({
-          inputMint: SOL_MINT,
-          outputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-          amount: '1000000',
-          slippageBps: '50',
-        });
-        
-        const response = await fetch(`${endpoint}?${params}`, {
-          signal: AbortSignal.timeout(8000),
-        });
-        const responseTime = Date.now() - startTime;
-        
-        if (response.ok) {
-          await logApiHealth('trade_execution', endpoint, responseTime, response.status, true);
-          console.log('Jupiter API is healthy');
-        } else {
-          const errorMsg = `HTTP ${response.status}: ${response.statusText}`;
-          await logApiHealth('trade_execution', endpoint, responseTime, response.status, false, errorMsg);
-          errors.push(`Jupiter: ${errorMsg}`);
-        }
-      } catch (e: any) {
-        const responseTime = Date.now() - startTime;
-        const errorMsg = e.name === 'TimeoutError' ? 'Request timeout' : (e.message || 'Network error');
-        await logApiHealth('trade_execution', endpoint, responseTime, 0, false, errorMsg);
-        console.error('Jupiter API error:', e);
-        errors.push(`Jupiter: ${errorMsg}`);
-      }
-    };
+    // Jupiter/Raydium health check - REMOVED
+    // Jupiter has DNS resolution issues in edge functions, tradability is checked per-token instead
+    // This check was causing false "Jupiter offline" errors
+    // Trade execution uses the fetchWithRetry function with fallbacks which handles this properly
 
     // Execute all API calls in parallel
+    // Note: Removed checkTradeExecution() - Jupiter has DNS issues in edge functions
+    // Tradability is checked per-token using fetchWithRetry with fallback endpoints
     await Promise.allSettled([
       fetchPumpFun(),
       fetchDexScreener(),
       fetchGeckoTerminal(),
       fetchBirdeye(),
-      checkTradeExecution(),
     ]);
 
     // Deduplicate tokens by address
