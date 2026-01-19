@@ -302,28 +302,40 @@ serve(async (req) => {
             token.isTradeable = true;
             token.safetyReasons.push("✅ Jupiter route available");
           } else {
-            // No route found - but for new tokens this is expected
-            // Check if token has any liquidity info from scanner
-            if (token.liquidity && token.liquidity > 0) {
+            // No Jupiter route found - but for new tokens this is expected
+            // They can still be traded via Raydium or Pump.fun directly
+            if (token.isPumpFun && token.liquidity && token.liquidity > 0) {
               token.canBuy = true;
               token.isTradeable = true;
-              token.safetyReasons.push("⚠️ No Jupiter route yet (new token)");
+              token.safetyReasons.push("✅ Tradeable via Pump.fun");
+            } else if (token.liquidity && token.liquidity > 0) {
+              token.canBuy = true;
+              token.isTradeable = true;
+              token.safetyReasons.push("✅ Tradeable via Raydium (Jupiter indexing in progress)");
             } else {
               token.canBuy = false;
               token.isTradeable = false;
-              token.safetyReasons.push("❌ No Jupiter route");
+              token.safetyReasons.push("❌ No liquidity pool found");
             }
           }
         } else {
           // All endpoints failed - likely infrastructure issue
-          // For Pump.fun graduated tokens or tokens with liquidity, allow trading
-          if (token.liquidity && token.liquidity > 1000) {
+          // For Pump.fun tokens or tokens with liquidity, allow direct trading via Raydium/Pump.fun
+          if (token.isPumpFun && token.liquidity && token.liquidity > 0) {
             token.canBuy = true;
             token.isTradeable = true;
-            token.safetyReasons.push("⚠️ Jupiter unavailable (has liquidity)");
+            token.safetyReasons.push("✅ Tradeable via Pump.fun (Jupiter not required)");
+          } else if (token.liquidity && token.liquidity > 500) {
+            token.canBuy = true;
+            token.isTradeable = true;
+            token.safetyReasons.push("✅ Tradeable via Raydium (new token, Jupiter pending)");
+          } else if (token.liquidity && token.liquidity > 0) {
+            token.canBuy = true;
+            token.isTradeable = true;
+            token.safetyReasons.push("⚠️ Low liquidity - trade with caution");
           } else {
             // Keep defaults but warn user
-            token.safetyReasons.push("⚠️ Jupiter check skipped (service unavailable)");
+            token.safetyReasons.push("⚠️ No liquidity detected");
           }
         }
       } catch (e: any) {
