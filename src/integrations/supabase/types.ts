@@ -14,16 +14,276 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      admin_settings: {
+        Row: {
+          created_at: string
+          id: string
+          setting_key: string
+          setting_value: Json
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          setting_key: string
+          setting_value?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          setting_key?: string
+          setting_value?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          created_at: string
+          id: string
+          message: string
+          read: boolean | null
+          title: string
+          type: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message: string
+          read?: boolean | null
+          title: string
+          type?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string
+          read?: boolean | null
+          title?: string
+          type?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      positions: {
+        Row: {
+          amount: number
+          created_at: string
+          current_price: number | null
+          entry_price: number
+          id: string
+          pnl_percentage: number | null
+          status: string | null
+          token_address: string
+          token_name: string | null
+          token_symbol: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          current_price?: number | null
+          entry_price: number
+          id?: string
+          pnl_percentage?: number | null
+          status?: string | null
+          token_address: string
+          token_name?: string | null
+          token_symbol?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          current_price?: number | null
+          entry_price?: number
+          id?: string
+          pnl_percentage?: number | null
+          status?: string | null
+          token_address?: string
+          token_name?: string | null
+          token_symbol?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+          is_suspended: boolean | null
+          suspension_reason: string | null
+          two_factor_enabled: boolean | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          is_suspended?: boolean | null
+          suspension_reason?: string | null
+          two_factor_enabled?: boolean | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          is_suspended?: boolean | null
+          suspension_reason?: string | null
+          two_factor_enabled?: boolean | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      sniper_settings: {
+        Row: {
+          auto_buy_enabled: boolean | null
+          created_at: string
+          gas_priority: string | null
+          id: string
+          max_buy_amount: number | null
+          slippage_tolerance: number | null
+          stop_loss_enabled: boolean | null
+          stop_loss_percentage: number | null
+          take_profit_enabled: boolean | null
+          take_profit_percentage: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auto_buy_enabled?: boolean | null
+          created_at?: string
+          gas_priority?: string | null
+          id?: string
+          max_buy_amount?: number | null
+          slippage_tolerance?: number | null
+          stop_loss_enabled?: boolean | null
+          stop_loss_percentage?: number | null
+          take_profit_enabled?: boolean | null
+          take_profit_percentage?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auto_buy_enabled?: boolean | null
+          created_at?: string
+          gas_priority?: string | null
+          id?: string
+          max_buy_amount?: number | null
+          slippage_tolerance?: number | null
+          stop_loss_enabled?: boolean | null
+          stop_loss_percentage?: number | null
+          take_profit_enabled?: boolean | null
+          take_profit_percentage?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trade_history: {
+        Row: {
+          amount: number
+          created_at: string
+          id: string
+          price_sol: number | null
+          price_usd: number | null
+          status: string | null
+          token_address: string
+          token_name: string | null
+          token_symbol: string | null
+          trade_type: string
+          tx_hash: string | null
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          id?: string
+          price_sol?: number | null
+          price_usd?: number | null
+          status?: string | null
+          token_address: string
+          token_name?: string | null
+          token_symbol?: string | null
+          trade_type: string
+          tx_hash?: string | null
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          id?: string
+          price_sol?: number | null
+          price_usd?: number | null
+          status?: string | null
+          token_address?: string
+          token_name?: string | null
+          token_symbol?: string | null
+          trade_type?: string
+          tx_hash?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +410,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const
