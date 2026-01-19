@@ -78,17 +78,25 @@ export default function PaidApiAlert({ isBotActive, isDemo }: PaidApiAlertProps)
     try {
       const { data, error } = await supabase
         .from('api_configurations')
-        .select('api_type, status, is_enabled, api_key_encrypted');
+        .select('api_type, status, is_enabled, api_key_encrypted, base_url');
 
       if (error) throw error;
 
       const statuses: Record<string, { configured: boolean; status: string; hasKey: boolean }> = {};
       
       for (const api of data || []) {
+        // For RPC providers, the API key is embedded in the base_url (e.g., Helius, QuickNode)
+        const hasEmbeddedKey = api.api_type === 'rpc_provider' && 
+          api.base_url && 
+          (api.base_url.includes('api-key=') || 
+           api.base_url.includes('helius') || 
+           api.base_url.includes('quicknode') ||
+           api.base_url.includes('alchemy'));
+        
         statuses[api.api_type] = {
           configured: api.is_enabled === true,
           status: api.status || 'inactive',
-          hasKey: !!api.api_key_encrypted,
+          hasKey: !!api.api_key_encrypted || hasEmbeddedKey,
         };
       }
 
