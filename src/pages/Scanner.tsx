@@ -1,6 +1,6 @@
 import React, { forwardRef, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import TradingHeader from "@/components/trading/TradingHeader";
-import LiquidityBotPanel from "@/components/trading/LiquidityBotPanel";
+import BotControlPanel from "@/components/scanner/BotControlPanel";
 import SniperDecisionPanel from "@/components/trading/SniperDecisionPanel";
 import { TradeSignalPanel } from "@/components/trading/TradeSignalPanel";
 import LiquidityMonitor from "@/components/scanner/LiquidityMonitor";
@@ -981,11 +981,11 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             />
           </div>
 
-          {/* Main Content Grid - Mobile stacked, desktop side-by-side */}
-          <div className="grid gap-4 md:gap-6 lg:grid-cols-[1fr,380px] xl:grid-cols-[1fr,420px]">
-            {/* Left Column - Liquidity Monitor (wider on desktop) */}
-            <div className="space-y-4 md:space-y-6 order-2 lg:order-1">
-              {/* Liquidity Monitor */}
+          {/* Main Content Grid - Cleaner 2-column layout */}
+          <div className="grid gap-4 lg:grid-cols-[1fr,400px]">
+            {/* Left Column - Token Monitor (main focus) */}
+            <div className="space-y-4 order-2 lg:order-1">
+              {/* Liquidity Monitor - Primary content */}
               <LiquidityMonitor 
                 pools={tokens}
                 activeTrades={openPositions}
@@ -993,68 +993,6 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                 apiStatus={loading ? 'active' : 'waiting'}
                 onExitTrade={handleExitPosition}
               />
-            </div>
-
-            {/* Right Column - Bot Settings & Performance (shows first on mobile for quick access) */}
-            <div className="space-y-4 md:space-y-6 order-1 lg:order-2">
-              {/* Bot Preflight Check - shows blocking issues in live mode */}
-              <BotPreflightCheck
-                isBotActive={isBotActive}
-                isDemo={isDemo}
-                walletConnected={wallet.isConnected}
-                walletNetwork={wallet.network}
-                walletBalance={wallet.balance}
-                tradeAmount={settings?.trade_amount ?? null}
-                maxConcurrentTrades={settings?.max_concurrent_trades ?? null}
-                autoEntryEnabled={autoEntryEnabled}
-                openPositionsCount={openPositions.length}
-                onConnectWallet={connectPhantom}
-              />
-              
-              {/* Trade Signals Panel - Live mode only */}
-              {!isDemo && (
-                <TradeSignalPanel />
-              )}
-              
-              {/* Liquidity Bot Panel */}
-              <LiquidityBotPanel
-                settings={settings}
-                saving={saving}
-                onUpdateField={updateField}
-                onSave={handleSaveSettings}
-                isActive={isBotActive}
-                onToggleActive={handleToggleBotActiveWithConfirm}
-                autoEntryEnabled={autoEntryEnabled}
-                onAutoEntryChange={toggleAutoEntry}
-                autoExitEnabled={autoExitEnabled}
-                onAutoExitChange={toggleAutoExit}
-                isDemo={isDemo}
-                walletConnected={wallet.isConnected && wallet.network === 'solana'}
-                walletAddress={wallet.address}
-                walletBalance={wallet.balance}
-              />
-
-              {/* Performance Panel - use demo stats in demo mode */}
-              <PerformancePanel
-                winRate={isDemo ? demoWinRate : winRate}
-                totalPnL={isDemo ? demoTotalPnLPercent : totalPnLPercent}
-                avgPnL={isDemo ? demoAvgPnL : (totalPnLPercent / Math.max(closedPositions.length, 1))}
-                bestTrade={isDemo ? demoBestTrade : Math.max(...closedPositions.map(p => p.profit_loss_percent || 0), 0)}
-                worstTrade={isDemo ? demoWorstTrade : Math.min(...closedPositions.map(p => p.profit_loss_percent || 0), 0)}
-                totalTrades={isDemo ? demoTotalTrades : closedPositions.length}
-                wins={isDemo ? demoWins : closedPositions.filter(p => (p.profit_loss_percent || 0) > 0).length}
-                losses={isDemo ? demoLosses : closedPositions.filter(p => (p.profit_loss_percent || 0) <= 0).length}
-              />
-
-              {/* Sniper Decision Panel - Debug info for why tokens are approved/rejected */}
-              {!isDemo && (
-                <SniperDecisionPanel
-                  decisions={sniperResult?.decisions || []}
-                  loading={sniperLoading}
-                  isDemo={isDemo}
-                  botActive={isBotActive}
-                />
-              )}
 
               {/* Active Positions */}
               <ActivePositionsPanel 
@@ -1079,15 +1017,75 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
               />
 
               {/* Bot Activity Log */}
-              <BotActivityLog maxEntries={50} />
+              <BotActivityLog maxEntries={30} />
+            </div>
 
-              {/* Paid API Alert - Shows when bot is active in live mode */}
-              <PaidApiAlert isBotActive={isBotActive} isDemo={isDemo} />
+            {/* Right Column - Bot Controls & Stats */}
+            <div className="space-y-4 order-1 lg:order-2">
+              {/* Bot Preflight Check */}
+              <BotPreflightCheck
+                isBotActive={isBotActive}
+                isDemo={isDemo}
+                walletConnected={wallet.isConnected}
+                walletNetwork={wallet.network}
+                walletBalance={wallet.balance}
+                tradeAmount={settings?.trade_amount ?? null}
+                maxConcurrentTrades={settings?.max_concurrent_trades ?? null}
+                autoEntryEnabled={autoEntryEnabled}
+                openPositionsCount={openPositions.length}
+                onConnectWallet={connectPhantom}
+              />
+              
+              {/* Bot Control Panel - All settings in one place */}
+              <BotControlPanel
+                settings={settings}
+                saving={saving}
+                onUpdateField={updateField}
+                onSave={handleSaveSettings}
+                isActive={isBotActive}
+                onToggleActive={handleToggleBotActiveWithConfirm}
+                autoEntryEnabled={autoEntryEnabled}
+                onAutoEntryChange={toggleAutoEntry}
+                autoExitEnabled={autoExitEnabled}
+                onAutoExitChange={toggleAutoExit}
+                isDemo={isDemo}
+                walletConnected={wallet.isConnected && wallet.network === 'solana'}
+                walletAddress={wallet.address}
+                walletBalance={wallet.balance}
+              />
 
-              {/* API Health Widget */}
+              {/* Performance Panel */}
+              <PerformancePanel
+                winRate={isDemo ? demoWinRate : winRate}
+                totalPnL={isDemo ? demoTotalPnLPercent : totalPnLPercent}
+                avgPnL={isDemo ? demoAvgPnL : (totalPnLPercent / Math.max(closedPositions.length, 1))}
+                bestTrade={isDemo ? demoBestTrade : Math.max(...closedPositions.map(p => p.profit_loss_percent || 0), 0)}
+                worstTrade={isDemo ? demoWorstTrade : Math.min(...closedPositions.map(p => p.profit_loss_percent || 0), 0)}
+                totalTrades={isDemo ? demoTotalTrades : closedPositions.length}
+                wins={isDemo ? demoWins : closedPositions.filter(p => (p.profit_loss_percent || 0) > 0).length}
+                losses={isDemo ? demoLosses : closedPositions.filter(p => (p.profit_loss_percent || 0) <= 0).length}
+              />
+
+              {/* Trade Signals - Live mode only */}
+              {!isDemo && <TradeSignalPanel />}
+
+              {/* Sniper Decisions - Live mode debug */}
+              {!isDemo && (
+                <SniperDecisionPanel
+                  decisions={sniperResult?.decisions || []}
+                  loading={sniperLoading}
+                  isDemo={isDemo}
+                  botActive={isBotActive}
+                />
+              )}
+
+              {/* API Health */}
               <ApiHealthWidget isDemo={isDemo} />
 
-              {/* Recovery Controls - show only in live mode */}
+              {/* Paid API Alert */}
+              <PaidApiAlert isBotActive={isBotActive} isDemo={isDemo} />
+
+              {/* Recovery Controls - Live mode only */}
               {!isDemo && (
                 <RecoveryControls
                   onForceScan={handleForceScan}
