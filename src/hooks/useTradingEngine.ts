@@ -1,12 +1,15 @@
 /**
  * React Hook for the 3-Stage Trading Engine
  * Wraps the trading engine with state management and wallet integration
+ * 
+ * CRITICAL: This hook now persists positions to the database after successful snipes
  */
 
 import { useState, useCallback, useRef } from 'react';
 import { VersionedTransaction } from '@solana/web3.js';
 import { useToast } from '@/hooks/use-toast';
 import { useAppMode } from '@/contexts/AppModeContext';
+import { supabase } from '@/integrations/supabase/client';
 
 import {
   runTradingFlow,
@@ -228,6 +231,47 @@ export function useTradingEngine() {
         onEvent: handleEvent,
         abortSignal: abortControllerRef.current.signal,
       });
+
+      // CRITICAL: Persist position to database after successful snipe
+      if (result.status === 'SUCCESS' && result.position) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const position = result.position;
+            const entryValue = position.solSpent;
+            
+            const { data: savedPosition, error: dbError } = await supabase
+              .from('positions')
+              .insert({
+                user_id: user.id,
+                token_address: position.tokenAddress,
+                token_symbol: position.tokenSymbol,
+                token_name: position.tokenSymbol, // Use symbol as fallback
+                chain: 'solana',
+                entry_price: position.entryPrice,
+                current_price: position.entryPrice,
+                amount: position.tokenAmount,
+                entry_value: entryValue,
+                current_value: entryValue,
+                profit_take_percent: config?.maxRiskScore ? 100 : 50, // Default TP
+                stop_loss_percent: 20, // Default SL
+                status: 'open',
+              })
+              .select()
+              .single();
+
+            if (dbError) {
+              console.error('[TradingEngine] Failed to persist position:', dbError);
+              // Don't fail the trade, just log
+            } else {
+              console.log('[TradingEngine] Position saved to database:', savedPosition?.id);
+            }
+          }
+        } catch (persistError) {
+          console.error('[TradingEngine] Position persistence error:', persistError);
+          // Trade succeeded, don't fail on DB error
+        }
+      }
 
       setState(prev => ({
         ...prev,
