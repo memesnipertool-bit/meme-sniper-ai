@@ -269,8 +269,8 @@ serve(async (req) => {
       return null;
     };
 
-    // STRICT RAYDIUM-ONLY TRADABILITY CHECK
-    // Tokens must have a live Raydium pool with swap capability
+    // TRADABILITY CHECK WITH FALLBACK
+    // Try Raydium first, fall back to Jupiter if Raydium API fails
     const checkTradability = async (token: TokenData): Promise<TokenData> => {
       // REJECT: Pump.fun bonding curve tokens - not tradable via Raydium
       if (token.isPumpFun) {
@@ -282,42 +282,65 @@ serve(async (req) => {
       }
 
       try {
-        // Step 1: Check if Raydium has a valid pool for this token
+        // Try to verify tradability - use multiple methods with fallbacks
+        let verified = false;
+        let verifyMethod = '';
+        
+        // Step 1: Try Raydium pool check first
         const raydiumCheck = await checkRaydiumPool(token.address, token.liquidity);
         
-        if (!raydiumCheck.hasPool) {
-          token.canBuy = false;
-          token.isTradeable = false;
-          token.safetyReasons.push(raydiumCheck.reason || "❌ No Raydium pool found");
-          return token;
+        if (raydiumCheck.hasPool) {
+          verified = true;
+          verifyMethod = raydiumCheck.poolType || 'Raydium';
+        } else if (raydiumCheck.reason?.includes('API error')) {
+          // Raydium API failed - try Jupiter as primary fallback
+          console.log(`[Tradability] Raydium API failed for ${token.symbol}, trying Jupiter...`);
+          const jupiterResult = await simulateJupiterSwap(token.address);
+          if (jupiterResult.success) {
+            verified = true;
+            verifyMethod = 'Jupiter (Raydium API unavailable)';
+          }
         }
         
-        // Step 2: Simulate a tiny swap to confirm tradability
-        const swapResult = await simulateRaydiumSwap(token.address);
-        
-        if (!swapResult.success) {
-          token.canBuy = false;
-          token.isTradeable = false;
-          token.safetyReasons.push(swapResult.reason || "❌ Swap simulation failed");
-          return token;
+        // Step 2: If still not verified, try swap simulation
+        if (!verified) {
+          const swapResult = await simulateRaydiumSwap(token.address);
+          if (swapResult.success) {
+            verified = true;
+            verifyMethod = 'Swap simulation passed';
+          } else {
+            // Final check: Does it have significant liquidity from source?
+            // If liquidity > 5000 USD and from reputable source, mark as potentially tradable
+            if (token.liquidity > 5000 && (token.source === 'Birdeye' || token.source === 'DexScreener')) {
+              verified = true;
+              verifyMethod = `High liquidity ($${token.liquidity.toFixed(0)}) - verify manually`;
+              token.safetyReasons.push("⚠️ Swap verification incomplete - trade with caution");
+            }
+          }
         }
         
-        // ALL CHECKS PASSED - Token is TRADABLE
-        token.canBuy = true;
-        token.isTradeable = true;
-        token.safetyReasons.push("✅ Raydium pool verified (swap simulation passed)");
-        
-        // Add pool info
-        if (raydiumCheck.poolType) {
-          token.safetyReasons.push(`✅ Pool: ${raydiumCheck.poolType}`);
+        if (verified) {
+          token.canBuy = true;
+          token.isTradeable = true;
+          token.safetyReasons.push(`✅ ${verifyMethod}`);
+        } else {
+          token.canBuy = false;
+          token.isTradeable = false;
+          token.safetyReasons.push(raydiumCheck.reason || "❌ Could not verify tradability");
         }
         
       } catch (e: any) {
         console.error('Tradability check error for', token.symbol, e);
-        // On error, mark as NOT tradable for safety
-        token.canBuy = false;
-        token.isTradeable = false;
-        token.safetyReasons.push("⚠️ Tradability check failed");
+        // On unexpected error, be lenient for high-liquidity tokens
+        if (token.liquidity > 10000) {
+          token.canBuy = true;
+          token.isTradeable = true;
+          token.safetyReasons.push("⚠️ Verification error - high liquidity, proceed with caution");
+        } else {
+          token.canBuy = false;
+          token.isTradeable = false;
+          token.safetyReasons.push("⚠️ Tradability check failed");
+        }
       }
       
       return token;
@@ -330,16 +353,31 @@ serve(async (req) => {
       poolType?: string;
     }> => {
       try {
-        const response = await fetch(
+        // Try multiple Raydium API endpoints with fallback
+        const endpoints = [
           `https://api-v3.raydium.io/pools/info/mint?mint1=${tokenAddress}&mint2=${SOL_MINT}&poolType=standard&pageSize=5`,
-          {
-            signal: AbortSignal.timeout(8000),
-            headers: { 'Accept': 'application/json' },
-          }
-        );
+          `https://api-v3.raydium.io/pools/info/mint?mint1=${tokenAddress}&poolType=all&pageSize=5`,
+        ];
         
-        if (!response.ok) {
-          return { hasPool: false, reason: `❌ Raydium API error: ${response.status}` };
+        let response: Response | null = null;
+        let lastError = '';
+        
+        for (const endpoint of endpoints) {
+          try {
+            response = await fetch(endpoint, {
+              signal: AbortSignal.timeout(6000),
+              headers: { 'Accept': 'application/json' },
+            });
+            
+            if (response.ok) break;
+            lastError = `HTTP ${response.status}`;
+          } catch (e: any) {
+            lastError = e.message || 'Network error';
+          }
+        }
+        
+        if (!response || !response.ok) {
+          return { hasPool: false, reason: `❌ Raydium API error: ${lastError}` };
         }
         
         const data = await response.json();
@@ -351,16 +389,12 @@ serve(async (req) => {
         // Find best pool
         const pools = data.data.data;
         const validPool = pools.find((p: any) => {
-          // Must have SOL or USDC as one of the mints
           const mintA = p.mintA?.address || p.mintA;
           const mintB = p.mintB?.address || p.mintB;
           const hasSolOrUsdc = mintA === SOL_MINT || mintB === SOL_MINT ||
                                mintA === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" ||
                                mintB === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-          
-          // Must have reserves
           const hasReserves = (p.mintAmountA || 0) > 0 && (p.mintAmountB || 0) > 0;
-          
           return hasSolOrUsdc && hasReserves;
         });
         
@@ -368,11 +402,9 @@ serve(async (req) => {
           return { hasPool: false, reason: "❌ No valid SOL/USDC pool found" };
         }
         
-        // Check minimum liquidity (20 SOL default)
-        const minLiquidityThreshold = 20;
+        // Calculate pool liquidity - use lower threshold (5 SOL for new tokens)
+        const minLiquidityThreshold = 5;
         let poolLiquidity = 0;
-        
-        // Calculate pool liquidity in SOL
         const mintA = validPool.mintA?.address || validPool.mintA;
         if (mintA === SOL_MINT) {
           poolLiquidity = validPool.mintAmountA || 0;
@@ -394,7 +426,7 @@ serve(async (req) => {
         
       } catch (e: any) {
         console.error('Raydium pool check error:', e);
-        return { hasPool: false, reason: "❌ Raydium check failed" };
+        return { hasPool: false, reason: `❌ Raydium API error: ${e.message || 'unknown'}` };
       }
     };
     
@@ -605,48 +637,74 @@ serve(async (req) => {
       }
     };
 
-    // DexScreener fetch function
+    // DexScreener fetch function - FIXED to fetch Solana new pairs properly
     const fetchDexScreener = async () => {
       const dexScreenerConfig = getApiConfigLocal('dexscreener');
       if (!dexScreenerConfig) return;
 
-      const endpoint = `${dexScreenerConfig.base_url}/latest/dex/search?q=solana`;
+      // Use the new pairs endpoint for Solana specifically
+      const endpoints = [
+        `${dexScreenerConfig.base_url}/latest/dex/pairs/solana`, // Solana pairs directly
+        `https://api.dexscreener.com/token-profiles/latest/v1`, // New token profiles
+      ];
+      
       const startTime = Date.now();
       try {
-        console.log('Fetching from DexScreener...');
-        const response = await fetch(endpoint, {
-          signal: AbortSignal.timeout(10000),
-        });
+        console.log('Fetching from DexScreener (Solana pairs)...');
+        
+        // Try each endpoint
+        let pairs: any[] = [];
+        
+        for (const endpoint of endpoints) {
+          try {
+            const response = await fetch(endpoint, {
+              signal: AbortSignal.timeout(8000),
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              
+              if (Array.isArray(data)) {
+                // Filter for Solana only
+                pairs = data.filter((p: any) => p.chainId === 'solana' || p.chain === 'solana').slice(0, 20);
+              } else if (data.pairs && Array.isArray(data.pairs)) {
+                pairs = data.pairs.filter((p: any) => p.chainId === 'solana').slice(0, 20);
+              }
+              
+              if (pairs.length > 0) {
+                console.log(`DexScreener: Found ${pairs.length} Solana pairs from ${endpoint}`);
+                break;
+              }
+            }
+          } catch (e) {
+            console.log(`DexScreener endpoint ${endpoint} failed, trying next...`);
+          }
+        }
+        
         const responseTime = Date.now() - startTime;
         
-        if (response.ok) {
-          await logApiHealth('dexscreener', endpoint, responseTime, response.status, true);
-          const data = await response.json();
+        if (pairs.length > 0) {
+          await logApiHealth('dexscreener', endpoints[0], responseTime, 200, true);
           
-          let pairs: any[] = [];
-          if (Array.isArray(data)) {
-            pairs = data;
-          } else if (data && Array.isArray(data.pairs)) {
-            pairs = data.pairs;
-          } else if (data && typeof data === 'object') {
-            const arrayKey = Object.keys(data).find(key => Array.isArray(data[key]));
-            if (arrayKey) {
-              pairs = data[arrayKey];
-            }
-          }
-          
-          const pairsToProcess = pairs.slice(0, 20);
-          for (const pair of pairsToProcess) {
+          for (const pair of pairs) {
             if (!pair) continue;
+            
+            // Only process Solana chain
+            if (pair.chainId !== 'solana' && pair.chain !== 'solana') continue;
+            
             const liquidity = parseFloat(pair.liquidity?.usd || pair.liquidity || 0);
+            const address = pair.baseToken?.address || pair.address || '';
+            
+            // Validate Solana address format
+            if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) continue;
             
             if (liquidity >= minLiquidity) {
               tokens.push({
                 id: `dex-${pair.pairAddress || pair.address || Math.random().toString(36)}`,
-                address: pair.baseToken?.address || pair.address || '',
+                address,
                 name: pair.baseToken?.name || pair.name || 'Unknown',
                 symbol: pair.baseToken?.symbol || pair.symbol || '???',
-                chain: pair.chainId || 'solana',
+                chain: 'solana',
                 liquidity,
                 liquidityLocked: false,
                 lockPercentage: null,
@@ -666,34 +724,27 @@ serve(async (req) => {
                 canSell: true,
                 freezeAuthority: null,
                 mintAuthority: null,
-                isPumpFun: false,
+                isPumpFun: pair.dexId === 'pumpfun',
                 safetyReasons: [],
               });
             }
           }
+          console.log(`DexScreener: Added ${tokens.filter(t => t.source === 'DexScreener').length} Solana tokens`);
         } else {
-          const errorMsg = `HTTP ${response.status}: ${response.statusText}`;
-          await logApiHealth('dexscreener', endpoint, responseTime, response.status, false, errorMsg);
-          errors.push(`DexScreener: ${errorMsg}`);
-          apiErrors.push({
-            apiName: dexScreenerConfig.api_name,
-            apiType: 'dexscreener',
-            errorMessage: errorMsg,
-            endpoint,
-            timestamp: new Date().toISOString(),
-          });
+          console.log('DexScreener: No Solana pairs found');
+          await logApiHealth('dexscreener', endpoints[0], responseTime, 200, false, 'No Solana pairs');
         }
       } catch (e: any) {
         const responseTime = Date.now() - startTime;
         const errorMsg = e.name === 'TimeoutError' ? 'Request timeout' : (e.message || 'Network error');
-        await logApiHealth('dexscreener', endpoint, responseTime, 0, false, errorMsg);
+        await logApiHealth('dexscreener', endpoints[0], responseTime, 0, false, errorMsg);
         console.error('DexScreener error:', e);
         errors.push(`DexScreener: ${errorMsg}`);
         apiErrors.push({
-          apiName: dexScreenerConfig.api_name,
+          apiName: dexScreenerConfig?.api_name || 'DexScreener',
           apiType: 'dexscreener',
           errorMessage: errorMsg,
-          endpoint,
+          endpoint: endpoints[0],
           timestamp: new Date().toISOString(),
         });
       }
