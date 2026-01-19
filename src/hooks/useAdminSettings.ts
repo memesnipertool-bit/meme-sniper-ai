@@ -176,9 +176,8 @@ export function useAdminSettings() {
         .from('admin_settings')
         .upsert({
           setting_key: key,
-          setting_value: value as any,
+          setting_value: value as unknown,
           updated_by: user.id,
-          category: key.split('_')[0],
         }, {
           onConflict: 'setting_key',
         });
