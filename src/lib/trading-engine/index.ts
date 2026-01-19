@@ -69,11 +69,13 @@ export {
   PROGRAM_IDS,
 } from './config';
 
-// Stage 1: Liquidity Detection
+// Stage 1: Liquidity Detection (Raydium-only)
 export {
   detectLiquidity,
   monitorLiquidity,
+  detectTradablePool,
 } from './liquidity-detector';
+export type { TradablePoolResult } from './liquidity-detector';
 
 // Stage 2: Raydium Sniping
 export {

@@ -16,7 +16,10 @@ import { API_ENDPOINTS, SOL_MINT } from './config';
 
 /**
  * Execute a Raydium snipe transaction
- * Swaps SOL for the target token using Raydium AMM
+ * Swaps SOL for the target token using Raydium AMM ONLY
+ * 
+ * IMPORTANT: This function now ONLY supports Raydium pools.
+ * Pump.fun bonding curve tokens are rejected at Stage 1.
  */
 export async function executeRaydiumSnipe(
   params: RaydiumSnipeParams,
@@ -31,26 +34,26 @@ export async function executeRaydiumSnipe(
   
   onEvent?.({ type: 'SNIPE_STARTED', data: { tokenAddress: liquidityInfo.tokenAddress } });
   
+  // STRICT: Only allow Raydium pools
+  if (liquidityInfo.poolType !== 'raydium') {
+    console.log(`[RaydiumSniper] Rejected non-Raydium pool type: ${liquidityInfo.poolType}`);
+    return {
+      status: 'FAILED',
+      txHash: null,
+      entryPrice: null,
+      tokenAmount: null,
+      solSpent: null,
+      attempts: 0,
+      error: `Only Raydium pools are supported. Got: ${liquidityInfo.poolType}`,
+      snipedAt: startTime,
+    };
+  }
+  
   while (attempts < config.maxRetries) {
     attempts++;
     
     try {
-      // If it's a Pump.fun token, use Pump.fun API
-      if (liquidityInfo.poolType === 'pump_fun') {
-        return await executePumpFunBuy(
-          liquidityInfo,
-          buyAmount,
-          slippage,
-          priorityFee,
-          walletAddress,
-          signTransaction,
-          startTime,
-          attempts,
-          onEvent
-        );
-      }
-      
-      // Otherwise use Raydium
+      // Execute Raydium swap
       return await executeRaydiumSwap(
         liquidityInfo,
         buyAmount,
@@ -98,72 +101,9 @@ export async function executeRaydiumSnipe(
   };
 }
 
-/**
- * Execute buy via Pump.fun bonding curve
- */
-async function executePumpFunBuy(
-  liquidityInfo: LiquidityInfo,
-  buyAmount: number,
-  slippage: number,
-  priorityFee: number,
-  walletAddress: string,
-  signTransaction: (tx: UnsignedTransaction) => Promise<{ signature: string; error?: string }>,
-  startTime: number,
-  attempts: number,
-  onEvent?: TradingEventCallback
-): Promise<RaydiumSnipeResult> {
-  // Call our edge function to build the Pump.fun transaction
-  const { data, error } = await supabase.functions.invoke('trade-execution', {
-    body: {
-      action: 'buy',
-      tokenAddress: liquidityInfo.tokenAddress,
-      amount: buyAmount,
-      slippage,
-      priorityFee,
-      walletAddress,
-      dex: 'pump_fun',
-      buildOnly: true, // Return unsigned transaction
-    },
-  });
-  
-  if (error || !data?.success) {
-    throw new Error(data?.error || error?.message || 'Failed to build Pump.fun transaction');
-  }
-  
-  if (!data.transaction) {
-    throw new Error('No transaction returned from Pump.fun');
-  }
-  
-  // Sign the transaction externally
-  const signResult = await signTransaction({
-    serializedTransaction: data.transaction,
-    blockhash: data.blockhash,
-    lastValidBlockHeight: data.lastValidBlockHeight,
-    feePayer: walletAddress,
-  });
-  
-  if (signResult.error) {
-    throw new Error(`Transaction signing failed: ${signResult.error}`);
-  }
-  
-  // Calculate entry price
-  const tokenAmount = data.expectedOutput || 0;
-  const entryPrice = tokenAmount > 0 ? buyAmount / tokenAmount : 0;
-  
-  const result: RaydiumSnipeResult = {
-    status: 'SNIPED',
-    txHash: signResult.signature,
-    entryPrice,
-    tokenAmount,
-    solSpent: buyAmount,
-    attempts,
-    snipedAt: startTime,
-  };
-  
-  onEvent?.({ type: 'SNIPE_SUCCESS', data: result });
-  
-  return result;
-}
+// NOTE: executePumpFunBuy has been REMOVED
+// All trading now goes through Raydium only
+// Pump.fun bonding curve tokens are rejected at Stage 1
 
 /**
  * Execute swap via Raydium AMM
