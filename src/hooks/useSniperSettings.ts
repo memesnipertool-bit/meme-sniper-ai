@@ -17,6 +17,7 @@ export interface SniperSettings {
   category_filters: string[];
   token_blacklist: string[];
   token_whitelist: string[];
+  target_buyer_positions: number[];
 }
 
 const defaultSettings: Omit<SniperSettings, 'user_id'> = {
@@ -29,6 +30,7 @@ const defaultSettings: Omit<SniperSettings, 'user_id'> = {
   category_filters: ['animals', 'parody', 'trend', 'utility'],
   token_blacklist: [],
   token_whitelist: [],
+  target_buyer_positions: [2, 3],
 };
 
 export function useSniperSettings() {
@@ -68,6 +70,7 @@ export function useSniperSettings() {
           category_filters: (typedData.category_filters as string[]) || [],
           token_blacklist: (typedData.token_blacklist as string[]) || [],
           token_whitelist: (typedData.token_whitelist as string[]) || [],
+          target_buyer_positions: (typedData.target_buyer_positions as number[]) || [2, 3],
         });
       } else {
         // Return default settings for new users
@@ -120,6 +123,7 @@ export function useSniperSettings() {
         category_filters: (typedData.category_filters as string[]) || [],
         token_blacklist: (typedData.token_blacklist as string[]) || [],
         token_whitelist: (typedData.token_whitelist as string[]) || [],
+        target_buyer_positions: (typedData.target_buyer_positions as number[]) || [2, 3],
       });
 
       toast({ title: 'Settings saved successfully' });

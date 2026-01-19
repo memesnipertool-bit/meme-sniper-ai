@@ -11,15 +11,13 @@ import { toast } from "sonner";
 import {
   Settings,
   Wallet,
-  Zap,
-  Save,
-  Copy,
-  Users,
-  TrendingUp,
   Ban,
+  Star,
   X,
   Plus,
-  AlertTriangle,
+  Save,
+  Loader2,
+  Shield,
 } from "lucide-react";
 
 // Validate Solana address format
@@ -32,33 +30,9 @@ const isValidSolanaAddress = (address: string): boolean => {
 
 const UserSettings = forwardRef<HTMLDivElement, object>(function UserSettings(_props, ref) {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState("sniping");
   const [newBlacklistToken, setNewBlacklistToken] = useState("");
+  const [newWhitelistToken, setNewWhitelistToken] = useState("");
   const { settings, loading: settingsLoading, saving, saveSettings, updateField } = useSniperSettings();
-
-  const [snipingSettings, setSnipingSettings] = useState({
-    maxSlippage: "5",
-    defaultBuyAmount: "0.1",
-    autoBuy: false,
-    autoSell: false,
-    stopLoss: "20",
-    takeProfit: "100",
-  });
-
-  const [copyTradeSettings, setCopyTradeSettings] = useState({
-    enabled: false,
-    walletAddress: "",
-    maxPerTrade: "0.5",
-    copyPercentage: "50",
-  });
-
-  const tabs = [
-    { id: "sniping", label: "Sniping Settings", icon: Zap },
-    { id: "copytrade", label: "Copy Trading", icon: Users },
-    { id: "blacklist", label: "Token Blacklist", icon: Ban },
-    { id: "wallet", label: "Wallet", icon: Wallet },
-  ];
-
   const { wallet, connectPhantom, disconnect } = useWallet();
 
   const handleConnectWallet = async () => {
@@ -69,8 +43,77 @@ const UserSettings = forwardRef<HTMLDivElement, object>(function UserSettings(_p
     }
   };
 
+  const addToBlacklist = () => {
+    if (!settings) return;
+    const trimmed = newBlacklistToken.trim();
+    if (!isValidSolanaAddress(trimmed)) {
+      toast.error("Invalid Solana address format");
+      return;
+    }
+    if (settings.token_blacklist.includes(trimmed)) {
+      toast.error("Token already in blacklist");
+      return;
+    }
+    updateField('token_blacklist', [...settings.token_blacklist, trimmed]);
+    setNewBlacklistToken("");
+    toast.success("Token added to blacklist");
+  };
+
+  const removeFromBlacklist = (token: string) => {
+    if (!settings) return;
+    updateField('token_blacklist', settings.token_blacklist.filter(t => t !== token));
+    toast.success("Token removed from blacklist");
+  };
+
+  const addToWhitelist = () => {
+    if (!settings) return;
+    const trimmed = newWhitelistToken.trim();
+    if (!isValidSolanaAddress(trimmed)) {
+      toast.error("Invalid Solana address format");
+      return;
+    }
+    if (settings.token_whitelist.includes(trimmed)) {
+      toast.error("Token already in whitelist");
+      return;
+    }
+    updateField('token_whitelist', [...settings.token_whitelist, trimmed]);
+    setNewWhitelistToken("");
+    toast.success("Token added to whitelist");
+  };
+
+  const removeFromWhitelist = (token: string) => {
+    if (!settings) return;
+    updateField('token_whitelist', settings.token_whitelist.filter(t => t !== token));
+    toast.success("Token removed from whitelist");
+  };
+
+  const handleSave = async () => {
+    if (!settings) return;
+    try {
+      await saveSettings(settings);
+    } catch {
+      // Error handled in hook
+    }
+  };
+
+  if (settingsLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <TradingHeader
+          walletConnected={wallet.isConnected}
+          walletAddress={wallet.address || undefined}
+          network={wallet.network}
+          onConnectWallet={handleConnectWallet}
+        />
+        <div className="flex items-center justify-center pt-32">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" ref={ref}>
       <TradingHeader
         walletConnected={wallet.isConnected}
         walletAddress={wallet.address || undefined}
@@ -79,439 +122,201 @@ const UserSettings = forwardRef<HTMLDivElement, object>(function UserSettings(_p
       />
 
       <main className="relative pt-20 md:pt-24 pb-8">
-        <div className="container mx-auto px-4">
+        <div className="container mx-auto px-4 max-w-4xl">
           {/* Page Header */}
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-2.5 rounded-lg bg-primary/10">
-              <Settings className="w-6 h-6 text-primary" />
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-lg bg-primary/10">
+                <Settings className="w-6 h-6 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold text-foreground">
+                  Token Lists
+                </h1>
+                <p className="text-muted-foreground text-sm">
+                  Manage your token blacklist and whitelist
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold text-foreground">
-                My Settings
-              </h1>
-              <p className="text-muted-foreground">
-                Manage your sniping, copy-trading, and wallet settings
-              </p>
+            <Button 
+              onClick={handleSave} 
+              disabled={saving} 
+              variant="glow"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+              Save
+            </Button>
+          </div>
+
+          {/* Wallet Status */}
+          <div className="glass rounded-xl p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  wallet.isConnected ? 'bg-success/20' : 'bg-warning/20'
+                }`}>
+                  <Wallet className={`w-5 h-5 ${wallet.isConnected ? 'text-success' : 'text-warning'}`} />
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">
+                    {wallet.isConnected ? 'Wallet Connected' : 'No Wallet Connected'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {wallet.isConnected 
+                      ? `${wallet.address?.slice(0, 6)}...${wallet.address?.slice(-4)}`
+                      : 'Connect wallet for live trading'}
+                  </p>
+                </div>
+              </div>
+              <Button 
+                variant={wallet.isConnected ? "outline" : "default"}
+                onClick={handleConnectWallet}
+              >
+                {wallet.isConnected ? 'Disconnect' : 'Connect Wallet'}
+              </Button>
             </div>
           </div>
 
-          <div className="grid lg:grid-cols-4 gap-6">
-            {/* Sidebar Tabs */}
-            <div className="lg:col-span-1">
-              <div className="glass rounded-xl p-2">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all ${
-                      activeTab === tab.id
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-                    }`}
-                  >
-                    <tab.icon className="w-5 h-5" />
-                    <span className="font-medium">{tab.label}</span>
-                  </button>
-                ))}
+          {/* Token Lists Grid */}
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Blacklist */}
+            <div className="glass rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <Shield className="w-5 h-5 text-destructive" />
+                <h2 className="text-lg font-semibold text-foreground">Blacklist</h2>
               </div>
-            </div>
+              <p className="text-sm text-muted-foreground mb-4">
+                Tokens to never buy - bot will skip these during sniping
+              </p>
 
-            {/* Content Area */}
-            <div className="lg:col-span-3">
-              {/* Sniping Settings Tab */}
-              {activeTab === "sniping" && (
-                <div className="space-y-4 animate-fade-in">
-                  <div className="glass rounded-xl p-5">
-                    <h2 className="text-lg font-semibold text-foreground mb-2">
-                      Sniping Settings
-                    </h2>
-                    <p className="text-sm text-muted-foreground mb-6">
-                      Configure your personal trading parameters for token sniping.
-                    </p>
+              <div className="flex gap-2 mb-4">
+                <Input
+                  value={newBlacklistToken}
+                  onChange={(e) => setNewBlacklistToken(e.target.value)}
+                  placeholder="Enter token address..."
+                  className="flex-1 font-mono text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && addToBlacklist()}
+                />
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  onClick={addToBlacklist}
+                >
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
 
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-sm text-muted-foreground mb-2 block">
-                          Max Slippage (%)
-                        </label>
-                        <input
-                          type="number"
-                          value={snipingSettings.maxSlippage}
-                          onChange={(e) =>
-                            setSnipingSettings({
-                              ...snipingSettings,
-                              maxSlippage: e.target.value,
-                            })
-                          }
-                          className="w-full h-11 px-4 bg-secondary/50 border border-border rounded-lg text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm text-muted-foreground mb-2 block">
-                          Default Buy Amount (SOL)
-                        </label>
-                        <input
-                          type="number"
-                          value={snipingSettings.defaultBuyAmount}
-                          onChange={(e) =>
-                            setSnipingSettings({
-                              ...snipingSettings,
-                              defaultBuyAmount: e.target.value,
-                            })
-                          }
-                          className="w-full h-11 px-4 bg-secondary/50 border border-border rounded-lg text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm text-muted-foreground mb-2 block">
-                          Stop Loss (%)
-                        </label>
-                        <input
-                          type="number"
-                          value={snipingSettings.stopLoss}
-                          onChange={(e) =>
-                            setSnipingSettings({
-                              ...snipingSettings,
-                              stopLoss: e.target.value,
-                            })
-                          }
-                          className="w-full h-11 px-4 bg-secondary/50 border border-border rounded-lg text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-sm text-muted-foreground mb-2 block">
-                          Take Profit (%)
-                        </label>
-                        <input
-                          type="number"
-                          value={snipingSettings.takeProfit}
-                          onChange={(e) =>
-                            setSnipingSettings({
-                              ...snipingSettings,
-                              takeProfit: e.target.value,
-                            })
-                          }
-                          className="w-full h-11 px-4 bg-secondary/50 border border-border rounded-lg text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-6 pt-6 border-t border-border">
-                      <h3 className="font-medium text-foreground mb-4">
-                        Automation
-                      </h3>
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
-                          <div>
-                            <p className="font-medium text-foreground">Auto-Buy</p>
-                            <p className="text-sm text-muted-foreground">
-                              Automatically buy tokens matching your criteria
-                            </p>
-                          </div>
-                          <button
-                            onClick={() =>
-                              setSnipingSettings({
-                                ...snipingSettings,
-                                autoBuy: !snipingSettings.autoBuy,
-                              })
-                            }
-                            className={`w-12 h-7 rounded-full relative transition-colors ${
-                              snipingSettings.autoBuy ? "bg-primary" : "bg-muted"
-                            }`}
-                          >
-                            <div
-                              className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
-                                snipingSettings.autoBuy
-                                  ? "translate-x-6"
-                                  : "translate-x-1"
-                              }`}
-                            />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
-                          <div>
-                            <p className="font-medium text-foreground">Auto-Sell</p>
-                            <p className="text-sm text-muted-foreground">
-                              Automatically sell at stop-loss or take-profit
-                            </p>
-                          </div>
-                          <button
-                            onClick={() =>
-                              setSnipingSettings({
-                                ...snipingSettings,
-                                autoSell: !snipingSettings.autoSell,
-                              })
-                            }
-                            className={`w-12 h-7 rounded-full relative transition-colors ${
-                              snipingSettings.autoSell ? "bg-primary" : "bg-muted"
-                            }`}
-                          >
-                            <div
-                              className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
-                                snipingSettings.autoSell
-                                  ? "translate-x-6"
-                                  : "translate-x-1"
-                              }`}
-                            />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button variant="glow">
-                      <Save className="w-4 h-4" />
-                      Save Sniping Settings
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Copy Trading Tab */}
-              {activeTab === "copytrade" && (
-                <div className="space-y-4 animate-fade-in">
-                  <div className="glass rounded-xl p-5">
-                    <h2 className="text-lg font-semibold text-foreground mb-2">
-                      Copy Trading
-                    </h2>
-                    <p className="text-sm text-muted-foreground mb-6">
-                      Follow successful traders and automatically copy their trades.
-                    </p>
-
-                    <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg mb-6">
-                      <div>
-                        <p className="font-medium text-foreground">Enable Copy Trading</p>
-                        <p className="text-sm text-muted-foreground">
-                          Automatically mirror trades from followed wallets
-                        </p>
-                      </div>
-                      <button
-                        onClick={() =>
-                          setCopyTradeSettings({
-                            ...copyTradeSettings,
-                            enabled: !copyTradeSettings.enabled,
-                          })
-                        }
-                        className={`w-12 h-7 rounded-full relative transition-colors ${
-                          copyTradeSettings.enabled ? "bg-primary" : "bg-muted"
-                        }`}
-                      >
-                        <div
-                          className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
-                            copyTradeSettings.enabled
-                              ? "translate-x-6"
-                              : "translate-x-1"
-                          }`}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-sm text-muted-foreground mb-2 block">
-                          Wallet Address to Follow
-                        </label>
-                        <input
-                          type="text"
-                          value={copyTradeSettings.walletAddress}
-                          onChange={(e) =>
-                            setCopyTradeSettings({
-                              ...copyTradeSettings,
-                              walletAddress: e.target.value,
-                            })
-                          }
-                          placeholder="Enter wallet address..."
-                          className="w-full h-11 px-4 bg-secondary/50 border border-border rounded-lg text-foreground font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                        />
-                      </div>
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-sm text-muted-foreground mb-2 block">
-                            Max Per Trade (SOL)
-                          </label>
-                          <input
-                            type="number"
-                            value={copyTradeSettings.maxPerTrade}
-                            onChange={(e) =>
-                              setCopyTradeSettings({
-                                ...copyTradeSettings,
-                                maxPerTrade: e.target.value,
-                              })
-                            }
-                            className="w-full h-11 px-4 bg-secondary/50 border border-border rounded-lg text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-sm text-muted-foreground mb-2 block">
-                            Copy Percentage (%)
-                          </label>
-                          <input
-                            type="number"
-                            value={copyTradeSettings.copyPercentage}
-                            onChange={(e) =>
-                              setCopyTradeSettings({
-                                ...copyTradeSettings,
-                                copyPercentage: e.target.value,
-                              })
-                            }
-                            className="w-full h-11 px-4 bg-secondary/50 border border-border rounded-lg text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button variant="glow">
-                      <Save className="w-4 h-4" />
-                      Save Copy Trade Settings
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Blacklist Tab */}
-              {activeTab === "blacklist" && (
-                <div className="space-y-4 animate-fade-in">
-                  <div className="glass rounded-xl p-5">
-                    <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
-                      <Ban className="w-5 h-5 text-destructive" />
-                      Token Blacklist
-                    </h2>
-                    <p className="text-sm text-muted-foreground mb-6">
-                      Add fake or suspicious token addresses to prevent auto-trades. Blacklisted tokens will be skipped during sniping.
-                    </p>
-
-                    {/* Add Token Input */}
-                    <div className="flex gap-2 mb-6">
-                      <Input
-                        value={newBlacklistToken}
-                        onChange={(e) => setNewBlacklistToken(e.target.value)}
-                        placeholder="Enter token address to blacklist..."
-                        className="flex-1 font-mono text-sm"
-                      />
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {!settings || settings.token_blacklist.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    No tokens blacklisted
+                  </p>
+                ) : (
+                  settings.token_blacklist.map((token) => (
+                    <div
+                      key={token}
+                      className="flex items-center justify-between p-2.5 bg-destructive/10 rounded-lg border border-destructive/20"
+                    >
+                      <span className="font-mono text-sm text-foreground truncate flex-1">
+                        {token.slice(0, 8)}...{token.slice(-6)}
+                      </span>
                       <Button
-                        variant="destructive"
-                        onClick={() => {
-                          if (!settings) return;
-                          const trimmed = newBlacklistToken.trim();
-                          if (!isValidSolanaAddress(trimmed)) {
-                            toast.error('Invalid Solana token address format');
-                            return;
-                          }
-                          if (settings.token_blacklist.includes(trimmed)) {
-                            toast.error('Token already in blacklist');
-                            return;
-                          }
-                          updateField('token_blacklist', [...settings.token_blacklist, trimmed]);
-                          saveSettings({ token_blacklist: [...settings.token_blacklist, trimmed] });
-                          setNewBlacklistToken('');
-                          toast.success('Token added to blacklist');
-                        }}
-                        disabled={!newBlacklistToken.trim() || saving}
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/20"
+                        onClick={() => removeFromBlacklist(token)}
                       >
-                        <Plus className="w-4 h-4 mr-1" />
-                        Add
+                        <X className="w-3.5 h-3.5" />
                       </Button>
                     </div>
-
-                    {/* Warning Info */}
-                    <div className="flex items-start gap-3 p-4 bg-warning/10 border border-warning/30 rounded-lg mb-6">
-                      <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium text-foreground">Protect Against Fake Tokens</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Add known scam/rug-pull token addresses here to prevent accidental trades. 
-                          These tokens will be blocked from auto-buy executions.
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Blacklisted Tokens List */}
-                    <div className="border-t border-border pt-4">
-                      <h3 className="font-medium text-foreground mb-3">
-                        Blacklisted Tokens ({settings?.token_blacklist?.length || 0})
-                      </h3>
-                      
-                      {settingsLoading ? (
-                        <div className="text-center py-8 text-muted-foreground">Loading...</div>
-                      ) : !settings?.token_blacklist?.length ? (
-                        <div className="text-center py-8">
-                          <Ban className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-                          <p className="text-sm text-muted-foreground">No tokens blacklisted yet</p>
-                          <p className="text-xs text-muted-foreground/70 mt-1">
-                            Add token addresses above to prevent trading them
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2 max-h-64 overflow-y-auto">
-                          {settings.token_blacklist.map((token) => (
-                            <div 
-                              key={token} 
-                              className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg group"
-                            >
-                              <code className="text-xs font-mono text-muted-foreground truncate flex-1">
-                                {token}
-                              </code>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="w-7 h-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
-                                onClick={() => {
-                                  const updated = settings.token_blacklist.filter(t => t !== token);
-                                  updateField('token_blacklist', updated);
-                                  saveSettings({ token_blacklist: updated });
-                                  toast.success('Token removed from blacklist');
-                                }}
-                              >
-                                <X className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  ))
+                )}
+              </div>
+              
+              {settings && settings.token_blacklist.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  {settings.token_blacklist.length} token{settings.token_blacklist.length !== 1 ? 's' : ''} blacklisted
+                </p>
               )}
+            </div>
 
-              {/* Wallet Tab */}
-              {activeTab === "wallet" && (
-                <div className="space-y-4 animate-fade-in">
-                  <div className="glass rounded-xl p-5">
-                    <h2 className="text-lg font-semibold text-foreground mb-2">
-                      Wallet Connection
-                    </h2>
-                    <p className="text-sm text-muted-foreground mb-6">
-                      Connect your wallet to execute trades. Your private keys never leave your wallet.
-                    </p>
+            {/* Whitelist */}
+            <div className="glass rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <Star className="w-5 h-5 text-success" />
+                <h2 className="text-lg font-semibold text-foreground">Whitelist</h2>
+              </div>
+              <p className="text-sm text-muted-foreground mb-4">
+                Prioritized tokens - bot will favor these during sniping
+              </p>
 
-                    <WalletConnect />
+              <div className="flex gap-2 mb-4">
+                <Input
+                  value={newWhitelistToken}
+                  onChange={(e) => setNewWhitelistToken(e.target.value)}
+                  placeholder="Enter token address..."
+                  className="flex-1 font-mono text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && addToWhitelist()}
+                />
+                <Button
+                  variant="default"
+                  size="icon"
+                  className="bg-success hover:bg-success/90"
+                  onClick={addToWhitelist}
+                >
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
 
-                    <div className="mt-6 pt-6 border-t border-border">
-                      <h3 className="font-medium text-foreground mb-3">Supported Wallets</h3>
-                      <div className="grid sm:grid-cols-3 gap-3">
-                        <div className="p-3 bg-secondary/30 rounded-lg text-center">
-                          <span className="text-2xl mb-2 block">👻</span>
-                          <p className="text-sm font-medium text-foreground">Phantom</p>
-                          <p className="text-xs text-muted-foreground">Solana</p>
-                        </div>
-                        <div className="p-3 bg-secondary/30 rounded-lg text-center">
-                          <span className="text-2xl mb-2 block">🦊</span>
-                          <p className="text-sm font-medium text-foreground">MetaMask</p>
-                          <p className="text-xs text-muted-foreground">ETH / BSC</p>
-                        </div>
-                        <div className="p-3 bg-secondary/30 rounded-lg text-center">
-                          <span className="text-2xl mb-2 block">🔗</span>
-                          <p className="text-sm font-medium text-foreground">WalletConnect</p>
-                          <p className="text-xs text-muted-foreground">Multi-chain</p>
-                        </div>
-                      </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {!settings || settings.token_whitelist.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    No tokens whitelisted
+                  </p>
+                ) : (
+                  settings.token_whitelist.map((token) => (
+                    <div
+                      key={token}
+                      className="flex items-center justify-between p-2.5 bg-success/10 rounded-lg border border-success/20"
+                    >
+                      <span className="font-mono text-sm text-foreground truncate flex-1">
+                        {token.slice(0, 8)}...{token.slice(-6)}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-success hover:text-success hover:bg-success/20"
+                        onClick={() => removeFromWhitelist(token)}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
-                  </div>
-                </div>
+                  ))
+                )}
+              </div>
+              
+              {settings && settings.token_whitelist.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  {settings.token_whitelist.length} token{settings.token_whitelist.length !== 1 ? 's' : ''} whitelisted
+                </p>
               )}
+            </div>
+          </div>
+
+          {/* Info Card */}
+          <div className="glass rounded-xl p-4 mt-6">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                <Shield className="w-4 h-4 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-medium text-foreground mb-1">How Token Lists Work</h3>
+                <p className="text-sm text-muted-foreground">
+                  <strong>Blacklist:</strong> Tokens added here will be completely ignored by the bot, even if they meet all other criteria.
+                  <br />
+                  <strong>Whitelist:</strong> Prioritized tokens that the bot will favor when scanning for opportunities.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -519,7 +324,5 @@ const UserSettings = forwardRef<HTMLDivElement, object>(function UserSettings(_p
     </div>
   );
 });
-
-UserSettings.displayName = 'UserSettings';
 
 export default UserSettings;

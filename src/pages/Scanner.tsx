@@ -377,11 +377,11 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     if (isDemo) {
       // Mark batch as processed for demo mode (prevents repeated sim trades)
       batch.forEach(t => processedTokensRef.current.add(t.address));
-      // Find token that meets criteria
+      // Find token that meets criteria using multi-select buyer positions
+      const targetPositions = settings.target_buyer_positions || [2, 3];
       const approvedToken = tokenData.find(t => 
         t.buyerPosition && 
-        t.buyerPosition >= 2 && 
-        t.buyerPosition <= 3 && 
+        targetPositions.includes(t.buyerPosition) && 
         t.riskScore < 70 &&
         t.liquidity >= (settings.min_liquidity || 300)
       );

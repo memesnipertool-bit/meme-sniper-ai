@@ -54,7 +54,6 @@ export default function LiquidityBotPanel({
   walletAddress = null,
   walletBalance = null,
 }: LiquidityBotPanelProps) {
-  const [targetBuyerPosition, setTargetBuyerPosition] = useState(2);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Debounced save for auto-saving on slider changes
@@ -227,44 +226,69 @@ export default function LiquidityBotPanel({
           />
         </div>
         
-        {/* Target Buyer Position - Mobile compact grid */}
+        {/* Target Buyer Position - Multi-select */}
         <div className="p-2.5 md:p-3 bg-secondary/30 rounded-xl">
           <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs text-muted-foreground font-medium mb-2">
             <Target className="w-3 h-3 md:w-3.5 md:h-3.5 text-primary" />
-            Target Position
+            Target Positions
+            <span className="text-[9px] text-muted-foreground/70">(multi-select)</span>
           </div>
           <div className="grid grid-cols-5 gap-1 md:gap-1.5 mb-1.5 md:mb-2">
-            {[1, 2, 3, 4, 5].map((pos) => (
-              <button
-                key={pos}
-                onClick={() => setTargetBuyerPosition(pos)}
-                className={`py-1.5 md:py-2 rounded-lg font-semibold text-[10px] md:text-xs transition-all ${
-                  targetBuyerPosition === pos
-                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                    : 'bg-secondary text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
-                }`}
-              >
-                #{pos}
-              </button>
-            ))}
+            {[1, 2, 3, 4, 5].map((pos) => {
+              const isSelected = settings.target_buyer_positions?.includes(pos);
+              return (
+                <button
+                  key={pos}
+                  onClick={() => {
+                    const current = settings.target_buyer_positions || [2, 3];
+                    const updated = isSelected
+                      ? current.filter(p => p !== pos)
+                      : [...current, pos].sort((a, b) => a - b);
+                    if (updated.length > 0) {
+                      handleUpdateField('target_buyer_positions', updated);
+                    }
+                  }}
+                  className={`py-1.5 md:py-2 rounded-lg font-semibold text-[10px] md:text-xs transition-all ${
+                    isSelected
+                      ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
+                      : 'bg-secondary text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
+                  }`}
+                >
+                  #{pos}
+                </button>
+              );
+            })}
           </div>
           <div className="grid grid-cols-5 gap-1 md:gap-1.5">
-            {[6, 7, 8, 9, 10].map((pos) => (
-              <button
-                key={pos}
-                onClick={() => setTargetBuyerPosition(pos)}
-                className={`py-1.5 md:py-2 rounded-lg font-semibold text-[10px] md:text-xs transition-all ${
-                  targetBuyerPosition === pos
-                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
-                    : 'bg-secondary text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
-                }`}
-              >
-                #{pos}
-              </button>
-            ))}
+            {[6, 7, 8, 9, 10].map((pos) => {
+              const isSelected = settings.target_buyer_positions?.includes(pos);
+              return (
+                <button
+                  key={pos}
+                  onClick={() => {
+                    const current = settings.target_buyer_positions || [2, 3];
+                    const updated = isSelected
+                      ? current.filter(p => p !== pos)
+                      : [...current, pos].sort((a, b) => a - b);
+                    if (updated.length > 0) {
+                      handleUpdateField('target_buyer_positions', updated);
+                    }
+                  }}
+                  className={`py-1.5 md:py-2 rounded-lg font-semibold text-[10px] md:text-xs transition-all ${
+                    isSelected
+                      ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
+                      : 'bg-secondary text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
+                  }`}
+                >
+                  #{pos}
+                </button>
+              );
+            })}
           </div>
           <p className="text-[9px] md:text-[10px] text-muted-foreground mt-1.5 md:mt-2 text-center">
-            Enter as buyer #{targetBuyerPosition}
+            Enter as buyer {settings.target_buyer_positions?.length > 0 
+              ? settings.target_buyer_positions.map(p => `#${p}`).join(', ')
+              : '#2, #3'}
           </p>
         </div>
         
