@@ -1,6 +1,6 @@
 import React, { forwardRef, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import TradingHeader from "@/components/trading/TradingHeader";
-import BotControlPanel from "@/components/scanner/BotControlPanel";
+import LiquidityBotPanel from "@/components/trading/LiquidityBotPanel";
 import SniperDecisionPanel from "@/components/trading/SniperDecisionPanel";
 import { TradeSignalPanel } from "@/components/trading/TradeSignalPanel";
 import LiquidityMonitor from "@/components/scanner/LiquidityMonitor";
@@ -1036,8 +1036,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                 onConnectWallet={connectPhantom}
               />
               
-              {/* Bot Control Panel - All settings in one place */}
-              <BotControlPanel
+              {/* Liquidity Bot Panel - All settings in one place */}
+              <LiquidityBotPanel
                 settings={settings}
                 saving={saving}
                 onUpdateField={updateField}
