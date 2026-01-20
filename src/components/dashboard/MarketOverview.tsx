@@ -1,6 +1,7 @@
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, TrendingDown, Flame, Sparkles, Loader2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Flame, Sparkles, Loader2, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScannedToken } from "@/hooks/useTokenScanner";
 
@@ -32,17 +33,29 @@ const formatVolume = (volume: number) => {
 };
 
 export default function MarketOverview({ tokens = [], loading = false }: MarketOverviewProps) {
+  const navigate = useNavigate();
+  
   // Use scanned tokens if available, otherwise use fallback
   const displayTokens = tokens.length > 0 
     ? tokens.slice(0, 5).map(t => ({
         symbol: t.symbol,
         name: t.name,
+        address: t.address,
         price: formatPrice(t.priceUsd),
         change24h: t.priceChange24h,
         volume: formatVolume(t.volume24h),
         hot: t.priceChange24h > 10 || t.riskScore < 40,
+        tokenData: t, // Keep full token data for navigation
       }))
-    : fallbackTokens;
+    : fallbackTokens.map(t => ({ ...t, address: '', tokenData: null }));
+
+  const handleTokenClick = (token: typeof displayTokens[0]) => {
+    if (token.address && token.tokenData) {
+      // Pass token data via URL params for immediate display
+      const tokenDataParam = encodeURIComponent(JSON.stringify(token.tokenData));
+      navigate(`/token/${token.address}?data=${tokenDataParam}`);
+    }
+  };
 
   return (
     <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-card/90 to-card/60 backdrop-blur-xl">
@@ -81,6 +94,7 @@ export default function MarketOverview({ tokens = [], loading = false }: MarketO
                 key={token.symbol + index}
                 className="group flex items-center justify-between p-3 bg-secondary/30 hover:bg-secondary/50 rounded-xl transition-all duration-200 cursor-pointer animate-fade-in"
                 style={{ animationDelay: `${index * 50}ms` }}
+                onClick={() => handleTokenClick(token)}
               >
                 <div className="flex items-center gap-3">
                   <div className="relative">
@@ -109,19 +123,24 @@ export default function MarketOverview({ tokens = [], loading = false }: MarketO
                   </div>
                 </div>
                 
-                <div className="text-right">
-                  <p className="font-medium text-sm">{token.price}</p>
-                  <div className={cn(
-                    "flex items-center justify-end gap-1 text-xs font-medium",
-                    token.change24h >= 0 ? "text-success" : "text-destructive"
-                  )}>
-                    {token.change24h >= 0 ? (
-                      <TrendingUp className="w-3 h-3" />
-                    ) : (
-                      <TrendingDown className="w-3 h-3" />
-                    )}
-                    {token.change24h >= 0 ? "+" : ""}{token.change24h.toFixed(1)}%
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className="font-medium text-sm">{token.price}</p>
+                    <div className={cn(
+                      "flex items-center justify-end gap-1 text-xs font-medium",
+                      token.change24h >= 0 ? "text-success" : "text-destructive"
+                    )}>
+                      {token.change24h >= 0 ? (
+                        <TrendingUp className="w-3 h-3" />
+                      ) : (
+                        <TrendingDown className="w-3 h-3" />
+                      )}
+                      {token.change24h >= 0 ? "+" : ""}{token.change24h.toFixed(1)}%
+                    </div>
                   </div>
+                  {token.address && (
+                    <Eye className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                  )}
                 </div>
               </div>
             ))}

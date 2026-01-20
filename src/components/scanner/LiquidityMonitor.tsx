@@ -1,10 +1,11 @@
 import { useState, useMemo, memo, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScannedToken } from "@/hooks/useTokenScanner";
-import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Loader2, Search, LogOut, ChevronDown, ChevronUp, DollarSign } from "lucide-react";
+import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Loader2, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -58,7 +59,7 @@ const avatarColors = [
 ];
 
 // Memoized Pool Row with improved visibility and criteria details
-const PoolRow = memo(({ pool, colorIndex, isNew }: { pool: ScannedToken; colorIndex: number; isNew?: boolean }) => {
+const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: ScannedToken; colorIndex: number; isNew?: boolean; onViewDetails: (pool: ScannedToken) => void }) => {
   const [expanded, setExpanded] = useState(false);
   const isPositive = pool.priceChange24h >= 0;
   const initials = pool.symbol.slice(0, 2).toUpperCase();
@@ -71,6 +72,11 @@ const PoolRow = memo(({ pool, colorIndex, isNew }: { pool: ScannedToken; colorIn
   const isTradeable = pool.isTradeable !== false;
   const canBuy = pool.canBuy !== false;
   const canSell = pool.canSell !== false;
+
+  const handleViewDetails = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onViewDetails(pool);
+  };
 
   return (
     <div className="border-b border-border/20">
@@ -266,6 +272,29 @@ const PoolRow = memo(({ pool, colorIndex, isNew }: { pool: ScannedToken; colorIn
               </div>
             </div>
           )}
+          
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 mt-3">
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 h-8 text-xs gap-1.5"
+              onClick={handleViewDetails}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              View Details
+            </Button>
+            <a 
+              href={`https://solscan.io/token/${pool.address}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Button>
+            </a>
+          </div>
         </div>
       )}
     </div>
@@ -396,10 +425,17 @@ export default function LiquidityMonitor({
   apiStatus = 'waiting',
   onExitTrade
 }: LiquidityMonitorProps) {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("pools");
   const [searchTerm, setSearchTerm] = useState("");
   const [isExpanded, setIsExpanded] = useState(true);
   const [displayCount, setDisplayCount] = useState(10);
+  
+  // Handle navigation to token detail page
+  const handleViewDetails = useCallback((pool: ScannedToken) => {
+    const tokenDataParam = encodeURIComponent(JSON.stringify(pool));
+    navigate(`/token/${pool.address}?data=${tokenDataParam}`);
+  }, [navigate]);
   
   // Track new tokens (added in last 5 seconds)
   const [newTokenIds, setNewTokenIds] = useState<Set<string>>(new Set());
@@ -576,6 +612,7 @@ export default function LiquidityMonitor({
                       pool={pool} 
                       colorIndex={idx}
                       isNew={newTokenIds.has(pool.id)}
+                      onViewDetails={handleViewDetails}
                     />
                   ))
                 )}
