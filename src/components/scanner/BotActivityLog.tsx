@@ -81,6 +81,58 @@ const categoryLabels: Record<string, string> = {
   system: 'Sys',
 };
 
+// Convert technical error messages to user-friendly messages
+function getFriendlyMessage(entry: BotLogEntry): string {
+  const msg = entry.message;
+  
+  // Common error patterns -> friendly messages
+  const errorMappings: [RegExp, string][] = [
+    // Network/API errors
+    [/dns error|failed to lookup|no address associated/i, '🌐 Network issue - API temporarily unavailable'],
+    [/timeout|timed out|aborted/i, '⏱️ Request timed out - server took too long'],
+    [/fetch failed|failed to fetch/i, '📡 Connection failed - check your internet'],
+    [/HTTP 4\d\d|HTTP 5\d\d/i, '⚠️ Server error - try again shortly'],
+    [/401|unauthorized/i, '🔐 Authentication failed - check API keys'],
+    [/403|forbidden/i, '🚫 Access denied - insufficient permissions'],
+    [/429|rate limit/i, '⏳ Rate limited - too many requests, slowing down'],
+    
+    // Jupiter/DEX errors
+    [/not indexed on Jupiter/i, '🔍 Token too new for Jupiter - checking other DEXs'],
+    [/no route|no valid route/i, '🛤️ No trading route available yet'],
+    [/Jupiter unavailable/i, '🔌 Jupiter API offline - using alternatives'],
+    
+    // Liquidity errors
+    [/insufficient liquidity/i, '💧 Not enough liquidity to trade safely'],
+    [/no.*pool.*found/i, '🏊 No liquidity pool found for this token'],
+    [/liquidity.*SOL.*need/i, '💧 Waiting for more liquidity'],
+    
+    // Trading errors
+    [/slippage|price impact/i, '📉 Price would move too much - trade skipped'],
+    [/insufficient.*balance/i, '💰 Not enough SOL in wallet'],
+    [/transaction failed/i, '❌ Transaction failed on-chain'],
+    [/simulation failed/i, '🧪 Swap simulation failed - pool may be unstable'],
+    
+    // Token evaluation
+    [/discarded|rejected/i, '⏭️ Token didn\'t pass safety filters'],
+    [/risk.*high|high.*risk/i, '⚠️ Risk score too high - skipped for safety'],
+    [/honeypot|rug.*pull/i, '🚨 Potential scam detected - avoided'],
+    
+    // Success messages
+    [/tradable|tradeable/i, '✅ Token is tradeable'],
+    [/found.*pool|pool.*found/i, '✅ Liquidity pool discovered'],
+    [/snipe.*success|executed/i, '🎯 Trade executed successfully'],
+  ];
+  
+  for (const [pattern, replacement] of errorMappings) {
+    if (pattern.test(msg)) {
+      return replacement;
+    }
+  }
+  
+  // Return original message if no mapping found
+  return msg;
+}
+
 export default function BotActivityLog({ maxEntries = 100 }: BotActivityLogProps) {
   const logs = useBotLogs();
   const [expanded, setExpanded] = useState(true);
@@ -147,41 +199,51 @@ export default function BotActivityLog({ maxEntries = 100 }: BotActivityLogProps
                 No activity yet. Activate the bot to see logs.
               </div>
             ) : (
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {displayLogs.map((entry) => {
                   const config = levelConfig[entry.level];
                   const Icon = config.icon;
                   const isExpanded = expandedEntries.has(entry.id);
+                  const friendlyMessage = getFriendlyMessage(entry);
                   
                   return (
                     <div
                       key={entry.id}
-                      className={`p-2 rounded-lg border border-transparent hover:border-border/50 transition-colors cursor-pointer ${config.bg}`}
+                      className={`p-2.5 rounded-lg border border-transparent hover:border-border/50 transition-colors ${entry.details ? 'cursor-pointer' : ''} ${config.bg}`}
                       onClick={() => entry.details && toggleEntry(entry.id)}
                     >
                       <div className="flex items-start gap-2">
-                        <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${config.color}`} />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="outline" className="text-[9px] h-4 px-1">
+                        <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${config.color}`} />
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Badge variant="outline" className="text-[9px] h-4 px-1.5 shrink-0">
                               {categoryLabels[entry.category]}
                             </Badge>
                             {entry.tokenSymbol && (
-                              <span className="font-medium text-xs">{entry.tokenSymbol}</span>
+                              <span className="font-semibold text-xs text-foreground shrink-0">
+                                ${entry.tokenSymbol}
+                              </span>
                             )}
-                            <span className="text-xs text-muted-foreground truncate flex-1">
-                              {entry.message}
+                            <span className="text-[9px] text-muted-foreground shrink-0 ml-auto">
+                              {entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                             </span>
                           </div>
+                          <p className={`text-xs leading-relaxed break-words whitespace-pre-wrap ${config.color}`}>
+                            {friendlyMessage}
+                          </p>
                           {isExpanded && entry.details && (
-                            <p className="text-[10px] text-muted-foreground mt-1 whitespace-pre-wrap">
-                              {entry.details}
-                            </p>
+                            <div className="mt-2 pt-2 border-t border-border/30">
+                              <p className="text-[10px] text-muted-foreground break-words whitespace-pre-wrap font-mono bg-background/50 p-2 rounded">
+                                {entry.details}
+                              </p>
+                            </div>
+                          )}
+                          {entry.details && !isExpanded && (
+                            <span className="text-[9px] text-muted-foreground/60 mt-1 inline-block">
+                              Click for details...
+                            </span>
                           )}
                         </div>
-                        <span className="text-[9px] text-muted-foreground shrink-0">
-                          {entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </span>
                       </div>
                     </div>
                   );
