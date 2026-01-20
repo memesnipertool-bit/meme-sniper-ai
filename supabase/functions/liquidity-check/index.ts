@@ -151,22 +151,22 @@ async function checkPumpFun(tokenAddress: string): Promise<LiquidityCheckRespons
 /**
  * Check Jupiter for available routes
  *
- * NOTE: In some edge regions, DNS resolution can fail for specific hostnames.
- * We therefore try multiple Jupiter endpoints before declaring Jupiter unavailable.
+ * NOTE: 400 errors are EXPECTED for tokens not yet indexed on Jupiter.
+ * This is normal behavior for newly launched tokens - not an error.
+ * We try multiple endpoints to maximize compatibility.
  */
 async function checkJupiter(tokenAddress: string, minLiquidity: number): Promise<LiquidityCheckResponse> {
   const amountLamports = 100000000; // 0.1 SOL
 
+  // Try multiple Jupiter endpoints for better compatibility
   const endpoints = [
     {
-      // Free, keyless endpoint
-      name: 'lite.swap.v1',
-      url:
-        `https://lite-api.jup.ag/swap/v1/quote?` +
-        `inputMint=${SOL_MINT}&` +
-        `outputMint=${tokenAddress}&` +
-        `amount=${amountLamports}&` +
-        `slippageBps=1500`,
+      name: 'public-quote-v6',
+      url: `https://api.jup.ag/quote/v6?inputMint=${SOL_MINT}&outputMint=${tokenAddress}&amount=${amountLamports}&slippageBps=1500`,
+    },
+    {
+      name: 'lite-swap-v1',
+      url: `https://lite-api.jup.ag/swap/v1/quote?inputMint=${SOL_MINT}&outputMint=${tokenAddress}&amount=${amountLamports}&slippageBps=1500`,
     },
   ] as const;
 
@@ -184,15 +184,28 @@ async function checkJupiter(tokenAddress: string, minLiquidity: number): Promise
 
       clearTimeout(timeout);
 
+      // 400 = token not indexed yet (expected for new tokens)
+      // 404 = route not found (also expected)
+      if (response.status === 400 || response.status === 404) {
+        lastReason = 'Token not indexed on Jupiter yet';
+        continue;
+      }
+
       if (!response.ok) {
-        lastReason = `Jupiter(${ep.name}): ${response.status}`;
+        lastReason = `Jupiter(${ep.name}): HTTP ${response.status}`;
         continue;
       }
 
       const data = await response.json();
 
-      if (data?.error || !data?.outAmount || parseInt(data.outAmount) <= 0) {
-        lastReason = `Jupiter(${ep.name}): ${data?.error || 'No route'}`;
+      // Check for error response or no route
+      if (data?.error || data?.errorCode) {
+        lastReason = data?.error || 'No route available';
+        continue;
+      }
+
+      if (!data?.outAmount || parseInt(data.outAmount) <= 0) {
+        lastReason = 'No valid route found';
         continue;
       }
 
@@ -214,7 +227,6 @@ async function checkJupiter(tokenAddress: string, minLiquidity: number): Promise
       else if (priceImpact > 5) estimatedLiquidity = 15;
       else if (priceImpact > 2) estimatedLiquidity = 30;
 
-      // (Optional) enforce minLiquidity using our rough estimate
       if (estimatedLiquidity < minLiquidity) {
         return {
           status: 'DISCARDED',
@@ -222,6 +234,7 @@ async function checkJupiter(tokenAddress: string, minLiquidity: number): Promise
         };
       }
 
+      console.log(`[LiquidityCheck] Jupiter route found via ${ep.name}`);
       return {
         status: 'TRADABLE',
         source: hasPumpFun ? 'pump_fun' : hasRaydium ? 'raydium' : 'jupiter',
@@ -232,12 +245,15 @@ async function checkJupiter(tokenAddress: string, minLiquidity: number): Promise
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      lastReason = `Jupiter(${ep.name}) error: ${message}`;
-      // try next endpoint
+      // DNS errors or timeouts - try next endpoint
+      lastReason = `Jupiter(${ep.name}): ${message}`;
     }
   }
 
-  console.log('[LiquidityCheck] Jupiter error:', lastReason || 'Jupiter unavailable');
+  // Don't log 400s as errors - they're expected for new tokens
+  if (lastReason && !lastReason.includes('not indexed')) {
+    console.log('[LiquidityCheck] Jupiter unavailable:', lastReason);
+  }
   return { status: 'DISCARDED', reason: lastReason || 'Jupiter unavailable' };
 }
 
