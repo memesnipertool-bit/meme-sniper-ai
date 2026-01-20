@@ -65,9 +65,9 @@ interface SwapSimulationResult {
 
 /**
  * Detect a tradable pool for the given token
- * Supports: Raydium pools, Jupiter routes, AND Pump.fun bonding curve
+ * Uses server-side edge function to bypass CORS issues with external APIs
  * 
- * PERFORMANCE: Uses Jupiter as primary (aggregates all sources including Pump.fun)
+ * PERFORMANCE: Edge function checks Pump.fun → Jupiter → Raydium in priority order
  */
 export async function detectTradablePool(
   tokenAddress: string,
@@ -77,129 +77,76 @@ export async function detectTradablePool(
   const startTime = Date.now();
   
   try {
-    // PRIORITY 1: Check if token is on Pump.fun bonding curve (fastest for new tokens)
-    const pumpFunResult = await checkPumpFunTradeable(tokenAddress);
-    if (pumpFunResult.isTradeable) {
-      console.log(`[LiquidityDetector] Token ${tokenAddress.slice(0, 8)} is on Pump.fun - TRADEABLE`);
-      
-      onEvent?.({
-        type: 'LIQUIDITY_DETECTED',
-        data: {
-          tokenAddress,
-          tokenName: pumpFunResult.name || 'Unknown',
-          tokenSymbol: pumpFunResult.symbol || 'UNKNOWN',
-          poolAddress: 'pumpfun_bonding_curve',
-          poolType: 'pump_fun',
-          baseMint: SOL_MINT,
-          quoteMint: tokenAddress,
-          liquidityAmount: pumpFunResult.liquidity || 0,
-          lpTokenMint: null,
-          timestamp: startTime,
-          blockHeight: 0,
+    // Use edge function to bypass CORS - it checks all sources server-side
+    console.log(`[LiquidityDetector] Checking ${tokenAddress.slice(0, 8)} via edge function...`);
+    
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/liquidity-check`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+          'apikey': supabaseKey,
         },
-      });
-      
-      return {
-        status: 'TRADABLE',
-        poolAddress: 'pumpfun_bonding_curve',
-        baseMint: SOL_MINT,
-        quoteMint: tokenAddress,
-        liquidity: pumpFunResult.liquidity || 50, // Pump.fun always has liquidity from bonding curve
-        poolType: 'raydium_v4', // Use raydium type for compatibility
-        detectedAt: startTime,
-      };
-    }
-    
-    // PRIORITY 2: Try Jupiter fallback first (most reliable, includes Raydium + all DEXs)
-    console.log('[LiquidityDetector] Checking Jupiter for routes...');
-    const jupiterFallback = await tryJupiterFallback(tokenAddress, config.minLiquidity);
-    if (jupiterFallback.status === 'TRADABLE') {
-      onEvent?.({
-        type: 'LIQUIDITY_DETECTED',
-        data: {
+        body: JSON.stringify({
           tokenAddress,
-          tokenName: 'Unknown',
-          tokenSymbol: 'UNKNOWN',
-          poolAddress: jupiterFallback.poolAddress || '',
-          poolType: 'raydium',
-          baseMint: SOL_MINT,
-          quoteMint: tokenAddress,
-          liquidityAmount: jupiterFallback.liquidity || 0,
-          lpTokenMint: null,
-          timestamp: startTime,
-          blockHeight: 0,
-        },
-      });
-      return jupiterFallback;
-    }
+          minLiquidity: config.minLiquidity,
+        }),
+        signal: AbortSignal.timeout(15000),
+      }
+    );
     
-    // PRIORITY 3: Query Raydium API directly (backup)
-    const pools = await fetchRaydiumPools(tokenAddress);
-    
-    if (!pools || pools.length === 0) {
-      console.log('[LiquidityDetector] No pools found on Raydium or Jupiter');
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log(`[LiquidityDetector] Edge function error: ${response.status} - ${errorText}`);
       return {
         status: 'DISCARDED',
-        reason: jupiterFallback.reason || 'No tradeable route found',
+        reason: `Liquidity check failed: ${response.status}`,
       };
     }
     
-    // STEP 2: Filter and validate each pool against strict criteria
-    for (const pool of pools) {
-      const validation = await validatePoolStrict(pool, config);
+    const data = await response.json();
+    
+    if (data.status === 'TRADABLE') {
+      console.log(`[LiquidityDetector] ✅ Found tradeable via ${data.source}: ${data.liquidity?.toFixed(1)} SOL`);
       
-      if (!validation.passed) {
-        console.log(`[LiquidityDetector] Pool ${pool.poolAddress} failed: ${validation.reason}`);
-        continue;
-      }
+      onEvent?.({
+        type: 'LIQUIDITY_DETECTED',
+        data: {
+          tokenAddress,
+          tokenName: data.tokenName || 'Unknown',
+          tokenSymbol: data.tokenSymbol || 'UNKNOWN',
+          poolAddress: data.poolAddress || '',
+          poolType: data.source === 'pump_fun' ? 'pump_fun' : 'raydium',
+          baseMint: data.baseMint || SOL_MINT,
+          quoteMint: tokenAddress,
+          liquidityAmount: data.liquidity || 0,
+          lpTokenMint: null,
+          timestamp: startTime,
+          blockHeight: 0,
+        },
+      });
       
-      // STEP 3: Simulate swap to confirm tradability (MANDATORY)
-      const simulation = await simulateSwap(
-        pool.baseMint,
-        pool.quoteMint,
-        0.001 // Tiny amount: 0.001 SOL
-      );
-      
-      if (!simulation.success) {
-        console.log(`[LiquidityDetector] Pool ${pool.poolAddress} swap simulation failed: ${simulation.error}`);
-        continue;
-      }
-      
-      // ALL CHECKS PASSED - Pool is TRADABLE
-      const result: TradablePoolResult = {
+      return {
         status: 'TRADABLE',
-        poolAddress: pool.poolAddress,
-        baseMint: pool.baseMint,
-        quoteMint: pool.quoteMint,
-        liquidity: pool.baseReserve,
+        poolAddress: data.poolAddress,
+        baseMint: data.baseMint || SOL_MINT,
+        quoteMint: tokenAddress,
+        liquidity: data.liquidity || 50,
         poolType: 'raydium_v4',
         detectedAt: startTime,
       };
-      
-      onEvent?.({
-        type: 'LIQUIDITY_DETECTED',
-        data: {
-          tokenAddress,
-          tokenName: 'Unknown',
-          tokenSymbol: 'UNKNOWN',
-          poolAddress: pool.poolAddress,
-          poolType: 'raydium',
-          baseMint: pool.baseMint,
-          quoteMint: pool.quoteMint,
-          liquidityAmount: pool.baseReserve,
-          lpTokenMint: pool.lpMint,
-          timestamp: startTime,
-          blockHeight: 0,
-        },
-      });
-      
-      return result;
     }
     
-    // No pool passed all validations
+    // Not tradeable
+    console.log(`[LiquidityDetector] ❌ Not tradeable: ${data.reason}`);
     return {
       status: 'DISCARDED',
-      reason: 'All pools failed strict validation or swap simulation',
+      reason: data.reason || 'No tradeable route found',
     };
     
   } catch (error) {
@@ -342,8 +289,9 @@ async function fetchRaydiumPools(tokenAddress: string): Promise<RaydiumPoolState
   
   try {
     // Query Raydium API v3 for pools containing this token
+    // Note: Use page_size not pageSize (Raydium v3 API parameter name)
     const response = await fetch(
-      `https://api-v3.raydium.io/pools/info/mint?mint1=${tokenAddress}&poolType=standard&poolSortField=liquidity&sortType=desc&pageSize=10`,
+      `https://api-v3.raydium.io/pools/info/mint?mint1=${tokenAddress}&poolType=standard&poolSortField=liquidity&sortType=desc&page_size=10`,
       {
         signal: AbortSignal.timeout(10000),
         headers: {
