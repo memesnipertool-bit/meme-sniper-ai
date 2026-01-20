@@ -140,7 +140,7 @@ async function withRetry<T>(
 }
 
 // Check if token is from Pump.fun (bonding curve)
-async function isPumpFunToken(tokenMint: string): Promise<{ isPumpFun: boolean; bondingCurve?: any; apiError?: boolean }> {
+async function isPumpFunToken(tokenMint: string): Promise<{ isPumpFun: boolean; bondingCurve?: any; apiError?: boolean; confirmedNotPumpFun?: boolean }> {
   // Multiple API endpoints to try for resilience
   const endpoints = [
     { url: `${PUMPFUN_API}/coins/${tokenMint}`, name: 'primary' },
@@ -176,14 +176,14 @@ async function isPumpFunToken(tokenMint: string): Promise<{ isPumpFun: boolean; 
               return { isPumpFun: true, bondingCurve: data };
             } else {
               console.log(`[Pump.fun] Token ${tokenMint} has graduated to Raydium`);
-              return { isPumpFun: false };
+              return { isPumpFun: false, confirmedNotPumpFun: true }; // Graduated = confirmed not on bonding curve
             }
           }
         }
       } else if (response.status === 404) {
-        // Token definitely not on Pump.fun
-        console.log(`[Pump.fun] Token ${tokenMint} not found on Pump.fun (${endpoint.name})`);
-        return { isPumpFun: false };
+        // Token definitely not on Pump.fun - confirmed
+        console.log(`[Pump.fun] Token ${tokenMint} confirmed NOT on Pump.fun (${endpoint.name})`);
+        return { isPumpFun: false, confirmedNotPumpFun: true };
       }
     } catch (error: any) {
       console.log(`[Pump.fun] ${endpoint.name} API failed for ${tokenMint}: ${error.message}`);
@@ -813,20 +813,25 @@ Deno.serve(async (req) => {
               const isNoRoute = rayErrorMsg.includes('ROUTE_NOT_FOUND');
               
               if (isNotTradable || isNoRoute) {
-                // Check if this might be a Pump.fun API issue
-                if (pumpCheck.apiError) {
+                // Only suggest Pump.fun if API check actually failed (not if it confirmed token isn't there)
+                // AND the token shows signs of being very new (no DEX routes)
+                if (pumpCheck.apiError && !pumpCheck.confirmedNotPumpFun) {
                   throw new Error(
                     `🔄 Token may still be on Pump.fun bonding curve but API verification failed. ` +
                     `This is a very new token that hasn't graduated to DEXs yet. ` +
                     `Try again in a few minutes or trade directly on pump.fun website.`
                   );
                 }
+                
+                // Token is confirmed NOT on Pump.fun but still not tradeable on DEXs
                 throw new Error(
-                  `❌ Token not available on any DEX. Possible reasons:\n` +
-                  `• Token is still on Pump.fun bonding curve (not yet graduated)\n` +
-                  `• Token has no liquidity pool on Raydium/Jupiter\n` +
-                  `• Token was just created and needs time to be indexed\n\n` +
-                  `💡 Try: Wait a few minutes and retry, or trade on pump.fun directly.`
+                  `❌ Token not available for trading yet.\n\n` +
+                  `This token exists but has no active trading routes on Jupiter or Raydium.\n\n` +
+                  `Possible reasons:\n` +
+                  `• Token liquidity pool is not yet indexed by DEX aggregators\n` +
+                  `• Token may be on a different DEX (check DexScreener for exact pool)\n` +
+                  `• Liquidity may have been recently added or removed\n\n` +
+                  `💡 Try: Check DexScreener.com for the token's actual trading venue.`
                 );
               }
               throw new Error(
