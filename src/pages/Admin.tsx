@@ -1,5 +1,5 @@
 import React, { forwardRef, useState, useEffect } from "react";
-import TradingHeader from "@/components/trading/TradingHeader";
+import AppLayout from "@/components/layout/AppLayout";
 import { useWallet } from "@/hooks/useWallet";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
@@ -110,16 +110,8 @@ const Admin = forwardRef<HTMLDivElement, object>(function Admin(_props, ref) {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <TradingHeader
-        walletConnected={wallet.isConnected}
-        walletAddress={wallet.address || undefined}
-        network={wallet.network}
-        onConnectWallet={handleConnectWallet}
-      />
-
-      <main className="relative pt-20 md:pt-24 pb-8">
-        <div className="container mx-auto px-4">
+    <AppLayout>
+      <div className="container mx-auto px-4">
           {/* Page Header */}
           <div className="flex items-center gap-3 mb-8">
             <div className="p-2.5 rounded-lg bg-primary/10">
@@ -596,8 +588,7 @@ const Admin = forwardRef<HTMLDivElement, object>(function Admin(_props, ref) {
             </div>
           )}
         </div>
-      </main>
-    </div>
+      </AppLayout>
   );
 });
 
