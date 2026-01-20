@@ -3,9 +3,10 @@ import TradingHeader from "@/components/trading/TradingHeader";
 import { useWallet } from "@/hooks/useWallet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { usePositions, Position } from "@/hooks/usePositions";
+import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { 
   TrendingUp, 
   TrendingDown,
@@ -19,6 +20,10 @@ import {
   XCircle,
   CheckCircle,
   AlertTriangle,
+  History,
+  ArrowUpRight,
+  ArrowDownRight,
+  ExternalLink,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -131,6 +136,7 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
     fetchPositions,
   } = usePositions();
 
+  const { trades, loading: tradesLoading, refetch: refetchTrades } = useTradeHistory(50);
   const [autoMonitor, setAutoMonitor] = useState(false);
   const [autoExecute, setAutoExecute] = useState(false);
   const monitorInterval = 30; // seconds
@@ -380,8 +386,8 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
 
           {/* Closed Positions */}
           {closedPositions.length > 0 && (
-            <div>
-              <h2 className="text-lg font-semibold text-foreground mb-4">Trade History</h2>
+            <div className="mb-8">
+              <h2 className="text-lg font-semibold text-foreground mb-4">Closed Positions</h2>
               <div className="space-y-3">
                 {closedPositions.slice(0, 10).map(position => (
                   <PositionCard 
@@ -393,6 +399,115 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
               </div>
             </div>
           )}
+
+          {/* Transaction History */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-primary/20">
+                  <History className="w-5 h-5 text-primary" />
+                </div>
+                <h2 className="text-lg font-semibold text-foreground">Transaction History</h2>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchTrades()}
+                disabled={tradesLoading}
+              >
+                {tradesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              </Button>
+            </div>
+
+            {tradesLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            ) : trades.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <History className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground">No transactions yet</p>
+                  <p className="text-sm text-muted-foreground">Your buy and sell transactions will appear here</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-0">
+                  <div className="divide-y divide-border">
+                    {trades.map((trade) => (
+                      <div 
+                        key={trade.id} 
+                        className="flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg ${trade.trade_type === 'buy' ? 'bg-success/20' : 'bg-destructive/20'}`}>
+                            {trade.trade_type === 'buy' ? (
+                              <ArrowDownRight className="w-4 h-4 text-success" />
+                            ) : (
+                              <ArrowUpRight className="w-4 h-4 text-destructive" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-foreground">
+                                {trade.token_symbol || 'Unknown'}
+                              </span>
+                              <Badge variant="outline" className="text-xs capitalize">
+                                {trade.trade_type}
+                              </Badge>
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs ${
+                                  trade.status === 'completed' ? 'bg-success/10 text-success border-success/30' :
+                                  trade.status === 'failed' ? 'bg-destructive/10 text-destructive border-destructive/30' :
+                                  'bg-warning/10 text-warning border-warning/30'
+                                }`}
+                              >
+                                {trade.status || 'pending'}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {trade.token_name || trade.token_address.slice(0, 8) + '...' + trade.token_address.slice(-6)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="font-medium text-foreground">
+                              {trade.amount.toFixed(4)} {trade.token_symbol || 'tokens'}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              {trade.price_sol && <span>{trade.price_sol.toFixed(6)} SOL</span>}
+                              {trade.price_usd && <span>(${trade.price_usd.toFixed(4)})</span>}
+                            </div>
+                          </div>
+                          
+                          <div className="text-right min-w-[80px]">
+                            <p className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(trade.created_at), { addSuffix: true })}
+                            </p>
+                            {trade.tx_hash && (
+                              <a
+                                href={`https://solscan.io/tx/${trade.tx_hash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                View
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
       </main>
     </div>
