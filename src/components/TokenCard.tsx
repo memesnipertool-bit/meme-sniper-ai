@@ -1,5 +1,6 @@
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, TrendingDown, Users, Droplets, Clock, ExternalLink } from "lucide-react";
+import { TrendingUp, TrendingDown, Users, Droplets, Clock, ExternalLink, Eye } from "lucide-react";
 
 interface TokenCardProps {
   name: string;
@@ -12,6 +13,7 @@ interface TokenCardProps {
   age: string;
   riskScore: "low" | "medium" | "high";
   imageUrl?: string;
+  address?: string;
 }
 
 const TokenCard = ({
@@ -25,7 +27,9 @@ const TokenCard = ({
   age,
   riskScore,
   imageUrl,
+  address,
 }: TokenCardProps) => {
+  const navigate = useNavigate();
   const isPositive = priceChange >= 0;
 
   const riskColors = {
@@ -108,6 +112,13 @@ const TokenCard = ({
       <div className="flex gap-2">
         <Button variant="glow" className="flex-1" size="sm">
           Quick Buy
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm"
+          onClick={() => address && navigate(`/token/${address}`)}
+        >
+          <Eye className="w-4 h-4" />
         </Button>
         <Button variant="outline" size="sm">
           <ExternalLink className="w-4 h-4" />

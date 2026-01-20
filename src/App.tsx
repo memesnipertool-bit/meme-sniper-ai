@@ -22,6 +22,7 @@ import RiskCompliance from "./pages/RiskCompliance";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import Notifications from "./pages/Notifications";
+import TokenDetail from "./pages/TokenDetail";
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -108,6 +109,14 @@ const App = () => (
               element={
                 <ProtectedRoute requireAdmin>
                   <AdminAnalytics />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/token/:address"
+              element={
+                <ProtectedRoute>
+                  <TokenDetail />
                 </ProtectedRoute>
               }
             />
