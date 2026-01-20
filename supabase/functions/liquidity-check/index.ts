@@ -14,7 +14,8 @@ interface LiquidityCheckRequest {
 
 interface LiquidityCheckResponse {
   status: 'TRADABLE' | 'DISCARDED';
-  source?: 'pump_fun' | 'jupiter' | 'raydium';
+  source?: 'pump_fun' | 'jupiter' | 'raydium' | 'orca' | 'dexscreener';
+  dexId?: string; // raydium, orca, etc.
   poolAddress?: string;
   baseMint?: string;
   quoteMint?: string;
@@ -26,7 +27,9 @@ interface LiquidityCheckResponse {
 
 /**
  * Server-side liquidity check - bypasses CORS issues
- * Checks: Pump.fun → Jupiter → Raydium (in priority order)
+ * NEW PRIORITY: Pump.fun → DexScreener (finds Raydium/Orca pools) → Raydium API fallback
+ * 
+ * DexScreener tells us EXACTLY which DEX has liquidity, so we can route directly.
  */
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -45,30 +48,30 @@ serve(async (req) => {
 
     console.log(`[LiquidityCheck] Checking ${tokenAddress.slice(0, 8)}...`);
 
-    // PRIORITY 1: Check Pump.fun bonding curve
+    // PRIORITY 1: Check Pump.fun bonding curve (still on curve = trade via Pump.fun)
     const pumpResult = await checkPumpFun(tokenAddress);
     if (pumpResult.status === 'TRADABLE') {
-      console.log(`[LiquidityCheck] ✅ Found on Pump.fun`);
+      console.log(`[LiquidityCheck] ✅ Found on Pump.fun bonding curve`);
       return new Response(
         JSON.stringify(pumpResult),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // PRIORITY 2: Check Jupiter routes
-    const jupiterResult = await checkJupiter(tokenAddress, minLiquidity);
-    if (jupiterResult.status === 'TRADABLE') {
-      console.log(`[LiquidityCheck] ✅ Found Jupiter route`);
+    // PRIORITY 2: Use DexScreener to find exact DEX and pool
+    const dexResult = await checkDexScreener(tokenAddress, minLiquidity);
+    if (dexResult.status === 'TRADABLE') {
+      console.log(`[LiquidityCheck] ✅ Found via DexScreener: ${dexResult.dexId} pool`);
       return new Response(
-        JSON.stringify(jupiterResult),
+        JSON.stringify(dexResult),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // PRIORITY 3: Check Raydium directly
+    // PRIORITY 3: Direct Raydium API check (fallback)
     const raydiumResult = await checkRaydium(tokenAddress, minLiquidity);
     if (raydiumResult.status === 'TRADABLE') {
-      console.log(`[LiquidityCheck] ✅ Found Raydium pool`);
+      console.log(`[LiquidityCheck] ✅ Found Raydium pool (direct API)`);
       return new Response(
         JSON.stringify(raydiumResult),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -80,7 +83,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         status: 'DISCARDED',
-        reason: jupiterResult.reason || raydiumResult.reason || 'No tradeable route found',
+        reason: dexResult.reason || raydiumResult.reason || 'No tradeable pool found',
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -130,6 +133,7 @@ async function checkPumpFun(tokenAddress: string): Promise<LiquidityCheckRespons
         return {
           status: 'TRADABLE',
           source: 'pump_fun',
+          dexId: 'pumpfun',
           poolAddress: 'pumpfun_bonding_curve',
           baseMint: SOL_MINT,
           quoteMint: tokenAddress,
@@ -149,124 +153,115 @@ async function checkPumpFun(tokenAddress: string): Promise<LiquidityCheckRespons
 }
 
 /**
- * Check Jupiter for available routes
- *
- * NOTE: 400 errors are EXPECTED for tokens not yet indexed on Jupiter.
- * This is normal behavior for newly launched tokens - not an error.
- * We try multiple endpoints to maximize compatibility.
+ * Use DexScreener to find exactly which DEX has the liquidity pool
+ * This tells us the exact dexId (raydium, orca, meteora, etc.) and pool address
  */
-async function checkJupiter(tokenAddress: string, minLiquidity: number): Promise<LiquidityCheckResponse> {
-  const amountLamports = 100000000; // 0.1 SOL
+async function checkDexScreener(tokenAddress: string, minLiquidity: number): Promise<LiquidityCheckResponse> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
 
-  // Try multiple Jupiter endpoints for better compatibility
-  const endpoints = [
-    {
-      name: 'public-quote-v6',
-      url: `https://api.jup.ag/quote/v6?inputMint=${SOL_MINT}&outputMint=${tokenAddress}&amount=${amountLamports}&slippageBps=1500`,
-    },
-    {
-      name: 'lite-swap-v1',
-      url: `https://lite-api.jup.ag/swap/v1/quote?inputMint=${SOL_MINT}&outputMint=${tokenAddress}&amount=${amountLamports}&slippageBps=1500`,
-    },
-  ] as const;
-
-  let lastReason: string | undefined;
-
-  for (const ep of endpoints) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch(ep.url, {
+    // DexScreener API - search for token on Solana
+    const response = await fetch(
+      `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
+      {
         signal: controller.signal,
-        headers: { 'Accept': 'application/json' },
-      });
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'MemeSniper/2.0',
+        },
+      }
+    );
+    clearTimeout(timeout);
 
-      clearTimeout(timeout);
+    if (!response.ok) {
+      return { status: 'DISCARDED', reason: `DexScreener: HTTP ${response.status}` };
+    }
 
-      // 400 = token not indexed yet (expected for new tokens)
-      // 404 = route not found (also expected)
-      if (response.status === 400 || response.status === 404) {
-        lastReason = 'Token not indexed on Jupiter yet';
+    const data = await response.json();
+
+    if (!data.pairs || data.pairs.length === 0) {
+      return { status: 'DISCARDED', reason: 'No pairs found on DexScreener' };
+    }
+
+    // Filter for Solana pairs only and sort by liquidity
+    const solanaPairs = data.pairs
+      .filter((p: any) => p.chainId === 'solana')
+      .sort((a: any, b: any) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+
+    if (solanaPairs.length === 0) {
+      return { status: 'DISCARDED', reason: 'No Solana pairs on DexScreener' };
+    }
+
+    // Find best pair with SOL as quote/base and sufficient liquidity
+    for (const pair of solanaPairs) {
+      const dexId = pair.dexId?.toLowerCase() || '';
+      const pairAddress = pair.pairAddress;
+      const liquidityUsd = pair.liquidity?.usd || 0;
+      
+      // Rough conversion: $150 per SOL
+      const liquiditySol = liquidityUsd / 150;
+
+      // Check if this is a SOL pair
+      const baseTokenAddress = pair.baseToken?.address;
+      const quoteTokenAddress = pair.quoteToken?.address;
+      const hasSol = baseTokenAddress === SOL_MINT || quoteTokenAddress === SOL_MINT ||
+                     pair.quoteToken?.symbol === 'SOL' || pair.baseToken?.symbol === 'SOL';
+
+      if (!hasSol) continue;
+
+      // Check minimum liquidity (in SOL equivalent)
+      if (liquiditySol < minLiquidity) {
         continue;
       }
 
-      if (!response.ok) {
-        lastReason = `Jupiter(${ep.name}): HTTP ${response.status}`;
-        continue;
+      // Determine source based on DEX ID
+      let source: LiquidityCheckResponse['source'] = 'dexscreener';
+      if (dexId.includes('raydium')) {
+        source = 'raydium';
+      } else if (dexId.includes('orca')) {
+        source = 'orca';
       }
 
-      const data = await response.json();
+      console.log(`[LiquidityCheck] DexScreener found: ${dexId} pool ${pairAddress?.slice(0, 8)} with $${liquidityUsd.toFixed(0)} liquidity`);
 
-      // Check for error response or no route
-      if (data?.error || data?.errorCode) {
-        lastReason = data?.error || 'No route available';
-        continue;
-      }
-
-      if (!data?.outAmount || parseInt(data.outAmount) <= 0) {
-        lastReason = 'No valid route found';
-        continue;
-      }
-
-      // Estimate liquidity from route info
-      const routeInfo = data.routePlan?.[0];
-      const ammKey = routeInfo?.swapInfo?.ammKey;
-
-      // Check if route goes through known DEXes
-      const labels = (data.routePlan || [])
-        .map((r: any) => r?.swapInfo?.label || '')
-        .filter(Boolean);
-      const hasRaydium = labels.some((l: string) => l.toLowerCase().includes('raydium'));
-      const hasPumpFun = labels.some((l: string) => l.toLowerCase().includes('pump'));
-
-      // Rough liquidity estimate based on price impact
-      const priceImpact = parseFloat(data.priceImpactPct || '0');
-      let estimatedLiquidity = 50; // Default estimate
-      if (priceImpact > 10) estimatedLiquidity = 5;
-      else if (priceImpact > 5) estimatedLiquidity = 15;
-      else if (priceImpact > 2) estimatedLiquidity = 30;
-
-      if (estimatedLiquidity < minLiquidity) {
-        return {
-          status: 'DISCARDED',
-          reason: `Insufficient liquidity via Jupiter: ~${estimatedLiquidity} SOL`,
-        };
-      }
-
-      console.log(`[LiquidityCheck] Jupiter route found via ${ep.name}`);
       return {
         status: 'TRADABLE',
-        source: hasPumpFun ? 'pump_fun' : hasRaydium ? 'raydium' : 'jupiter',
-        poolAddress: ammKey || 'jupiter_route',
+        source,
+        dexId,
+        poolAddress: pairAddress,
         baseMint: SOL_MINT,
         quoteMint: tokenAddress,
-        liquidity: estimatedLiquidity,
+        liquidity: liquiditySol,
+        tokenName: pair.baseToken?.name || pair.quoteToken?.name,
+        tokenSymbol: pair.baseToken?.symbol || pair.quoteToken?.symbol,
       };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      // DNS errors or timeouts - try next endpoint
-      lastReason = `Jupiter(${ep.name}): ${message}`;
     }
-  }
 
-  // Don't log 400s as errors - they're expected for new tokens
-  if (lastReason && !lastReason.includes('not indexed')) {
-    console.log('[LiquidityCheck] Jupiter unavailable:', lastReason);
+    // Found pairs but none met criteria
+    const bestPair = solanaPairs[0];
+    const bestLiquidity = (bestPair.liquidity?.usd || 0) / 150;
+    return { 
+      status: 'DISCARDED', 
+      reason: `Best pool has ${bestLiquidity.toFixed(1)} SOL liquidity (need ${minLiquidity}+)` 
+    };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.log('[LiquidityCheck] DexScreener error:', message);
+    return { status: 'DISCARDED', reason: `DexScreener error: ${message}` };
   }
-  return { status: 'DISCARDED', reason: lastReason || 'Jupiter unavailable' };
 }
 
-
 /**
- * Check Raydium pools directly
+ * Direct Raydium API check (fallback if DexScreener doesn't have the pool yet)
  */
 async function checkRaydium(tokenAddress: string, minLiquidity: number): Promise<LiquidityCheckResponse> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
-    // Fixed: Use page_size instead of pageSize (Raydium API v3 parameter name)
+    // Raydium API v3 - search for pools by token mint
     const response = await fetch(
       `https://api-v3.raydium.io/pools/info/mint?mint1=${tokenAddress}&poolType=standard&poolSortField=liquidity&sortType=desc&page_size=10`,
       {
@@ -280,7 +275,7 @@ async function checkRaydium(tokenAddress: string, minLiquidity: number): Promise
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return { status: 'DISCARDED', reason: `Raydium: ${response.status}` };
+      return { status: 'DISCARDED', reason: `Raydium API: HTTP ${response.status}` };
     }
 
     const data = await response.json();
@@ -305,6 +300,7 @@ async function checkRaydium(tokenAddress: string, minLiquidity: number): Promise
         return {
           status: 'TRADABLE',
           source: 'raydium',
+          dexId: 'raydium',
           poolAddress: pool.id || pool.poolId,
           baseMint: SOL_MINT,
           quoteMint: tokenAddress,

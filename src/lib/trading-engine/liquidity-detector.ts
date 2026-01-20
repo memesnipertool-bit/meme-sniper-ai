@@ -33,6 +33,7 @@ export interface TradablePoolResult {
   quoteMint?: string;
   liquidity?: number;
   poolType?: 'raydium_v4' | 'raydium_clmm';
+  dexId?: string; // e.g., 'raydium', 'orca', 'meteora', 'pumpfun'
   detectedAt?: number;
   reason?: string;
 }
@@ -112,7 +113,19 @@ export async function detectTradablePool(
     const data = await response.json();
     
     if (data.status === 'TRADABLE') {
-      console.log(`[LiquidityDetector] ✅ Found tradeable via ${data.source}: ${data.liquidity?.toFixed(1)} SOL`);
+      // Determine pool type from source/dexId
+      const dexId = data.dexId || data.source || '';
+      let poolType: 'pump_fun' | 'raydium' | 'orca' | 'unknown' = 'unknown';
+      
+      if (data.source === 'pump_fun' || dexId === 'pumpfun') {
+        poolType = 'pump_fun';
+      } else if (dexId.includes('raydium') || data.source === 'raydium') {
+        poolType = 'raydium';
+      } else if (dexId.includes('orca') || data.source === 'orca') {
+        poolType = 'orca';
+      }
+      
+      console.log(`[LiquidityDetector] ✅ Found tradeable via ${dexId || data.source}: ${data.liquidity?.toFixed(1)} SOL`);
       
       onEvent?.({
         type: 'LIQUIDITY_DETECTED',
@@ -121,7 +134,7 @@ export async function detectTradablePool(
           tokenName: data.tokenName || 'Unknown',
           tokenSymbol: data.tokenSymbol || 'UNKNOWN',
           poolAddress: data.poolAddress || '',
-          poolType: data.source === 'pump_fun' ? 'pump_fun' : 'raydium',
+          poolType,
           baseMint: data.baseMint || SOL_MINT,
           quoteMint: tokenAddress,
           liquidityAmount: data.liquidity || 0,
@@ -137,9 +150,11 @@ export async function detectTradablePool(
         baseMint: data.baseMint || SOL_MINT,
         quoteMint: tokenAddress,
         liquidity: data.liquidity || 50,
-        poolType: 'raydium_v4',
+        poolType: poolType === 'orca' ? 'raydium_v4' : 'raydium_v4', // Use raydium_v4 for swap compatibility
         detectedAt: startTime,
-      };
+        // Pass through dexId for routing decisions
+        dexId: dexId,
+      } as TradablePoolResult & { dexId?: string };
     }
     
     // Not tradeable
