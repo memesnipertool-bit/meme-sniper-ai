@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Zap, ArrowDownUp, TrendingUp, TrendingDown, Loader2, AlertTriangle, Wallet } from 'lucide-react';
+import { Zap, ArrowDownUp, TrendingUp, TrendingDown, Loader2, AlertTriangle, Wallet, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -165,11 +165,33 @@ export function TokenTradingPanel({ token }: TokenTradingPanelProps) {
           </div>
 
           {!canTrade && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30">
-              <AlertTriangle className="w-4 h-4 text-destructive" />
-              <span className="text-sm text-destructive">
-                Trading not available for this token
-              </span>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30">
+                <AlertTriangle className="w-4 h-4 text-destructive" />
+                <span className="text-sm text-destructive">
+                  {token.isPumpFun 
+                    ? "Token is still on Pump.fun bonding curve"
+                    : "Trading not available for this token"}
+                </span>
+              </div>
+              
+              {token.isPumpFun && (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="w-full gap-2 border-primary/50 hover:bg-primary/10"
+                  onClick={() => window.open(`https://pump.fun/coin/${token.address}`, '_blank')}
+                >
+                  <img 
+                    src="https://pump.fun/icon.png" 
+                    alt="Pump.fun" 
+                    className="w-4 h-4"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                  Trade on Pump.fun
+                  <ExternalLink className="w-3 h-3 ml-auto" />
+                </Button>
+              )}
             </div>
           )}
 
