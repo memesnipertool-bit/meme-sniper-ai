@@ -150,66 +150,97 @@ async function checkPumpFun(tokenAddress: string): Promise<LiquidityCheckRespons
 
 /**
  * Check Jupiter for available routes
+ *
+ * NOTE: In some edge regions, DNS resolution can fail for specific hostnames.
+ * We therefore try multiple Jupiter endpoints before declaring Jupiter unavailable.
  */
 async function checkJupiter(tokenAddress: string, minLiquidity: number): Promise<LiquidityCheckResponse> {
-  try {
-    const amountLamports = 100000000; // 0.1 SOL
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+  const amountLamports = 100000000; // 0.1 SOL
 
-    const response = await fetch(
-      `https://quote-api.jup.ag/v6/quote?` +
-      `inputMint=${SOL_MINT}&` +
-      `outputMint=${tokenAddress}&` +
-      `amount=${amountLamports}&` +
-      `slippageBps=1500`,
-      {
+  const endpoints = [
+    {
+      // Free, keyless endpoint
+      name: 'lite.swap.v1',
+      url:
+        `https://lite-api.jup.ag/swap/v1/quote?` +
+        `inputMint=${SOL_MINT}&` +
+        `outputMint=${tokenAddress}&` +
+        `amount=${amountLamports}&` +
+        `slippageBps=1500`,
+    },
+  ] as const;
+
+  let lastReason: string | undefined;
+
+  for (const ep of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(ep.url, {
         signal: controller.signal,
         headers: { 'Accept': 'application/json' },
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        lastReason = `Jupiter(${ep.name}): ${response.status}`;
+        continue;
       }
-    );
-    clearTimeout(timeout);
 
-    if (!response.ok) {
-      return { status: 'DISCARDED', reason: `Jupiter: ${response.status}` };
+      const data = await response.json();
+
+      if (data?.error || !data?.outAmount || parseInt(data.outAmount) <= 0) {
+        lastReason = `Jupiter(${ep.name}): ${data?.error || 'No route'}`;
+        continue;
+      }
+
+      // Estimate liquidity from route info
+      const routeInfo = data.routePlan?.[0];
+      const ammKey = routeInfo?.swapInfo?.ammKey;
+
+      // Check if route goes through known DEXes
+      const labels = (data.routePlan || [])
+        .map((r: any) => r?.swapInfo?.label || '')
+        .filter(Boolean);
+      const hasRaydium = labels.some((l: string) => l.toLowerCase().includes('raydium'));
+      const hasPumpFun = labels.some((l: string) => l.toLowerCase().includes('pump'));
+
+      // Rough liquidity estimate based on price impact
+      const priceImpact = parseFloat(data.priceImpactPct || '0');
+      let estimatedLiquidity = 50; // Default estimate
+      if (priceImpact > 10) estimatedLiquidity = 5;
+      else if (priceImpact > 5) estimatedLiquidity = 15;
+      else if (priceImpact > 2) estimatedLiquidity = 30;
+
+      // (Optional) enforce minLiquidity using our rough estimate
+      if (estimatedLiquidity < minLiquidity) {
+        return {
+          status: 'DISCARDED',
+          reason: `Insufficient liquidity via Jupiter: ~${estimatedLiquidity} SOL`,
+        };
+      }
+
+      return {
+        status: 'TRADABLE',
+        source: hasPumpFun ? 'pump_fun' : hasRaydium ? 'raydium' : 'jupiter',
+        poolAddress: ammKey || 'jupiter_route',
+        baseMint: SOL_MINT,
+        quoteMint: tokenAddress,
+        liquidity: estimatedLiquidity,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      lastReason = `Jupiter(${ep.name}) error: ${message}`;
+      // try next endpoint
     }
-
-    const data = await response.json();
-
-    if (data.error || !data.outAmount || parseInt(data.outAmount) <= 0) {
-      return { status: 'DISCARDED', reason: data.error || 'No Jupiter route' };
-    }
-
-    // Estimate liquidity from route info
-    const routeInfo = data.routePlan?.[0];
-    const ammKey = routeInfo?.swapInfo?.ammKey;
-    
-    // Check if route goes through known DEXes
-    const labels = (data.routePlan || []).map((r: any) => r?.swapInfo?.label || '').filter(Boolean);
-    const hasRaydium = labels.some((l: string) => l.toLowerCase().includes('raydium'));
-    const hasPumpFun = labels.some((l: string) => l.toLowerCase().includes('pump'));
-    
-    // Rough liquidity estimate based on price impact
-    const priceImpact = parseFloat(data.priceImpactPct || '0');
-    let estimatedLiquidity = 50; // Default estimate
-    if (priceImpact > 10) estimatedLiquidity = 5;
-    else if (priceImpact > 5) estimatedLiquidity = 15;
-    else if (priceImpact > 2) estimatedLiquidity = 30;
-
-    return {
-      status: 'TRADABLE',
-      source: hasPumpFun ? 'pump_fun' : hasRaydium ? 'raydium' : 'jupiter',
-      poolAddress: ammKey || 'jupiter_route',
-      baseMint: SOL_MINT,
-      quoteMint: tokenAddress,
-      liquidity: estimatedLiquidity,
-    };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.log('[LiquidityCheck] Jupiter error:', message);
-    return { status: 'DISCARDED', reason: `Jupiter error: ${message}` };
   }
+
+  console.log('[LiquidityCheck] Jupiter error:', lastReason || 'Jupiter unavailable');
+  return { status: 'DISCARDED', reason: lastReason || 'Jupiter unavailable' };
 }
+
 
 /**
  * Check Raydium pools directly
