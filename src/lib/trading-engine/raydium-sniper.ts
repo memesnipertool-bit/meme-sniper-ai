@@ -203,9 +203,9 @@ async function executeViaJupiter(
   attempts: number,
   onEvent?: TradingEventCallback
 ): Promise<RaydiumSnipeResult> {
-  // Get Jupiter quote
+  // Get Jupiter quote - using free lite-api
   const quoteResponse = await fetch(
-    `https://quote-api.jup.ag/v6/quote?` +
+    `https://lite-api.jup.ag/swap/v1/quote?` +
     `inputMint=${SOL_MINT}&` +
     `outputMint=${tokenAddress}&` +
     `amount=${amountInLamports}&` +
@@ -223,8 +223,8 @@ async function executeViaJupiter(
     throw new Error(quoteData.error || 'No Jupiter route available');
   }
   
-  // Build swap transaction
-  const swapResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
+  // Build swap transaction via lite-api
+  const swapResponse = await fetch('https://lite-api.jup.ag/swap/v1/swap', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

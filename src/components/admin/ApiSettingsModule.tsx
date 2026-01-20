@@ -133,9 +133,9 @@ const API_INFO: Record<ApiType, {
   jupiter: {
     label: 'Jupiter Aggregator',
     required: true,
-    description: 'Primary DEX aggregator for Solana. Finds best swap routes across all DEXs.',
-    helpNotes: 'Free public API works, but paid API has higher limits. Get paid key for production.',
-    defaultUrl: 'https://quote-api.jup.ag/v6',
+    description: 'Primary DEX aggregator for Solana. Uses free lite-api by default (no key required).',
+    helpNotes: 'Free lite-api works without a key. Paid API (jupiterapi.com) has higher limits for production.',
+    defaultUrl: 'https://lite-api.jup.ag/swap/v1',
     requiresKey: false,
     secretName: 'JUPITER_API_KEY',
     exampleKey: 'jup_xxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
@@ -145,6 +145,7 @@ const API_INFO: Record<ApiType, {
       { pattern: 'ROUTE_NOT_FOUND', solution: 'No liquidity route found. Token may not be tradeable or has very low liquidity.' },
       { pattern: '403', solution: 'Access denied. Wait a moment and try again.' },
       { pattern: '429', solution: 'Rate limited. Reduce request frequency or use paid API key.' },
+      { pattern: 'dns error', solution: 'DNS resolution failed in edge environment. This is handled automatically via fallback.' },
     ],
   },
   raydium: {

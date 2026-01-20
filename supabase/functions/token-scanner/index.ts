@@ -11,8 +11,8 @@ const corsHeaders = {
 // Pump.fun API
 const PUMPFUN_API = "https://frontend-api.pump.fun";
 
-// Jupiter API for tradability check
-const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6/quote";
+// Jupiter API for tradability check - using free lite-api (no key required)
+const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
 
 // RugCheck API for safety validation
 const RUGCHECK_API = "https://api.rugcheck.xyz/v1";

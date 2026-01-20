@@ -467,8 +467,9 @@ async function simulateSwapJupiter(
   amountLamports: number
 ): Promise<SwapSimulationResult> {
   try {
+    // Use free lite-api endpoint
     const response = await fetch(
-      `https://quote-api.jup.ag/v6/quote?` +
+      `https://lite-api.jup.ag/swap/v1/quote?` +
       `inputMint=${inputMint}&` +
       `outputMint=${outputMint}&` +
       `amount=${amountLamports}&` +
@@ -518,10 +519,10 @@ async function tryJupiterFallback(
   minLiquidity: number
 ): Promise<TradablePoolResult> {
   try {
-    // Try to get a quote from Jupiter
+    // Try to get a quote from Jupiter lite-api
     const amountLamports = 100000000; // 0.1 SOL for more reliable quote
     const response = await fetch(
-      `https://quote-api.jup.ag/v6/quote?` +
+      `https://lite-api.jup.ag/swap/v1/quote?` +
       `inputMint=${SOL_MINT}&` +
       `outputMint=${tokenAddress}&` +
       `amount=${amountLamports}&` +
