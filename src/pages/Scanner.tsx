@@ -1,5 +1,5 @@
 import React, { forwardRef, useState, useEffect, useCallback, useMemo, useRef } from "react";
-import TradingHeader from "@/components/trading/TradingHeader";
+import AppLayout from "@/components/layout/AppLayout";
 import LiquidityBotPanel from "@/components/trading/LiquidityBotPanel";
 import SniperDecisionPanel from "@/components/trading/SniperDecisionPanel";
 import { TradeSignalPanel } from "@/components/trading/TradeSignalPanel";
@@ -808,7 +808,6 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
   return (
     <ErrorBoundary>
-    <div className="min-h-screen bg-background">
       {/* Confirmation Dialogs */}
       <ConfirmDialog
         open={showResetConfirm}
@@ -842,15 +841,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         onConfirm={handleSwitchToLiveAndActivate}
         onCancel={handleContinueDemo}
       />
-      <TradingHeader
-        walletConnected={wallet.isConnected}
-        walletAddress={wallet.address || undefined}
-        network={wallet.network}
-        onConnectWallet={handleConnectWallet}
-      />
-
-      <main className="pt-16 md:pt-20 pb-6 px-3 md:px-4">
-        <div className="container mx-auto space-y-4 md:space-y-6">
+      <AppLayout>
+        <div className="container mx-auto px-3 md:px-4 space-y-4 md:space-y-6">
           {/* Demo Mode Banner */}
           {isDemo && (
             <Alert className="bg-warning/10 border-warning/30">
@@ -879,24 +871,24 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             </Alert>
           )}
 
-          {/* API Errors Alert - Only show in Live mode */}
-          {!isDemo && apiErrors.length > 0 && showApiErrors && (
-            <Alert variant="destructive" className="relative">
+          {/* API Errors Banner */}
+          {apiErrors.length > 0 && (
+            <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle className="flex items-center justify-between">
-                <span>API Issues Detected ({apiErrors.length})</span>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-6 w-6 absolute top-2 right-2"
-                  onClick={() => setShowApiErrors(false)}
+                <span>API Connection Issues ({apiErrors.length})</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => {}}
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </AlertTitle>
               <AlertDescription>
-                <div className="mt-2 space-y-1">
-                  {apiErrors.map((error, index) => (
+                <div className="space-y-1 mt-2">
+                  {apiErrors.slice(0, 3).map((error, index) => (
                     <div key={index} className="flex items-center justify-between text-sm bg-destructive/10 rounded px-2 py-1">
                       <div>
                         <span className="font-medium">{error.apiName}</span>
@@ -1043,8 +1035,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             </div>
           </div>
         </div>
-      </main>
-    </div>
+      </AppLayout>
     </ErrorBoundary>
   );
 });

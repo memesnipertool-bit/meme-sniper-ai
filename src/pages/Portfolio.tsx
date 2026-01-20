@@ -1,5 +1,5 @@
 import React, { forwardRef, useState, useEffect, useRef } from "react";
-import TradingHeader from "@/components/trading/TradingHeader";
+import AppLayout from "@/components/layout/AppLayout";
 import { useWallet } from "@/hooks/useWallet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -185,16 +185,8 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <TradingHeader
-        walletConnected={wallet.isConnected}
-        walletAddress={wallet.address || undefined}
-        network={wallet.network}
-        onConnectWallet={handleConnectWallet}
-      />
-
-      <main className="relative pt-20 md:pt-24 pb-8">
-        <div className="container mx-auto px-4">
+    <AppLayout>
+      <div className="container mx-auto px-4">
           {/* Page Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
             <div>
@@ -509,8 +501,7 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
             )}
           </div>
         </div>
-      </main>
-    </div>
+      </AppLayout>
   );
 });
 

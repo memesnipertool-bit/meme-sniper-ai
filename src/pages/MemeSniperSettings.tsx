@@ -1,5 +1,5 @@
 import React, { forwardRef, useState } from 'react';
-import TradingHeader from "@/components/trading/TradingHeader";
+import AppLayout from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -96,71 +96,51 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background">
-        <TradingHeader
-          walletConnected={wallet.isConnected}
-          walletAddress={wallet.address || undefined}
-          network={wallet.network}
-          onConnectWallet={handleConnectWallet}
-        />
-        <div className="flex items-center justify-center pt-32">
+      <AppLayout>
+        <div className="flex items-center justify-center pt-12">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      </div>
+      </AppLayout>
     );
   }
 
   if (!settings) {
     return (
-      <div className="min-h-screen bg-background">
-        <TradingHeader
-          walletConnected={wallet.isConnected}
-          walletAddress={wallet.address || undefined}
-          network={wallet.network}
-          onConnectWallet={handleConnectWallet}
-        />
-        <div className="flex items-center justify-center pt-32">
+      <AppLayout>
+        <div className="flex items-center justify-center pt-12">
           <p className="text-muted-foreground">Please sign in to access settings.</p>
         </div>
-      </div>
+      </AppLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background" ref={ref}>
-      <TradingHeader
-        walletConnected={wallet.isConnected}
-        walletAddress={wallet.address || undefined}
-        network={wallet.network}
-        onConnectWallet={handleConnectWallet}
-      />
-
-      <main className="pt-20 pb-8 px-4">
-        <div className="container mx-auto max-w-4xl">
-          {/* Page Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-lg bg-primary/20">
-                <ListFilter className="w-6 h-6 text-primary" />
-              </div>
-              <div>
-                <h1 className="text-2xl md:text-3xl font-bold text-foreground">
-                  Token Lists
-                </h1>
-                <p className="text-muted-foreground text-sm">
-                  Manage blacklist and whitelist for token filtering
-                </p>
-              </div>
+    <AppLayout>
+      <div className="container mx-auto max-w-4xl px-4">
+        {/* Page Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-lg bg-primary/20">
+              <ListFilter className="w-6 h-6 text-primary" />
             </div>
-            <Button 
-              onClick={handleSave} 
-              disabled={saving} 
-              variant="glow"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-              Save
-            </Button>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold text-foreground">
+                Token Lists
+              </h1>
+              <p className="text-muted-foreground text-sm">
+                Manage blacklist and whitelist for token filtering
+              </p>
+            </div>
           </div>
+          <Button 
+            onClick={handleSave} 
+            disabled={saving} 
+            variant="glow"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+            Save
+          </Button>
+        </div>
 
           {/* Info Card */}
           <Card className="mb-6 border-primary/20 bg-primary/5">
@@ -288,10 +268,9 @@ const MemeSniperSettings = forwardRef<HTMLDivElement, object>(function MemeSnipe
                 )}
               </CardContent>
             </Card>
-          </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </AppLayout>
   );
 });
 

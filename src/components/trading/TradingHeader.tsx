@@ -1,13 +1,10 @@
-import React, { forwardRef, useState } from "react";
+import React, { forwardRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { 
-  Wallet, 
   User, 
   LogOut,
   ChevronDown,
-  Menu,
-  X,
   Zap,
   LayoutDashboard,
   Briefcase,
@@ -15,7 +12,6 @@ import {
   Settings,
   Crown,
   BarChart3,
-  Bell,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -49,7 +45,6 @@ const TradingHeader = forwardRef<HTMLElement, TradingHeaderProps>(function Tradi
   network = "Solana",
   onConnectWallet,
 }, ref) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { user, isAdmin, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -200,59 +195,8 @@ const TradingHeader = forwardRef<HTMLElement, TradingHeaderProps>(function Tradi
               </DropdownMenu>
             )}
             
-            {/* Mobile Menu Toggle */}
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="lg:hidden"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </Button>
           </div>
         </div>
-        
-        {/* Mobile Menu */}
-        {mobileMenuOpen && (
-          <div className="lg:hidden py-4 border-t border-border/50 animate-fade-in">
-            <nav className="flex flex-col gap-1">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = location.pathname === item.path;
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                      isActive
-                        ? "bg-primary/15 text-primary"
-                        : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                    }`}
-                  >
-                    <Icon className="w-5 h-5" />
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </nav>
-            {user && (
-              <div className="mt-4 pt-4 border-t border-border/50">
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
-                  onClick={() => {
-                    handleSignOut();
-                    setMobileMenuOpen(false);
-                  }}
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Sign Out
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </header>
   );

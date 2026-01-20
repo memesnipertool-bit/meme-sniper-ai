@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import TradingHeader from "@/components/trading/TradingHeader";
+import MobileTabNav from "@/components/navigation/MobileTabNav";
 import { useWallet } from "@/hooks/useWallet";
 
 interface AppLayoutProps {
@@ -25,9 +26,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
         network={wallet.network}
         onConnectWallet={handleConnectWallet}
       />
-      <main className="pt-20 pb-8 flex-1 overflow-y-auto overflow-x-hidden">
+      {/* Main content: pt-16/20 for header, pb-20 on mobile for bottom nav */}
+      <main className="pt-16 lg:pt-20 pb-20 lg:pb-8 flex-1 overflow-y-auto overflow-x-hidden">
         {children}
       </main>
+      {/* Mobile bottom tab navigation */}
+      <MobileTabNav />
     </div>
   );
 }
