@@ -1,19 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { 
   Activity, 
   CheckCircle, 
   XCircle, 
   AlertTriangle, 
   Ban, 
-  Wallet,
-  Clock,
   Trash2,
   ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 
 export type LogLevel = 'info' | 'success' | 'warning' | 'error' | 'skip';
@@ -172,103 +170,103 @@ export default function BotActivityLog({ maxEntries = 100 }: BotActivityLogProps
   };
 
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-primary" />
-            Bot Activity
-            <Badge variant="outline" className="text-[10px] h-4 ml-1">
-              {logs.length}
-            </Badge>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 text-[10px]">
-              <span className="text-success">{stats.success}✓</span>
-              <span className="text-muted-foreground">{stats.skip}⊘</span>
-              <span className="text-destructive">{stats.error}✗</span>
-            </div>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-6 w-6"
-              onClick={() => clearBotLogs()}
-            >
-              <Trash2 className="w-3 h-3" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-6 w-6"
-              onClick={() => setExpanded(!expanded)}
-            >
-              {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </Button>
-          </div>
-        </CardTitle>
-      </CardHeader>
-      {expanded && (
-        <CardContent className="pt-0">
-          <ScrollArea className="h-[250px]">
-            {displayLogs.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-sm text-muted-foreground py-8">
-                No activity yet. Activate the bot to see logs.
+    <Collapsible open={expanded} onOpenChange={setExpanded}>
+      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <CollapsibleTrigger asChild>
+          <CardHeader className="pb-2 cursor-pointer hover:bg-muted/30 transition-colors rounded-t-lg">
+            <CardTitle className="text-sm font-medium flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-primary" />
+                Bot Activity
+                <Badge variant="outline" className="text-[10px] h-4 ml-1">
+                  {logs.length}
+                </Badge>
               </div>
-            ) : (
-              <div className="space-y-1.5">
-                {displayLogs.map((entry) => {
-                  const config = levelConfig[entry.level];
-                  const Icon = config.icon;
-                  const isExpanded = expandedEntries.has(entry.id);
-                  const friendlyMessage = getFriendlyMessage(entry);
-                  
-                  return (
-                    <div
-                      key={entry.id}
-                      className={`p-2.5 rounded-lg border border-transparent hover:border-border/50 transition-colors ${entry.details ? 'cursor-pointer' : ''} ${config.bg}`}
-                      onClick={() => entry.details && toggleEntry(entry.id)}
-                    >
-                      <div className="flex items-start gap-2">
-                        <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${config.color}`} />
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Badge variant="outline" className="text-[9px] h-4 px-1.5 shrink-0">
-                              {categoryLabels[entry.category]}
-                            </Badge>
-                            {entry.tokenSymbol && (
-                              <span className="font-semibold text-xs text-foreground shrink-0">
-                                ${entry.tokenSymbol}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 text-[10px]">
+                  <span className="text-success">{stats.success}✓</span>
+                  <span className="text-muted-foreground">{stats.skip}⊘</span>
+                  <span className="text-destructive">{stats.error}✗</span>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-6 w-6"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearBotLogs();
+                  }}
+                >
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+                <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+              </div>
+            </CardTitle>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="pt-0">
+            <ScrollArea className="h-[250px]">
+              {displayLogs.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-sm text-muted-foreground py-8">
+                  No activity yet. Activate the bot to see logs.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {displayLogs.map((entry) => {
+                    const config = levelConfig[entry.level];
+                    const Icon = config.icon;
+                    const isExpanded = expandedEntries.has(entry.id);
+                    const friendlyMessage = getFriendlyMessage(entry);
+                    
+                    return (
+                      <div
+                        key={entry.id}
+                        className={`p-2.5 rounded-lg border border-transparent hover:border-border/50 transition-colors ${entry.details ? 'cursor-pointer' : ''} ${config.bg}`}
+                        onClick={() => entry.details && toggleEntry(entry.id)}
+                      >
+                        <div className="flex items-start gap-2">
+                          <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${config.color}`} />
+                          <div className="flex-1 min-w-0 overflow-hidden">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge variant="outline" className="text-[9px] h-4 px-1.5 shrink-0">
+                                {categoryLabels[entry.category]}
+                              </Badge>
+                              {entry.tokenSymbol && (
+                                <span className="font-semibold text-xs text-foreground shrink-0">
+                                  ${entry.tokenSymbol}
+                                </span>
+                              )}
+                              <span className="text-[9px] text-muted-foreground shrink-0 ml-auto">
+                                {entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </span>
+                            </div>
+                            <p className={`text-xs leading-relaxed break-words whitespace-pre-wrap ${config.color}`}>
+                              {friendlyMessage}
+                            </p>
+                            {isExpanded && entry.details && (
+                              <div className="mt-2 pt-2 border-t border-border/30">
+                                <p className="text-[10px] text-muted-foreground break-words whitespace-pre-wrap font-mono bg-background/50 p-2 rounded">
+                                  {entry.details}
+                                </p>
+                              </div>
+                            )}
+                            {entry.details && !isExpanded && (
+                              <span className="text-[9px] text-muted-foreground/60 mt-1 inline-block">
+                                Click for details...
                               </span>
                             )}
-                            <span className="text-[9px] text-muted-foreground shrink-0 ml-auto">
-                              {entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                            </span>
                           </div>
-                          <p className={`text-xs leading-relaxed break-words whitespace-pre-wrap ${config.color}`}>
-                            {friendlyMessage}
-                          </p>
-                          {isExpanded && entry.details && (
-                            <div className="mt-2 pt-2 border-t border-border/30">
-                              <p className="text-[10px] text-muted-foreground break-words whitespace-pre-wrap font-mono bg-background/50 p-2 rounded">
-                                {entry.details}
-                              </p>
-                            </div>
-                          )}
-                          {entry.details && !isExpanded && (
-                            <span className="text-[9px] text-muted-foreground/60 mt-1 inline-block">
-                              Click for details...
-                            </span>
-                          )}
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </ScrollArea>
-        </CardContent>
-      )}
-    </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   );
 }
