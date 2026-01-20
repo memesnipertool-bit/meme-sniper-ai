@@ -89,38 +89,54 @@ function getFriendlyMessage(entry: BotLogEntry): string {
   const errorMappings: [RegExp, string][] = [
     // Network/API errors
     [/dns error|failed to lookup|no address associated/i, '🌐 Network issue - API temporarily unavailable'],
-    [/timeout|timed out|aborted/i, '⏱️ Request timed out - server took too long'],
-    [/fetch failed|failed to fetch/i, '📡 Connection failed - check your internet'],
-    [/HTTP 4\d\d|HTTP 5\d\d/i, '⚠️ Server error - try again shortly'],
-    [/401|unauthorized/i, '🔐 Authentication failed - check API keys'],
-    [/403|forbidden/i, '🚫 Access denied - insufficient permissions'],
-    [/429|rate limit/i, '⏳ Rate limited - too many requests, slowing down'],
+    [/timeout|timed out|aborted/i, '⏱️ Request timed out - trying again'],
+    [/fetch failed|failed to fetch/i, '📡 Connection failed - retrying'],
+    [/HTTP 4\d\d|HTTP 5\d\d/i, '⚠️ API error - using fallback'],
+    [/401|unauthorized/i, '🔐 Authentication failed'],
+    [/403|forbidden/i, '🚫 Access denied'],
+    [/429|rate limit/i, '⏳ Rate limited - slowing down'],
+    [/503|service unavailable/i, '🔄 Service busy - using backup'],
+    [/530|cloudflare/i, '☁️ Cloudflare protection - retrying'],
     
     // Jupiter/DEX errors
-    [/not indexed on Jupiter/i, '🔍 Token too new for Jupiter - checking other DEXs'],
-    [/no route|no valid route/i, '🛤️ No trading route available yet'],
-    [/Jupiter unavailable/i, '🔌 Jupiter API offline - using alternatives'],
+    [/not indexed on Jupiter/i, '🔍 Token too new - using Raydium/Orca'],
+    [/no route|no valid route/i, '🛤️ No route yet - checking alternatives'],
+    [/Jupiter unavailable/i, '🔌 Jupiter offline - using direct DEX'],
     
-    // Liquidity errors
-    [/insufficient liquidity/i, '💧 Not enough liquidity to trade safely'],
-    [/no.*pool.*found/i, '🏊 No liquidity pool found for this token'],
+    // Liquidity/Pool errors
+    [/insufficient liquidity/i, '💧 Low liquidity - skipped for safety'],
+    [/no.*pool.*found/i, '🏊 No pool found yet'],
     [/liquidity.*SOL.*need/i, '💧 Waiting for more liquidity'],
+    [/DexScreener.*found/i, '✅ Pool found via DexScreener'],
+    [/Raydium.*found/i, '✅ Pool found on Raydium'],
+    [/Orca.*found/i, '✅ Pool found on Orca'],
     
     // Trading errors
-    [/slippage|price impact/i, '📉 Price would move too much - trade skipped'],
-    [/insufficient.*balance/i, '💰 Not enough SOL in wallet'],
+    [/slippage|price impact/i, '📉 Price too volatile - skipped'],
+    [/insufficient.*balance/i, '💰 Need more SOL in wallet'],
     [/transaction failed/i, '❌ Transaction failed on-chain'],
-    [/simulation failed/i, '🧪 Swap simulation failed - pool may be unstable'],
+    [/simulation failed/i, '🧪 Swap simulation failed'],
+    [/wallet not connected/i, '🔗 Connect wallet to trade'],
+    [/connect wallet/i, '🔗 Connect wallet to enable trading'],
     
     // Token evaluation
-    [/discarded|rejected/i, '⏭️ Token didn\'t pass safety filters'],
-    [/risk.*high|high.*risk/i, '⚠️ Risk score too high - skipped for safety'],
-    [/honeypot|rug.*pull/i, '🚨 Potential scam detected - avoided'],
+    [/discarded|rejected/i, '⏭️ Didn\'t pass filters'],
+    [/risk.*high|high.*risk/i, '⚠️ Risk too high - skipped'],
+    [/honeypot|rug.*pull/i, '🚨 Scam detected - avoided'],
+    [/\d+ tokens evaluated.*0 approved/i, '🔍 Scanning - no matches yet'],
+    [/\d+ token.*approved/i, '✅ Found trading opportunity!'],
     
-    // Success messages
+    // Success messages - keep original
     [/tradable|tradeable/i, '✅ Token is tradeable'],
     [/found.*pool|pool.*found/i, '✅ Liquidity pool discovered'],
-    [/snipe.*success|executed/i, '🎯 Trade executed successfully'],
+    [/snipe.*success|trade successful/i, '🎯 Trade executed!'],
+    [/3-stage snipe/i, '🚀 Starting trade execution'],
+    
+    // System messages
+    [/bot loop started/i, '🤖 Bot is running'],
+    [/cleared.*tokens.*cache/i, '🧹 Cache refreshed'],
+    [/max positions reached/i, '📊 Position limit reached'],
+    [/executing.*trade/i, '⚡ Executing trade...'],
   ];
   
   for (const [pattern, replacement] of errorMappings) {
