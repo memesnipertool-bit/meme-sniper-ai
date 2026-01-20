@@ -6,11 +6,12 @@ import {
   decryptKey,
   validateApiKey,
   getAllApiKeyStatus,
+  validateInternalToken,
 } from "../_shared/api-keys.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-token',
 };
 
 serve(async (req) => {
@@ -26,8 +27,18 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { action, apiType, apiKey } = body;
 
-    // Internal action for edge-to-edge calls (no auth required, uses service role)
+    // Internal action for edge-to-edge calls - requires internal token validation
     if (action === 'get_key_internal') {
+      // Validate internal service token
+      const internalToken = req.headers.get('x-internal-token');
+      if (!validateInternalToken(internalToken)) {
+        console.warn('Invalid internal token attempt for get_key_internal');
+        return new Response(JSON.stringify({ error: 'Unauthorized internal request' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       if (!apiType || !API_SECRET_MAPPING[apiType]) {
         return new Response(JSON.stringify({ error: 'Invalid API type' }), {
           status: 400,
@@ -54,6 +65,9 @@ serve(async (req) => {
         apiKeyValue = envKey ? Deno.env.get(envKey) || null : null;
       }
 
+      // Log access for audit trail
+      console.log(`[AUDIT] Internal API key access: ${apiType} at ${new Date().toISOString()}`);
+
       return new Response(JSON.stringify({
         apiType,
         apiKey: apiKeyValue,
@@ -65,7 +79,7 @@ serve(async (req) => {
       });
     }
 
-    // All other actions require authentication
+    // All other actions require user authentication
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -179,6 +193,9 @@ serve(async (req) => {
         }
       }
 
+      // Log for audit
+      console.log(`[AUDIT] API key saved by admin ${user.id}: ${apiType} at ${new Date().toISOString()}`);
+
       return new Response(JSON.stringify({ 
         success: true,
         message: `API key for ${apiType} saved successfully`,
@@ -206,6 +223,9 @@ serve(async (req) => {
       if (updateError) {
         throw new Error(`Failed to delete API key: ${updateError.message}`);
       }
+
+      // Log for audit
+      console.log(`[AUDIT] API key deleted by admin ${user.id}: ${apiType} at ${new Date().toISOString()}`);
 
       return new Response(JSON.stringify({ 
         success: true,
