@@ -205,7 +205,18 @@ export function TransactionStatus({
         {/* Error Message */}
         {isFailed && error && (
           <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3">
-            <p className="text-sm text-destructive">{error}</p>
+            <p className="text-sm text-destructive whitespace-pre-wrap break-words">{error}</p>
+            {error.includes('pump.fun') && (
+              <a 
+                href="https://pump.fun" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-2 text-xs text-primary hover:underline"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Trade on Pump.fun
+              </a>
+            )}
           </div>
         )}
 
