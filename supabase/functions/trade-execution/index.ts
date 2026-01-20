@@ -140,52 +140,59 @@ async function withRetry<T>(
 }
 
 // Check if token is from Pump.fun (bonding curve)
-async function isPumpFunToken(tokenMint: string): Promise<{ isPumpFun: boolean; bondingCurve?: any }> {
-  // Try primary API first
-  try {
-    const response = await fetch(`${PUMPFUN_API}/coins/${tokenMint}`, {
-      signal: AbortSignal.timeout(5000),
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; MemeSniper/1.0)',
-      },
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      // If the token exists on pump.fun and hasn't graduated
-      if (data && !data.complete) {
-        console.log(`[Pump.fun] Token ${tokenMint} is on bonding curve`);
-        return { isPumpFun: true, bondingCurve: data };
+async function isPumpFunToken(tokenMint: string): Promise<{ isPumpFun: boolean; bondingCurve?: any; apiError?: boolean }> {
+  // Multiple API endpoints to try for resilience
+  const endpoints = [
+    { url: `${PUMPFUN_API}/coins/${tokenMint}`, name: 'primary' },
+    { url: `${PUMPFUN_COIN_API}/coins/${tokenMint}`, name: 'fallback' },
+    { url: `https://pump.fun/coin/${tokenMint}`, name: 'web-fallback', isHtml: true },
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint.url, {
+        signal: AbortSignal.timeout(8000),
+        headers: {
+          'Accept': endpoint.isHtml ? 'text/html' : 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Cache-Control': 'no-cache',
+        },
+      });
+      
+      if (response.ok) {
+        if (endpoint.isHtml) {
+          // If web page exists, token is likely on Pump.fun
+          const html = await response.text();
+          if (html.includes(tokenMint) && !html.includes('404') && !html.includes('not found')) {
+            console.log(`[Pump.fun] Token ${tokenMint} found via web fallback (may be on bonding curve)`);
+            return { isPumpFun: true, bondingCurve: { complete: false }, apiError: true };
+          }
+        } else {
+          const data = await response.json();
+          // If the token exists on pump.fun and hasn't graduated
+          if (data && data.mint === tokenMint) {
+            if (!data.complete) {
+              console.log(`[Pump.fun] Token ${tokenMint} is on bonding curve (${endpoint.name})`);
+              return { isPumpFun: true, bondingCurve: data };
+            } else {
+              console.log(`[Pump.fun] Token ${tokenMint} has graduated to Raydium`);
+              return { isPumpFun: false };
+            }
+          }
+        }
+      } else if (response.status === 404) {
+        // Token definitely not on Pump.fun
+        console.log(`[Pump.fun] Token ${tokenMint} not found on Pump.fun (${endpoint.name})`);
+        return { isPumpFun: false };
       }
-      return { isPumpFun: false };
+    } catch (error: any) {
+      console.log(`[Pump.fun] ${endpoint.name} API failed for ${tokenMint}: ${error.message}`);
     }
-  } catch (error) {
-    console.log(`[Pump.fun] Primary API failed for ${tokenMint}, trying fallback...`);
   }
 
-  // Try fallback API
-  try {
-    const fallbackResponse = await fetch(`${PUMPFUN_COIN_API}/coins/${tokenMint}`, {
-      signal: AbortSignal.timeout(5000),
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; MemeSniper/1.0)',
-      },
-    });
-    
-    if (fallbackResponse.ok) {
-      const data = await fallbackResponse.json();
-      if (data && !data.complete) {
-        console.log(`[Pump.fun Fallback] Token ${tokenMint} is on bonding curve`);
-        return { isPumpFun: true, bondingCurve: data };
-      }
-    }
-  } catch (fallbackError) {
-    console.log(`[Pump.fun] Fallback also failed for ${tokenMint}:`, fallbackError);
-  }
-
-  return { isPumpFun: false };
+  // If all endpoints failed but we couldn't confirm token doesn't exist
+  console.log(`[Pump.fun] All endpoints failed for ${tokenMint}, assuming not on Pump.fun`);
+  return { isPumpFun: false, apiError: true };
 }
 
 // Validate token for safety (honeypot, freeze authority, etc.)
@@ -801,11 +808,31 @@ Deno.serve(async (req) => {
               const rayErrorMsg = raydiumError?.message || String(raydiumError);
               console.log(`[Trade] Raydium also failed: ${rayErrorMsg}`);
               
-              // If both failed, return a helpful error message
-              if (rayErrorMsg.includes('ROUTE_NOT_FOUND')) {
-                throw new Error(tradeablityError || `Token not tradable on DEXs yet. This token may be too new - check if it's still on Pump.fun bonding curve.`);
+              // Provide user-friendly error messages based on failure type
+              const isNotTradable = jupErrorMsg.includes('TOKEN_NOT_TRADABLE') || jupErrorMsg.includes('not tradable');
+              const isNoRoute = rayErrorMsg.includes('ROUTE_NOT_FOUND');
+              
+              if (isNotTradable || isNoRoute) {
+                // Check if this might be a Pump.fun API issue
+                if (pumpCheck.apiError) {
+                  throw new Error(
+                    `🔄 Token may still be on Pump.fun bonding curve but API verification failed. ` +
+                    `This is a very new token that hasn't graduated to DEXs yet. ` +
+                    `Try again in a few minutes or trade directly on pump.fun website.`
+                  );
+                }
+                throw new Error(
+                  `❌ Token not available on any DEX. Possible reasons:\n` +
+                  `• Token is still on Pump.fun bonding curve (not yet graduated)\n` +
+                  `• Token has no liquidity pool on Raydium/Jupiter\n` +
+                  `• Token was just created and needs time to be indexed\n\n` +
+                  `💡 Try: Wait a few minutes and retry, or trade on pump.fun directly.`
+                );
               }
-              throw new Error(`No trading route found. Token may not have sufficient liquidity. Jupiter: ${jupErrorMsg}. Raydium: ${rayErrorMsg}`);
+              throw new Error(
+                `⚠️ No trading route found. Token may have insufficient liquidity.\n` +
+                `Jupiter: ${jupErrorMsg}\nRaydium: ${rayErrorMsg}`
+              );
             }
           }
         }
