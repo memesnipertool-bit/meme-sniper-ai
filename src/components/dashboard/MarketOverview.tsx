@@ -10,13 +10,13 @@ interface MarketOverviewProps {
   loading?: boolean;
 }
 
-// Fallback static data when no tokens available
+// Fallback static data when no tokens available - with demo addresses for navigation
 const fallbackTokens = [
-  { symbol: "BONK", name: "Bonk", price: "$0.00003241", change24h: 15.4, volume: "$125M", hot: true },
-  { symbol: "WIF", name: "dogwifhat", price: "$2.45", change24h: 8.2, volume: "$89M", hot: true },
-  { symbol: "MYRO", name: "Myro", price: "$0.156", change24h: -3.5, volume: "$42M" },
-  { symbol: "POPCAT", name: "Popcat", price: "$0.892", change24h: 22.1, volume: "$67M", hot: true },
-  { symbol: "BOME", name: "Book of Meme", price: "$0.0123", change24h: -1.2, volume: "$35M" },
+  { symbol: "BONK", name: "Bonk", address: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", price: "$0.00003241", change24h: 15.4, volume: "$125M", hot: true },
+  { symbol: "WIF", name: "dogwifhat", address: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", price: "$2.45", change24h: 8.2, volume: "$89M", hot: true },
+  { symbol: "MYRO", name: "Myro", address: "HhJpBhRRn4g56VsyLuT8DL5Bv31HkXqsrahTTUCZeZg4", price: "$0.156", change24h: -3.5, volume: "$42M" },
+  { symbol: "POPCAT", name: "Popcat", address: "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr", price: "$0.892", change24h: 22.1, volume: "$67M", hot: true },
+  { symbol: "BOME", name: "Book of Meme", address: "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82", price: "$0.0123", change24h: -1.2, volume: "$35M" },
 ];
 
 const formatPrice = (price: number) => {
@@ -47,13 +47,27 @@ export default function MarketOverview({ tokens = [], loading = false }: MarketO
         hot: t.priceChange24h > 10 || t.riskScore < 40,
         tokenData: t, // Keep full token data for navigation
       }))
-    : fallbackTokens.map(t => ({ ...t, address: '', tokenData: null }));
+    : fallbackTokens.map(t => ({ ...t, tokenData: null }));
 
   const handleTokenClick = (token: typeof displayTokens[0]) => {
-    if (token.address && token.tokenData) {
-      // Pass token data via URL params for immediate display
-      const tokenDataParam = encodeURIComponent(JSON.stringify(token.tokenData));
-      navigate(`/token/${token.address}?data=${tokenDataParam}`);
+    if (token.address) {
+      if (token.tokenData) {
+        // Pass token data via URL params for immediate display
+        const tokenDataParam = encodeURIComponent(JSON.stringify(token.tokenData));
+        navigate(`/token/${token.address}?data=${tokenDataParam}`);
+      } else {
+        // Fallback tokens - navigate with basic info via URL params
+        const basicData = {
+          address: token.address,
+          name: token.name,
+          symbol: token.symbol,
+          priceUsd: parseFloat(token.price.replace('$', '').replace(',', '')),
+          priceChange24h: token.change24h,
+          volume24h: parseFloat(token.volume.replace('$', '').replace('M', '000000').replace('K', '000')),
+        };
+        const tokenDataParam = encodeURIComponent(JSON.stringify(basicData));
+        navigate(`/token/${token.address}?data=${tokenDataParam}`);
+      }
     }
   };
 
