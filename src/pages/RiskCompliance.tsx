@@ -538,7 +538,15 @@ const RiskCompliance = forwardRef<HTMLDivElement, object>(function RiskComplianc
                         <Input
                           type="number"
                           value={settings.circuit_breaker_time_window_minutes}
-                          onChange={(e) => updateSettings({ circuit_breaker_time_window_minutes: parseInt(e.target.value) || 60 })}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            // Validate range 15-1440 (15 minutes to 24 hours)
+                            if (!isNaN(val) && val >= 15 && val <= 1440) {
+                              updateSettings({ circuit_breaker_time_window_minutes: val });
+                            } else if (e.target.value === '') {
+                              updateSettings({ circuit_breaker_time_window_minutes: 60 });
+                            }
+                          }}
                           min={15}
                           max={1440}
                           disabled={loading || !settings.circuit_breaker_enabled}

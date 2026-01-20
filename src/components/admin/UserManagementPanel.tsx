@@ -760,10 +760,19 @@ export function UserManagementPanel() {
               </label>
               <textarea
                 value={suspendReason}
-                onChange={(e) => setSuspendReason(e.target.value)}
+                onChange={(e) => {
+                  // Limit suspension reason to 500 characters
+                  if (e.target.value.length <= 500) {
+                    setSuspendReason(e.target.value);
+                  }
+                }}
+                maxLength={500}
                 placeholder="Enter the reason for suspending this user..."
                 className="w-full h-24 px-4 py-3 bg-secondary/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                {suspendReason.length}/500 characters
+              </p>
             </div>
           </div>
           <DialogFooter>

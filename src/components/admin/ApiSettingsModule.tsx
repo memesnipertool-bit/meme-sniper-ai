@@ -568,8 +568,17 @@ export function ApiSettingsModule() {
                       id="rate_limit"
                       type="number"
                       value={formData.rate_limit_per_minute}
-                      onChange={(e) => setFormData(prev => ({ ...prev, rate_limit_per_minute: parseInt(e.target.value) || 60 }))}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        // Validate range 1-10000
+                        if (!isNaN(val) && val >= 1 && val <= 10000) {
+                          setFormData(prev => ({ ...prev, rate_limit_per_minute: val }));
+                        } else if (e.target.value === '') {
+                          setFormData(prev => ({ ...prev, rate_limit_per_minute: 60 }));
+                        }
+                      }}
                       min={1}
+                      max={10000}
                     />
                   </div>
                   

@@ -219,9 +219,21 @@ export function TokenTradingPanel({ token }: TokenTradingPanelProps) {
                   type="number"
                   placeholder="0.1"
                   value={buyAmount}
-                  onChange={(e) => setBuyAmount(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    // Allow empty for typing, validate on blur/submit
+                    if (val === '' || (parseFloat(val) >= 0 && parseFloat(val) <= 100)) {
+                      setBuyAmount(val);
+                    }
+                  }}
+                  min={0.001}
+                  max={100}
+                  step={0.01}
                   className="font-mono"
                 />
+                {parseFloat(buyAmount) > walletBalance && (
+                  <p className="text-xs text-destructive">Exceeds wallet balance</p>
+                )}
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -346,7 +358,15 @@ export function TokenTradingPanel({ token }: TokenTradingPanelProps) {
                   type="number"
                   placeholder="0.0"
                   value={swapFromAmount}
-                  onChange={(e) => setSwapFromAmount(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '' || (parseFloat(val) >= 0 && parseFloat(val) <= 100)) {
+                      setSwapFromAmount(val);
+                    }
+                  }}
+                  min={0.001}
+                  max={100}
+                  step={0.01}
                   className="font-mono"
                 />
               </div>
