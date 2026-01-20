@@ -351,7 +351,7 @@ function getDefaultBaseUrl(apiType: string): string {
     dexscreener: 'https://api.dexscreener.com',
     geckoterminal: 'https://api.geckoterminal.com',
     honeypot_rugcheck: 'https://api.rugcheck.xyz',
-    jupiter: 'https://quote-api.jup.ag/v6',
+    jupiter: 'https://lite-api.jup.ag/swap/v1',
     raydium: 'https://transaction-v1.raydium.io',
     pumpfun: 'https://frontend-api.pump.fun',
     rpc_provider: 'https://api.mainnet-beta.solana.com',

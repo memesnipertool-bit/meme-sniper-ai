@@ -8,7 +8,8 @@ const corsHeaders = {
 
 // API configuration - dynamically fetched from database
 let JUPITER_API_KEY: string | null = null;
-let JUPITER_BASE_URL = "https://quote-api.jup.ag/v6"; // Default to free public API
+// Default to free lite-api (no API key required, bypasses DNS issues in some regions)
+let JUPITER_BASE_URL = "https://lite-api.jup.ag/swap/v1";
 let JUPITER_QUOTE_API = `${JUPITER_BASE_URL}/quote`;
 let JUPITER_SWAP_API = `${JUPITER_BASE_URL}/swap`;
 
@@ -19,12 +20,14 @@ async function initializeApiKeys() {
     JUPITER_API_KEY = await getApiKey('jupiter');
     
     if (JUPITER_API_KEY) {
-      JUPITER_BASE_URL = "https://public.jupiterapi.com"; // Paid API with higher limits
+      // Paid API with higher limits
+      JUPITER_BASE_URL = "https://public.jupiterapi.com";
       JUPITER_QUOTE_API = `${JUPITER_BASE_URL}/quote`;
       JUPITER_SWAP_API = `${JUPITER_BASE_URL}/swap`;
       console.log('[Trade] Jupiter API: AUTHENTICATED (paid) - using jupiterapi.com');
     } else {
-      console.log('[Trade] Jupiter API: PUBLIC (rate limited) - using jup.ag');
+      // Free lite-api - no key needed
+      console.log('[Trade] Jupiter API: PUBLIC (lite-api) - free tier');
     }
   } catch (error) {
     console.error('[Trade] Failed to initialize API keys:', error);

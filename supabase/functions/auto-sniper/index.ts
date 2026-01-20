@@ -7,8 +7,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Jupiter API for route validation (primary - aggregates all DEXs including Raydium)
-const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6/quote";
+// Jupiter API for route validation - using free lite-api (no key required)
+const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
 // Raydium API for route validation (fallback)
 const RAYDIUM_QUOTE_API = "https://transaction-v1.raydium.io/compute/swap-base-in";
 const SOL_MINT = "So11111111111111111111111111111111111111112";

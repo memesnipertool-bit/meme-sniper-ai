@@ -46,11 +46,11 @@ export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 // API endpoints
 export const API_ENDPOINTS = {
-  // Jupiter
-  jupiterQuote: 'https://quote-api.jup.ag/v6/quote',
-  jupiterSwap: 'https://quote-api.jup.ag/v6/swap',
-  jupiterPrice: 'https://price.jup.ag/v6/price',
-  jupiterTokens: 'https://token.jup.ag/all',
+  // Jupiter - using free lite-api (no API key required)
+  jupiterQuote: 'https://lite-api.jup.ag/swap/v1/quote',
+  jupiterSwap: 'https://lite-api.jup.ag/swap/v1/swap',
+  jupiterPrice: 'https://lite-api.jup.ag/price/v3',
+  jupiterTokens: 'https://tokens.jup.ag/tokens?tags=verified',
   
   // Raydium
   raydiumSwap: 'https://api-v3.raydium.io/swap',
