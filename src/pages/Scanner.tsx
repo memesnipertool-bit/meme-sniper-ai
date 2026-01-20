@@ -311,29 +311,54 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     return () => clearInterval(interval);
   }, [scanSpeed, isPaused, settings?.min_liquidity, scanTokens, isDemo]);
 
-  // Auto-sniper: evaluate NEW tokens when bot is active
+  // ============================================
+  // PRODUCTION-GRADE BOT EVALUATION LOOP
+  // Runs continuously while bot is active
+  // ============================================
+  
+  // Continuous evaluation interval ref
+  const evaluationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  
+  // Clear processed tokens periodically to allow re-evaluation of old tokens
   useEffect(() => {
-    if (!isBotActive || !autoEntryEnabled || tokens.length === 0 || !settings) return;
+    if (!isBotActive || isPaused) return;
+    
+    const cleanupInterval = setInterval(() => {
+      const oldSize = processedTokensRef.current.size;
+      if (oldSize > 100) {
+        const tokensArray = Array.from(processedTokensRef.current);
+        processedTokensRef.current = new Set(tokensArray.slice(-50));
+        addBotLog({
+          level: 'info',
+          category: 'system',
+          message: `Cleared ${oldSize - 50} old tokens from cache`,
+        });
+      }
+    }, 120000);
+    
+    return () => clearInterval(cleanupInterval);
+  }, [isBotActive, isPaused]);
+  
+  // Main evaluation function - extracted for reuse
+  const runBotEvaluation = useCallback(async () => {
+    if (!isBotActive || !autoEntryEnabled || tokens.length === 0 || !settings) {
+      return;
+    }
     
     // Filter for tokens we haven't processed yet
     const unseenTokens = tokens.filter(t => !processedTokensRef.current.has(t.address));
 
-    if (unseenTokens.length === 0) return;
+    if (unseenTokens.length === 0) {
+      // No new tokens - this is normal, just wait for next scan
+      return;
+    }
 
-    // IMPORTANT:
-    // Previously we marked ALL unseen tokens as "processed" but only evaluated a small slice.
-    // That caused the bot to permanently skip many valid opportunities.
     const blacklist = new Set(settings.token_blacklist || []);
     const candidates = unseenTokens.filter((t) => {
       if (!t.address) return false;
       if (blacklist.has(t.address)) return false;
-
-      // Block obvious “fake SOL” lookalikes (symbol SOL but not the real wSOL mint)
       if (t.symbol?.toUpperCase() === 'SOL' && t.address !== SOL_MINT) return false;
-
-      // If scanner flags it as not sellable, don’t waste evaluations on it
       if (t.canSell === false) return false;
-
       return true;
     });
 
@@ -342,8 +367,6 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     const batchSize = isDemo ? 10 : 20;
     const batch = candidates.slice(0, batchSize);
 
-    // Map tokens with ALL scanner validation fields for auto-sniper
-    // CRITICAL: Include isPumpFun, isTradeable, source to avoid re-validating
     const tokenData: TokenData[] = batch.map(t => ({
       address: t.address,
       name: t.name,
@@ -356,28 +379,25 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       riskScore: t.riskScore,
       categories: [],
       priceUsd: t.priceUsd,
-      // CRITICAL: Pass scanner validation flags to auto-sniper
-      isPumpFun: t.isPumpFun,       // From token-scanner
-      isTradeable: t.isTradeable,   // From token-scanner
-      canBuy: t.canBuy,             // From token-scanner
-      canSell: t.canSell,           // From token-scanner
-      source: t.source,             // API source (Pump.fun, DexScreener, etc.)
-      safetyReasons: t.safetyReasons, // Safety check results
+      isPumpFun: t.isPumpFun,
+      isTradeable: t.isTradeable,
+      canBuy: t.canBuy,
+      canSell: t.canSell,
+      source: t.source,
+      safetyReasons: t.safetyReasons,
     }));
 
-    console.log('Auto-sniper evaluating new tokens:', tokenData.map(t => t.symbol));
     addBotLog({ 
       level: 'info', 
       category: 'evaluate', 
-      message: `Evaluating ${tokenData.length} tokens`,
-      details: tokenData.map(t => t.symbol).join(', '),
+      message: `Evaluating ${tokenData.length} new tokens`,
+      details: tokenData.map(t => `${t.symbol} (${t.source || 'unknown'})`).join(', '),
     });
 
-    // In demo mode, simulate trade execution with demo balance
+    // Demo mode execution
     if (isDemo) {
-      // Mark batch as processed for demo mode (prevents repeated sim trades)
       batch.forEach(t => processedTokensRef.current.add(t.address));
-      // Find token that meets criteria using multi-select buyer positions
+      
       const targetPositions = settings.target_buyer_positions || [2, 3];
       const approvedToken = tokenData.find(t => 
         t.buyerPosition && 
@@ -386,327 +406,246 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         t.liquidity >= (settings.min_liquidity || 300)
       );
       
-      if (approvedToken && settings.trade_amount) {
-        // Check if we have enough balance - use real SOL price
+      if (approvedToken && settings.trade_amount && demoBalance >= settings.trade_amount) {
+        deductBalance(settings.trade_amount);
         const tradeAmountInDollars = settings.trade_amount * solPrice;
+        const entryPrice = approvedToken.priceUsd || 0.0001;
+        const amount = tradeAmountInDollars / entryPrice;
         
-        if (demoBalance >= settings.trade_amount) {
-          // Deduct balance
-          deductBalance(settings.trade_amount);
-          
-          const entryPrice = approvedToken.priceUsd || 0.0001;
-          const amount = tradeAmountInDollars / entryPrice;
-          
-          // Create demo position
-          const newPosition = addDemoPosition({
-            token_address: approvedToken.address,
-            token_symbol: approvedToken.symbol,
-            token_name: approvedToken.name,
-            chain: approvedToken.chain,
-            entry_price: entryPrice,
-            current_price: entryPrice,
-            amount,
-            entry_value: tradeAmountInDollars,
-            current_value: tradeAmountInDollars,
-            profit_loss_percent: 0,
-            profit_loss_value: 0,
-            profit_take_percent: settings.profit_take_percentage,
-            stop_loss_percent: settings.stop_loss_percentage,
-            status: 'open',
-            exit_reason: null,
-            exit_price: null,
-            exit_tx_id: null,
-            closed_at: null,
-          });
-          
-          toast({
-            title: '🎯 Demo Trade Executed!',
-            description: `Bought ${approvedToken.symbol} at $${entryPrice.toFixed(6)} with ${settings.trade_amount} SOL`,
-          });
-          
-          addNotification({
-            title: `Demo Trade: ${approvedToken.symbol}`,
-            message: `Bought ${approvedToken.symbol} with ${settings.trade_amount} SOL. TP: ${settings.profit_take_percentage}% SL: ${settings.stop_loss_percentage}%`,
-            type: 'trade',
-            metadata: { token: approvedToken.symbol, amount: settings.trade_amount },
-          });
-          
-          // Simulate price movement for demo positions
-          setTimeout(() => {
-            const priceChange = (Math.random() - 0.3) * 0.5; // -30% to +20%
-            const newPrice = entryPrice * (1 + priceChange);
-            const newValue = amount * newPrice;
-            const pnlPercent = priceChange * 100;
-            const pnlValue = newValue - tradeAmountInDollars;
-            
-            updateDemoPosition(newPosition.id, {
-              current_price: newPrice,
-              current_value: newValue,
-              profit_loss_percent: pnlPercent,
-              profit_loss_value: pnlValue,
-            });
-            
-            // Check exit conditions
-            if (pnlPercent >= settings.profit_take_percentage) {
-              closeDemoPosition(newPosition.id, newPrice, 'take_profit');
-              addBalance(settings.trade_amount + (pnlValue / solPrice)); // Return original + profit
-              toast({
-                title: '💰 Take Profit Hit!',
-                description: `Closed ${approvedToken.symbol} at +${pnlPercent.toFixed(1)}%`,
-              });
-            } else if (pnlPercent <= -settings.stop_loss_percentage) {
-              closeDemoPosition(newPosition.id, newPrice, 'stop_loss');
-              addBalance(settings.trade_amount + (pnlValue / solPrice)); // Return remaining value
-              toast({
-                title: '🛑 Stop Loss Hit',
-                description: `Closed ${approvedToken.symbol} at ${pnlPercent.toFixed(1)}%`,
-                variant: 'destructive',
-              });
-            }
-          }, 5000 + Math.random() * 10000); // Random 5-15 seconds delay
-        } else {
-          toast({
-            title: 'Insufficient Demo Balance',
-            description: `Need ${settings.trade_amount} SOL, have ${demoBalance.toFixed(2)} SOL`,
-            variant: 'destructive',
-          });
-        }
-      }
-    } else {
-      // Live mode: evaluate first, then execute via wallet signature (no private keys stored)
-      (async () => {
-        console.log('[Live Bot] Starting live execution check...');
-        console.log('[Live Bot] Wallet state:', { 
-          isConnected: wallet.isConnected, 
-          network: wallet.network, 
-          address: wallet.address?.slice(0, 8), 
-          balance: wallet.balance 
+        const newPosition = addDemoPosition({
+          token_address: approvedToken.address,
+          token_symbol: approvedToken.symbol,
+          token_name: approvedToken.name,
+          chain: approvedToken.chain,
+          entry_price: entryPrice,
+          current_price: entryPrice,
+          amount,
+          entry_value: tradeAmountInDollars,
+          current_value: tradeAmountInDollars,
+          profit_loss_percent: 0,
+          profit_loss_value: 0,
+          profit_take_percent: settings.profit_take_percentage,
+          stop_loss_percent: settings.stop_loss_percentage,
+          status: 'open',
+          exit_reason: null,
+          exit_price: null,
+          exit_tx_id: null,
+          closed_at: null,
         });
         
-        if (!wallet.isConnected || wallet.network !== 'solana' || !wallet.address) {
-          console.log('[Live Bot] BLOCKED: No wallet connected, opening wallet modal...');
-          addBotLog({
-            level: 'warning',
-            category: 'trade',
-            message: 'Wallet not connected - please connect to trade',
-          });
-          openWalletModal();
-          return;
-        }
-
-        // Ensure we have enough SOL for the trade amount + a small fee buffer
-        const balanceSol = parseFloat(String(wallet.balance || '').replace(/[^\d.]/g, '')) || 0;
-        const tradeAmountSol = settings.trade_amount || 0;
-        console.log('[Live Bot] Balance check:', { balanceSol, tradeAmountSol });
-        const feeBufferSol = 0.01;
-
-        if (tradeAmountSol <= 0) {
-          console.log('[Live Bot] BLOCKED: Invalid trade amount:', tradeAmountSol);
-          return;
-        }
-
-        if (balanceSol < tradeAmountSol + feeBufferSol) {
-          console.log(`[Live Bot] BLOCKED: Insufficient balance: have ${balanceSol}, need ${tradeAmountSol + feeBufferSol}`);
-          addBotLog({
-            level: 'warning',
-            category: 'trade',
-            message: 'Insufficient balance for trade',
-            details: `Balance: ${balanceSol.toFixed(4)} SOL, need: ${(tradeAmountSol + feeBufferSol).toFixed(4)} SOL`,
-          });
-          return;
-        }
-
-        if (liveTradeInFlightRef.current) {
-          console.log('[Live Bot] BLOCKED: Trade already in flight, skipping');
-          return;
-        }
-
-        console.log(`[Live Bot] ✅ All checks passed. Evaluating ${tokenData.length} tokens...`);
-        const evaluation = await evaluateTokens(tokenData, false, undefined, { suppressOpportunityToast: true });
-        if (!evaluation) {
-          console.log('[Live Bot] BLOCKED: Evaluation returned null (throttled or error)');
-          return;
-        }
-
-        // Mark evaluated batch as processed only AFTER we successfully get an evaluation
-        batch.forEach(t => processedTokensRef.current.add(t.address));
-
-        const approved = evaluation.decisions?.filter((d) => d.approved) || [];
+        addBotLog({
+          level: 'success',
+          category: 'trade',
+          message: `Demo trade executed: ${approvedToken.symbol}`,
+          tokenSymbol: approvedToken.symbol,
+          details: `Entry: $${entryPrice.toFixed(6)} | Amount: ${settings.trade_amount} SOL`,
+        });
         
-        console.log(`[Live Bot] Evaluation complete: ${approved.length}/${evaluation?.decisions?.length || 0} approved`);
+        toast({
+          title: '🎯 Demo Trade Executed!',
+          description: `Bought ${approvedToken.symbol} at $${entryPrice.toFixed(6)}`,
+        });
         
-        if (approved.length === 0) {
-          addBotLog({ 
-            level: 'skip', 
-            category: 'evaluate', 
-            message: `${evaluation.decisions?.length || 0} tokens evaluated, 0 approved`,
-            details: evaluation.decisions?.map(d => `${d.token.symbol}: ${d.reasons.slice(0, 2).join(', ')}`).join('\n'),
+        // Simulate price movement
+        setTimeout(() => {
+          const priceChange = (Math.random() - 0.3) * 0.5;
+          const newPrice = entryPrice * (1 + priceChange);
+          const newValue = amount * newPrice;
+          const pnlPercent = priceChange * 100;
+          const pnlValue = newValue - tradeAmountInDollars;
+          
+          updateDemoPosition(newPosition.id, {
+            current_price: newPrice,
+            current_value: newValue,
+            profit_loss_percent: pnlPercent,
+            profit_loss_value: pnlValue,
           });
-          console.log('[Live Bot] BLOCKED: No approved tokens');
-          return;
-        }
+          
+          if (pnlPercent >= settings.profit_take_percentage) {
+            closeDemoPosition(newPosition.id, newPrice, 'take_profit');
+            addBalance(settings.trade_amount + (pnlValue / solPrice));
+            toast({ title: '💰 Take Profit Hit!', description: `Closed ${approvedToken.symbol} at +${pnlPercent.toFixed(1)}%` });
+          } else if (pnlPercent <= -settings.stop_loss_percentage) {
+            closeDemoPosition(newPosition.id, newPrice, 'stop_loss');
+            addBalance(settings.trade_amount + (pnlValue / solPrice));
+            toast({ title: '🛑 Stop Loss Hit', description: `Closed ${approvedToken.symbol} at ${pnlPercent.toFixed(1)}%`, variant: 'destructive' });
+          }
+        }, 5000 + Math.random() * 10000);
+      } else if (approvedToken && demoBalance < (settings.trade_amount || 0)) {
+        addBotLog({ level: 'warning', category: 'trade', message: 'Insufficient demo balance' });
+      }
+      return;
+    }
 
-        // Execute up to available slots (cap per cycle to avoid wallet spam)
-        const availableSlots = Math.max(0, (settings.max_concurrent_trades || 0) - openPositions.length);
-        console.log('[Live Bot] Slot check:', { availableSlots, maxConcurrent: settings.max_concurrent_trades, openPositions: openPositions.length });
-        
-        if (availableSlots <= 0) {
-          addBotLog({ 
-            level: 'skip', 
-            category: 'trade', 
-            message: 'Max concurrent trades reached',
-            details: `${openPositions.length}/${settings.max_concurrent_trades} positions open`,
-          });
-          console.log('[Live Bot] Max concurrent trades reached, skipping execution');
-          return;
-        }
+    // Live mode execution
+    if (!wallet.isConnected || wallet.network !== 'solana' || !wallet.address) {
+      addBotLog({ level: 'warning', category: 'trade', message: 'Connect wallet to enable live trading' });
+      return;
+    }
 
-        // Also ensure we can afford multiple trades (keep a small fee buffer)
-        const maxAffordableTrades = tradeAmountSol > 0
-          ? Math.max(0, Math.floor((balanceSol - feeBufferSol) / tradeAmountSol))
-          : 0;
+    const balanceSol = parseFloat(String(wallet.balance || '').replace(/[^\d.]/g, '')) || 0;
+    const tradeAmountSol = settings.trade_amount || 0;
+    const feeBufferSol = 0.01;
 
-        const maxPerCycle = 3;
-        const tradesThisCycle = Math.min(availableSlots, maxAffordableTrades, maxPerCycle, approved.length);
+    if (tradeAmountSol <= 0 || balanceSol < tradeAmountSol + feeBufferSol) {
+      if (balanceSol < tradeAmountSol + feeBufferSol) {
+        addBotLog({ 
+          level: 'warning', 
+          category: 'trade', 
+          message: 'Insufficient SOL balance',
+          details: `Have: ${balanceSol.toFixed(4)} SOL | Need: ${(tradeAmountSol + feeBufferSol).toFixed(4)} SOL`,
+        });
+      }
+      return;
+    }
 
-        if (tradesThisCycle <= 0) {
-          addBotLog({ 
-            level: 'skip', 
-            category: 'trade', 
-            message: 'Insufficient balance for trades',
-            details: `Balance: ${balanceSol.toFixed(4)} SOL, need: ${(tradeAmountSol + feeBufferSol).toFixed(4)} SOL`,
-          });
-          console.log('[Live Bot] Not enough balance for additional trades, skipping execution');
-          return;
-        }
+    if (liveTradeInFlightRef.current) {
+      return; // Trade already in progress
+    }
 
-        const toExecute = approved.slice(0, tradesThisCycle);
-        console.log(`[Live Bot] 🎯 EXECUTING ${toExecute.length} trades:`, toExecute.map(t => t.token.symbol).join(', '));
-        
+    // Evaluate tokens
+    const evaluation = await evaluateTokens(tokenData, false, undefined, { suppressOpportunityToast: true });
+    if (!evaluation) {
+      return;
+    }
+
+    batch.forEach(t => processedTokensRef.current.add(t.address));
+    const approved = evaluation.decisions?.filter((d) => d.approved) || [];
+    
+    if (approved.length === 0) {
+      addBotLog({ 
+        level: 'skip', 
+        category: 'evaluate', 
+        message: `${evaluation.decisions?.length || 0} tokens evaluated, 0 approved`,
+        details: evaluation.decisions?.slice(0, 5).map(d => `${d.token.symbol}: ${d.reasons[0] || 'N/A'}`).join('\n'),
+      });
+      return;
+    }
+
+    addBotLog({
+      level: 'success',
+      category: 'evaluate',
+      message: `${approved.length} token(s) approved for trading`,
+      details: approved.map(d => d.token.symbol).join(', '),
+    });
+
+    const availableSlots = Math.max(0, (settings.max_concurrent_trades || 0) - openPositions.length);
+    if (availableSlots <= 0) {
+      addBotLog({ level: 'skip', category: 'trade', message: 'Max positions reached' });
+      return;
+    }
+
+    const maxAffordableTrades = Math.max(0, Math.floor((balanceSol - feeBufferSol) / tradeAmountSol));
+    const tradesThisCycle = Math.min(availableSlots, maxAffordableTrades, 3, approved.length);
+
+    if (tradesThisCycle <= 0) return;
+
+    const toExecute = approved.slice(0, tradesThisCycle);
+    
+    addBotLog({
+      level: 'info',
+      category: 'trade',
+      message: `Executing ${toExecute.length} live trade(s)`,
+      details: toExecute.map(t => t.token.symbol).join(', '),
+    });
+
+    liveTradeInFlightRef.current = true;
+    try {
+      for (const next of toExecute) {
         addBotLog({
           level: 'info',
           category: 'trade',
-          message: `Starting ${toExecute.length} live trades`,
-          details: toExecute.map(t => t.token.symbol).join(', '),
+          message: 'Starting 3-stage snipe',
+          tokenSymbol: next.token.symbol,
+          tokenAddress: next.token.address,
         });
 
-        liveTradeInFlightRef.current = true;
-        try {
-          for (const next of toExecute) {
-            console.log(`[Live Bot] 🚀 3-Stage Snipe for ${next.token.symbol} (${next.token.address})`);
-            
-            addBotLog({
-              level: 'info',
-              category: 'trade',
-              message: 'Starting 3-stage snipe',
-              tokenSymbol: next.token.symbol,
-              tokenAddress: next.token.address,
-              details: 'Stage 1: Liquidity → Stage 2: Raydium → Stage 3: Jupiter',
-            });
+        const slippagePct = next.tradeParams?.slippage ?? 15;
+        const priorityFee = settings.priority === 'turbo' ? 500000 : settings.priority === 'fast' ? 200000 : 100000;
 
-            const slippagePct = next.tradeParams?.slippage ?? 15; // Higher slippage for new tokens
-            const priorityFee = settings.priority === 'turbo' 
-              ? 500000 
-              : settings.priority === 'fast' 
-                ? 200000 
-                : 100000;
-
-            // Use 3-stage trading engine
-            const result = await snipeToken(
-              next.token.address,
-              wallet.address,
-              (tx) => signAndSendTransaction(tx),
-              {
-                buyAmount: tradeAmountSol,
-                slippage: slippagePct / 100, // Convert to decimal
-                priorityFee,
-                minLiquidity: settings.min_liquidity,
-                maxRiskScore: 70,
-              }
-            );
-
-            console.log(`[Live Bot] Snipe result:`, result?.status || 'NULL');
-
-            if (result?.status === 'SUCCESS' && result.position) {
-              addBotLog({ 
-                level: 'success', 
-                category: 'trade', 
-                message: '3-stage snipe successful!',
-                tokenSymbol: next.token.symbol,
-                tokenAddress: next.token.address,
-                details: `Entry: ${result.position.entryPrice?.toFixed(8)} | TX: ${result.position.entryTxHash?.slice(0, 12)}...`,
-              });
-              
-              // Record trade in bot context
-              recordTrade(result.status === 'SUCCESS');
-              
-              await fetchPositions();
-              refreshBalance();
-              
-              // Brief delay before next trade
-              await new Promise(r => setTimeout(r, 500));
-            } else if (result?.status === 'PARTIAL') {
-              addBotLog({ 
-                level: 'info', 
-                category: 'trade', 
-                message: 'Partial success - liquidity detected but snipe failed',
-                tokenSymbol: next.token.symbol,
-                tokenAddress: next.token.address,
-                details: result.error || 'Will retry via Jupiter when available',
-              });
-              recordTrade(false);
-            } else {
-              addBotLog({ 
-                level: 'error', 
-                category: 'trade', 
-                message: result?.error || 'Snipe failed',
-                tokenSymbol: next.token.symbol,
-                tokenAddress: next.token.address,
-              });
-              recordTrade(false);
-              // Stop batch on failure to avoid repeated wallet popups
-              break;
-            }
+        const result = await snipeToken(
+          next.token.address,
+          wallet.address,
+          (tx) => signAndSendTransaction(tx),
+          {
+            buyAmount: tradeAmountSol,
+            slippage: slippagePct / 100,
+            priorityFee,
+            minLiquidity: settings.min_liquidity,
+            maxRiskScore: 70,
           }
-        } catch (err: any) {
-          console.error('[Live Bot] Trade error:', err);
-          toast({
-            title: 'Trade Error',
-            description: err.message || 'Failed to execute trade',
-            variant: 'destructive',
+        );
+
+        if (result?.status === 'SUCCESS' && result.position) {
+          addBotLog({ 
+            level: 'success', 
+            category: 'trade', 
+            message: 'Trade successful!',
+            tokenSymbol: next.token.symbol,
+            details: `Entry: $${result.position.entryPrice?.toFixed(8)} | TX: ${result.position.entryTxHash?.slice(0, 12)}...`,
           });
-        } finally {
-          liveTradeInFlightRef.current = false;
+          recordTrade(true);
+          await fetchPositions();
+          refreshBalance();
+          await new Promise(r => setTimeout(r, 500));
+        } else {
+          addBotLog({ 
+            level: 'error', 
+            category: 'trade', 
+            message: result?.error || 'Trade failed',
+            tokenSymbol: next.token.symbol,
+          });
+          recordTrade(false);
+          break; // Stop on first failure
         }
-      })();
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      addBotLog({ level: 'error', category: 'trade', message: `Trade error: ${errorMsg}` });
+      toast({ title: 'Trade Error', description: errorMsg, variant: 'destructive' });
+    } finally {
+      liveTradeInFlightRef.current = false;
     }
   }, [
-    tokens,
-    isBotActive,
-    autoEntryEnabled,
-    openPositions.length,
-    settings,
-    isDemo,
-    evaluateTokens,
-    snipeToken,
-    recordTrade,
-    wallet.isConnected,
-    wallet.network,
-    wallet.address,
-    wallet.balance,
-    signAndSendTransaction,
-    refreshBalance,
-    fetchPositions,
-    toast,
-    addNotification,
-    demoBalance,
-    deductBalance,
-    addBalance,
-    addDemoPosition,
-    updateDemoPosition,
-    closeDemoPosition,
-    solPrice,
+    tokens, isBotActive, autoEntryEnabled, settings, isDemo, openPositions.length,
+    wallet.isConnected, wallet.network, wallet.address, wallet.balance,
+    demoBalance, solPrice, evaluateTokens, snipeToken, recordTrade,
+    signAndSendTransaction, refreshBalance, fetchPositions, toast,
+    deductBalance, addBalance, addDemoPosition, updateDemoPosition, closeDemoPosition,
   ]);
+
+  // Continuous evaluation loop - runs on interval
+  useEffect(() => {
+    if (!isBotActive || isPaused) {
+      if (evaluationIntervalRef.current) {
+        clearInterval(evaluationIntervalRef.current);
+        evaluationIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // Run immediately on activation
+    runBotEvaluation();
+
+    // Set up interval for continuous evaluation
+    const intervalMs = isDemo ? 8000 : 10000; // 8s demo, 10s live
+    evaluationIntervalRef.current = setInterval(() => {
+      runBotEvaluation();
+    }, intervalMs);
+
+    addBotLog({
+      level: 'info',
+      category: 'system',
+      message: `Bot loop started (${intervalMs / 1000}s interval)`,
+    });
+
+    return () => {
+      if (evaluationIntervalRef.current) {
+        clearInterval(evaluationIntervalRef.current);
+        evaluationIntervalRef.current = null;
+      }
+    };
+  }, [isBotActive, isPaused, isDemo, runBotEvaluation]);
 
   const handleConnectWallet = async () => {
     if (wallet.isConnected) {

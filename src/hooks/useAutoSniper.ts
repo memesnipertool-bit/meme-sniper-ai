@@ -101,12 +101,12 @@ export function useAutoSniper() {
       return null;
     }
 
-    // Throttle: 5 seconds for live mode (wallet signing takes time anyway)
-    // 20 seconds for demo mode (fast simulation)
-    const throttleMs = isDemo ? 20000 : 5000;
+    // Throttle: 3 seconds for live mode, 5 seconds for demo mode
+    // Reduced from previous values to allow faster continuous operation
+    const throttleMs = isDemo ? 5000 : 3000;
     const now = Date.now();
     if (now - lastEvalRef.current < throttleMs) {
-      console.log(`[Auto-sniper] Throttled, wait ${Math.ceil((throttleMs - (now - lastEvalRef.current)) / 1000)}s`);
+      // Silent throttle - don't log this as it's normal behavior
       return null;
     }
 
