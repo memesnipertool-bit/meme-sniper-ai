@@ -12,6 +12,7 @@ import {
   Ban, 
   Trash2,
   ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 export type LogLevel = 'info' | 'success' | 'warning' | 'error' | 'skip';
@@ -147,12 +148,18 @@ function getFriendlyMessage(entry: BotLogEntry): string {
   return msg;
 }
 
+const INITIAL_DISPLAY_COUNT = 10;
+const LOAD_MORE_COUNT = 15;
+
 export default function BotActivityLog({ maxEntries = 100 }: BotActivityLogProps) {
   const logs = useBotLogs();
   const [expanded, setExpanded] = useState(true);
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());
+  const [displayCount, setDisplayCount] = useState(INITIAL_DISPLAY_COUNT);
   
-  const displayLogs = logs.slice(0, maxEntries);
+  const allLogs = logs.slice(0, maxEntries);
+  const displayLogs = allLogs.slice(0, displayCount);
+  const hasMore = displayCount < allLogs.length;
   
   const toggleEntry = (id: string) => {
     setExpandedEntries(prev => {
@@ -163,57 +170,92 @@ export default function BotActivityLog({ maxEntries = 100 }: BotActivityLogProps
     });
   };
   
+  const handleLoadMore = () => {
+    setDisplayCount(prev => Math.min(prev + LOAD_MORE_COUNT, allLogs.length));
+  };
+  
   const stats = {
     success: logs.filter(l => l.level === 'success').length,
     skip: logs.filter(l => l.level === 'skip').length,
     error: logs.filter(l => l.level === 'error').length,
   };
 
+  // Reset display count when logs are cleared
+  useEffect(() => {
+    if (logs.length === 0) {
+      setDisplayCount(INITIAL_DISPLAY_COUNT);
+    }
+  }, [logs.length]);
+
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card className="bg-gradient-to-br from-card/90 to-card/70 backdrop-blur-sm border-border/50 overflow-hidden">
+        {/* Decorative accent */}
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
+        
         <CollapsibleTrigger asChild>
-          <CardHeader className="pb-2 cursor-pointer hover:bg-muted/30 transition-colors rounded-t-lg">
+          <CardHeader className="pb-3 cursor-pointer hover:bg-muted/20 transition-colors">
             <CardTitle className="text-sm font-medium flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-primary" />
-                Bot Activity
-                <Badge variant="outline" className="text-[10px] h-4 ml-1">
-                  {logs.length}
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/20">
+                  <Activity className="w-3.5 h-3.5 text-primary" />
+                </div>
+                <span className="font-semibold">Bot Activity</span>
+                <Badge 
+                  variant="outline" 
+                  className="text-[10px] h-5 px-2 bg-muted/50 border-border/50"
+                >
+                  {logs.length} logs
                 </Badge>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 text-[10px]">
-                  <span className="text-success">{stats.success}✓</span>
-                  <span className="text-muted-foreground">{stats.skip}⊘</span>
-                  <span className="text-destructive">{stats.error}✗</span>
+              <div className="flex items-center gap-3">
+                {/* Stats summary */}
+                <div className="flex items-center gap-2 text-[11px] font-medium">
+                  <span className="flex items-center gap-1 text-success">
+                    <CheckCircle className="w-3 h-3" />
+                    {stats.success}
+                  </span>
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <Ban className="w-3 h-3" />
+                    {stats.skip}
+                  </span>
+                  <span className="flex items-center gap-1 text-destructive">
+                    <XCircle className="w-3 h-3" />
+                    {stats.error}
+                  </span>
                 </div>
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-6 w-6"
+                  className="h-7 w-7 hover:bg-destructive/10 hover:text-destructive"
                   onClick={(e) => {
                     e.stopPropagation();
                     clearBotLogs();
                   }}
+                  title="Clear all logs"
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Trash2 className="w-3.5 h-3.5" />
                 </Button>
-                <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
               </div>
             </CardTitle>
           </CardHeader>
         </CollapsibleTrigger>
+        
         <CollapsibleContent>
-          <CardContent className="pt-0">
-            <ScrollArea className="h-[250px]">
+          <CardContent className="pt-0 pb-3">
+            <ScrollArea className="h-[280px] pr-2">
               {displayLogs.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-sm text-muted-foreground py-8">
-                  No activity yet. Activate the bot to see logs.
+                <div className="flex flex-col items-center justify-center h-full text-center py-10">
+                  <div className="p-3 rounded-full bg-muted/30 mb-3">
+                    <Activity className="w-6 h-6 text-muted-foreground/50" />
+                  </div>
+                  <p className="text-sm font-medium text-muted-foreground">No activity yet</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">Activate the bot to see logs</p>
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {displayLogs.map((entry) => {
+                  {displayLogs.map((entry, index) => {
                     const config = levelConfig[entry.level];
                     const Icon = config.icon;
                     const isExpanded = expandedEntries.has(entry.id);
@@ -222,45 +264,69 @@ export default function BotActivityLog({ maxEntries = 100 }: BotActivityLogProps
                     return (
                       <div
                         key={entry.id}
-                        className={`p-2.5 rounded-lg border border-transparent hover:border-border/50 transition-colors ${entry.details ? 'cursor-pointer' : ''} ${config.bg}`}
+                        className={`group p-2.5 rounded-lg border transition-all duration-200 ${
+                          entry.details ? 'cursor-pointer hover:border-border' : ''
+                        } ${config.bg} border-transparent`}
                         onClick={() => entry.details && toggleEntry(entry.id)}
+                        style={{ animationDelay: `${index * 20}ms` }}
                       >
-                        <div className="flex items-start gap-2">
-                          <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${config.color}`} />
-                          <div className="flex-1 min-w-0 overflow-hidden">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Badge variant="outline" className="text-[9px] h-4 px-1.5 shrink-0">
+                        <div className="flex items-start gap-2.5">
+                          <div className={`p-1 rounded-md ${config.bg} mt-0.5`}>
+                            <Icon className={`w-3.5 h-3.5 ${config.color}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <Badge 
+                                variant="outline" 
+                                className="text-[9px] h-4 px-1.5 bg-background/50 border-border/50 font-medium"
+                              >
                                 {categoryLabels[entry.category]}
                               </Badge>
                               {entry.tokenSymbol && (
-                                <span className="font-semibold text-xs text-foreground shrink-0">
+                                <span className="font-semibold text-xs text-foreground">
                                   ${entry.tokenSymbol}
                                 </span>
                               )}
-                              <span className="text-[9px] text-muted-foreground shrink-0 ml-auto">
+                              <span className="text-[10px] text-muted-foreground ml-auto whitespace-nowrap">
                                 {entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                               </span>
+                              {entry.details && (
+                                <ChevronRight className={`w-3 h-3 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                              )}
                             </div>
-                            <p className={`text-xs leading-relaxed break-words whitespace-pre-wrap ${config.color}`}>
+                            <p className={`text-xs leading-relaxed ${config.color} break-words`}>
                               {friendlyMessage}
                             </p>
                             {isExpanded && entry.details && (
-                              <div className="mt-2 pt-2 border-t border-border/30">
-                                <p className="text-[10px] text-muted-foreground break-words whitespace-pre-wrap font-mono bg-background/50 p-2 rounded">
+                              <div className="mt-2 pt-2 border-t border-border/30 animate-fade-in">
+                                <p className="text-[10px] text-muted-foreground break-words whitespace-pre-wrap font-mono bg-background/80 p-2 rounded-md border border-border/30 max-h-32 overflow-y-auto">
                                   {entry.details}
                                 </p>
                               </div>
-                            )}
-                            {entry.details && !isExpanded && (
-                              <span className="text-[9px] text-muted-foreground/60 mt-1 inline-block">
-                                Click for details...
-                              </span>
                             )}
                           </div>
                         </div>
                       </div>
                     );
                   })}
+                  
+                  {/* Load More Button */}
+                  {hasMore && (
+                    <div className="pt-2 pb-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full h-8 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleLoadMore();
+                        }}
+                      >
+                        <ChevronDown className="w-3.5 h-3.5 mr-1.5" />
+                        Load more ({allLogs.length - displayCount} remaining)
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </ScrollArea>

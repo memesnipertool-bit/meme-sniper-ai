@@ -5,7 +5,7 @@ import SniperDecisionPanel from "@/components/trading/SniperDecisionPanel";
 import { TradeSignalPanel } from "@/components/trading/TradeSignalPanel";
 import LiquidityMonitor from "@/components/scanner/LiquidityMonitor";
 import PerformancePanel from "@/components/scanner/PerformancePanel";
-import ActivePositionsPanel from "@/components/scanner/ActivePositionsPanel";
+
 import BotActivityLog, { addBotLog, clearBotLogs } from "@/components/scanner/BotActivityLog";
 import RecoveryControls from "@/components/scanner/RecoveryControls";
 import ApiHealthWidget from "@/components/scanner/ApiHealthWidget";
@@ -956,28 +956,6 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                 loading={loading}
                 apiStatus={loading ? 'active' : 'waiting'}
                 onExitTrade={handleExitPosition}
-              />
-
-              {/* Active Positions */}
-              <ActivePositionsPanel 
-                positions={openPositions}
-                onClosePosition={handleExitPosition}
-                onForceClose={async (positionId) => {
-                  if (isDemo) {
-                    const pos = openDemoPositions.find(p => p.id === positionId);
-                    if (pos) closeDemoPosition(positionId, pos.current_price, 'manual');
-                  } else {
-                    const pos = realOpenPositions.find(p => p.id === positionId);
-                    if (pos) {
-                      await markPositionClosed(positionId, pos.current_price);
-                      toast({
-                        title: "Position Force Closed",
-                        description: `${pos.token_symbol} removed from active positions (no on-chain sell)`,
-                      });
-                    }
-                  }
-                }}
-                onRefresh={isDemo ? undefined : fetchPositions}
               />
 
               {/* Bot Activity Log */}

@@ -68,11 +68,11 @@ export default function RecentActivity() {
                   <div className={cn("p-2 rounded-lg border shrink-0", colorClass)}>
                     <Icon className="w-4 h-4" />
                   </div>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 overflow-hidden">
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-medium text-sm">{notification.title}</p>
-                        <p className="text-xs text-muted-foreground truncate">{notification.message}</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm truncate">{notification.title}</p>
+                        <p className="text-xs text-muted-foreground line-clamp-2 break-words">{notification.message}</p>
                       </div>
                       {pnl !== undefined && (
                         <Badge 
