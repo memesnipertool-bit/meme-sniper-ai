@@ -563,11 +563,18 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     const approved = evaluation.decisions?.filter((d) => d.approved) || [];
     
     if (approved.length === 0) {
+      // Get rejected tokens with their primary rejection reasons
+      const rejected = evaluation.decisions?.filter(d => !d.approved) || [];
+      const rejectionSummary = rejected.slice(0, 3).map(d => {
+        const reason = d.reasons.find(r => r.startsWith('✗')) || d.reasons[0] || 'N/A';
+        return `${d.token.symbol}: ${reason}`;
+      }).join(' | ');
+      
       addBotLog({ 
         level: 'skip', 
         category: 'evaluate', 
-        message: `${evaluation.decisions?.length || 0} tokens evaluated, 0 approved`,
-        details: evaluation.decisions?.slice(0, 5).map(d => `${d.token.symbol}: ${d.reasons[0] || 'N/A'}`).join('\n'),
+        message: `${rejected.length} token(s) did not pass filters`,
+        details: rejectionSummary || undefined,
       });
       return;
     }
