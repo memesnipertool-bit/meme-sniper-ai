@@ -332,6 +332,36 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     });
   }, [lastScanStats, isBotActive]);
 
+  // Log API errors with specific context so BotActivityLog can show helpful messages
+  useEffect(() => {
+    if (apiErrors.length === 0 || !isBotActive) return;
+    
+    // Dedupe by API type to avoid log spam
+    const loggedTypes = new Set<string>();
+    
+    apiErrors.forEach(error => {
+      if (loggedTypes.has(error.apiType)) return;
+      loggedTypes.add(error.apiType);
+      
+      // Create descriptive message that includes API name for pattern matching
+      const apiName = error.apiName || error.apiType || 'Unknown API';
+      const errorCode = error.errorMessage?.match(/\d{3}/)?.[0] || '';
+      
+      // Build message with API name for regex matching
+      let message = `${apiName} ${errorCode}`.trim();
+      if (error.errorMessage?.includes('fallback')) {
+        message += ' using fallback';
+      }
+      
+      addBotLog({
+        level: 'warning',
+        category: 'system',
+        message,
+        details: error.errorMessage,
+      });
+    });
+  }, [apiErrors, isBotActive]);
+
   // ============================================
   // PRODUCTION-GRADE BOT EVALUATION LOOP
   // Runs continuously while bot is active
