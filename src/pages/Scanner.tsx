@@ -317,9 +317,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     
     const { total, tradeable, stages } = lastScanStats;
     
-    // Build stage summary
+    // Build stage summary (Raydium-only pipeline - no bonding stage)
     const stageParts: string[] = [];
-    if (stages.bonding > 0) stageParts.push(`🌱${stages.bonding} bonding`);
     if (stages.lpLive > 0) stageParts.push(`🏊${stages.lpLive} live`);
     if (stages.indexing > 0) stageParts.push(`⏳${stages.indexing} indexing`);
     if (stages.listed > 0) stageParts.push(`✅${stages.listed} listed`);
