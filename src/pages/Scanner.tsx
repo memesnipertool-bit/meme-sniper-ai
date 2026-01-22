@@ -37,7 +37,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
 const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref) {
-  const { tokens, loading, scanTokens, errors, apiErrors, isDemo, cleanup } = useTokenScanner();
+  const { tokens, loading, scanTokens, errors, apiErrors, isDemo, cleanup, lastScanStats } = useTokenScanner();
   const { settings, saving, saveSettings, updateField } = useSniperSettings();
   const { evaluateTokens, result: sniperResult, loading: sniperLoading } = useAutoSniper();
   const { startAutoExitMonitor, stopAutoExitMonitor, isMonitoring } = useAutoExit();
@@ -310,6 +310,27 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     
     return () => clearInterval(interval);
   }, [scanSpeed, isPaused, settings?.min_liquidity, scanTokens, isDemo]);
+
+  // Log scan stats to bot activity when they update
+  useEffect(() => {
+    if (!lastScanStats || !isBotActive) return;
+    
+    const { total, tradeable, stages } = lastScanStats;
+    
+    // Build stage summary
+    const stageParts: string[] = [];
+    if (stages.bonding > 0) stageParts.push(`🌱${stages.bonding} bonding`);
+    if (stages.lpLive > 0) stageParts.push(`🏊${stages.lpLive} live`);
+    if (stages.indexing > 0) stageParts.push(`⏳${stages.indexing} indexing`);
+    if (stages.listed > 0) stageParts.push(`✅${stages.listed} listed`);
+    
+    addBotLog({
+      level: tradeable > 0 ? 'success' : 'info',
+      category: 'scan',
+      message: `${tradeable} tradeable out of ${total} tokens`,
+      details: stageParts.length > 0 ? stageParts.join(' | ') : undefined,
+    });
+  }, [lastScanStats, isBotActive]);
 
   // ============================================
   // PRODUCTION-GRADE BOT EVALUATION LOOP

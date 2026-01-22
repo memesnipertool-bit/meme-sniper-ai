@@ -3,6 +3,19 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAppMode } from '@/contexts/AppModeContext';
 
+// Token lifecycle stages
+export type TokenStage = 'BONDING' | 'LP_LIVE' | 'INDEXING' | 'LISTED';
+
+export interface TokenStatus {
+  tradable: boolean;
+  stage: TokenStage;
+  poolAddress?: string;
+  dexScreener: {
+    pairFound: boolean;
+    retryAt?: number;
+  };
+}
+
 export interface ScannedToken {
   id: string;
   address: string;
@@ -31,6 +44,8 @@ export interface ScannedToken {
   freezeAuthority?: string | null;
   mintAuthority?: string | null;
   safetyReasons?: string[];  // Array of safety check results
+  // NEW: Token lifecycle status
+  tokenStatus?: TokenStatus;
 }
 
 export interface ApiError {
@@ -43,10 +58,23 @@ export interface ApiError {
 
 interface ScanResult {
   tokens: ScannedToken[];
+  allTokens?: ScannedToken[];
   errors: string[];
   apiErrors: ApiError[];
   timestamp: string;
   apiCount: number;
+  stats?: {
+    total: number;
+    tradeable: number;
+    pumpFun: number;
+    filtered: number;
+    stages?: {
+      bonding: number;
+      lpLive: number;
+      indexing: number;
+      listed: number;
+    };
+  };
 }
 
 export interface RateLimitState {
@@ -107,6 +135,19 @@ const generateSingleDemoToken = (idx: number): ScannedToken => {
   };
 };
 
+export interface ScanStats {
+  total: number;
+  tradeable: number;
+  pumpFun: number;
+  filtered: number;
+  stages: {
+    bonding: number;
+    lpLive: number;
+    indexing: number;
+    listed: number;
+  };
+}
+
 export function useTokenScanner() {
   const [tokens, setTokens] = useState<ScannedToken[]>([]);
   const [loading, setLoading] = useState(false);
@@ -115,6 +156,7 @@ export function useTokenScanner() {
   const [apiCount, setApiCount] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
   const [apiErrors, setApiErrors] = useState<ApiError[]>([]);
+  const [lastScanStats, setLastScanStats] = useState<ScanStats | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitState>({
     isLimited: false,
     remainingScans: MAX_SCANS_PER_MINUTE,
@@ -348,6 +390,22 @@ export function useTokenScanner() {
       setApiCount(result.apiCount);
       setApiErrors(result.apiErrors || []);
       
+      // Save scan stats for display
+      if (result.stats) {
+        setLastScanStats({
+          total: result.stats.total,
+          tradeable: result.stats.tradeable,
+          pumpFun: result.stats.pumpFun,
+          filtered: result.stats.filtered,
+          stages: result.stats.stages || {
+            bonding: 0,
+            lpLive: 0,
+            indexing: 0,
+            listed: 0,
+          },
+        });
+      }
+      
       if (result.errors && result.errors.length > 0) {
         setErrors(result.errors);
         // Build a clean list of failed APIs, filtering empty/undefined names
@@ -418,6 +476,7 @@ export function useTokenScanner() {
     errors,
     apiErrors,
     rateLimit,
+    lastScanStats,
     scanTokens,
     getTopOpportunities,
     filterByChain,
