@@ -24,6 +24,9 @@ export interface TradingConfig {
   
   // Risk filters
   riskFilters: RiskFilters;
+  
+  // Skip risk check (for pre-verified tokens from scanner)
+  skipRiskCheck?: boolean;
 }
 
 export interface RiskFilters {

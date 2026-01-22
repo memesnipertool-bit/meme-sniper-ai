@@ -630,6 +630,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             priorityFee,
             minLiquidity: settings.min_liquidity,
             maxRiskScore: 70,
+            // Skip risk check for pre-verified tokens from scanner
+            skipRiskCheck: true,
           }
         );
 

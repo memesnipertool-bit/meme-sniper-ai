@@ -164,7 +164,46 @@ export async function detectLiquidity(
   const poolResult = await detectTradablePool(tokenAddress, config, onEvent);
   
   if (poolResult.status === 'TRADABLE') {
-    // Run risk assessment on tradable pools
+    // Skip risk assessment if token was pre-verified (from scanner)
+    // This prevents double-checking tokens that already passed auto-sniper evaluation
+    if (config.skipRiskCheck) {
+      console.log(`[LiquidityDetector] Skipping risk check for pre-verified token ${tokenAddress.slice(0, 8)}`);
+      
+      const passedRiskAssessment: RiskAssessment = {
+        overallScore: 30,
+        isRugPull: false,
+        isHoneypot: false,
+        hasMintAuthority: false,
+        hasFreezeAuthority: false,
+        holderCount: 100,
+        topHolderPercent: 10,
+        passed: true,
+        reasons: ['Pre-verified by scanner'],
+      };
+      
+      onEvent?.({ type: 'RISK_CHECK_PASSED', data: passedRiskAssessment });
+      
+      return {
+        status: 'LP_READY',
+        liquidityInfo: {
+          tokenAddress,
+          tokenName: 'Unknown',
+          tokenSymbol: 'UNKNOWN',
+          poolAddress: poolResult.poolAddress || '',
+          poolType: 'raydium',
+          baseMint: poolResult.baseMint || SOL_MINT,
+          quoteMint: tokenAddress,
+          liquidityAmount: poolResult.liquidity || 0,
+          lpTokenMint: null,
+          timestamp: startTime,
+          blockHeight: 0,
+        },
+        riskAssessment: passedRiskAssessment,
+        detectedAt: startTime,
+      };
+    }
+    
+    // Run risk assessment on tradable pools (for manual trades)
     const riskAssessment = await assessRisk(tokenAddress, config);
     
     if (!riskAssessment.passed) {

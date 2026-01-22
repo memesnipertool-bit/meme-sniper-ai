@@ -38,6 +38,9 @@ export const DEFAULT_TRADING_CONFIG: TradingConfig = {
   
   // Risk filters
   riskFilters: DEFAULT_RISK_FILTERS,
+  
+  // Skip risk check (false by default - manual trades should check)
+  skipRiskCheck: false,
 };
 
 // SOL mint address
