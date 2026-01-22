@@ -134,21 +134,26 @@ export function useConfirm(options: UseConfirmOptions) {
     setResolveRef(null);
   }, [resolveRef]);
 
-  const ConfirmationDialog = useCallback(() => (
-    <ConfirmDialog
-      open={isOpen}
-      onOpenChange={(open) => {
-        if (!open) handleCancel();
-      }}
-      title={options.title}
-      description={options.description}
-      confirmLabel={options.confirmLabel}
-      cancelLabel={options.cancelLabel}
-      variant={options.variant}
-      onConfirm={handleConfirm}
-      onCancel={handleCancel}
-    />
-  ), [isOpen, options, handleConfirm, handleCancel]);
+  const ConfirmationDialog = useCallback(
+    function ConfirmationDialogComponent() {
+      return (
+        <ConfirmDialog
+          open={isOpen}
+          onOpenChange={(open) => {
+            if (!open) handleCancel();
+          }}
+          title={options.title}
+          description={options.description}
+          confirmLabel={options.confirmLabel}
+          cancelLabel={options.cancelLabel}
+          variant={options.variant}
+          onConfirm={handleConfirm}
+          onCancel={handleCancel}
+        />
+      );
+    },
+    [isOpen, options, handleConfirm, handleCancel]
+  );
 
   return { confirm, ConfirmationDialog };
 }
