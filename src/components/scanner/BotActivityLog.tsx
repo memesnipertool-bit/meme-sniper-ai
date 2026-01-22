@@ -110,8 +110,7 @@ function getFriendlyMessage(entry: BotLogEntry): string {
     [/dexscreener.*timeout|dexscreener.*abort/i, '⏳ Pool awaiting DexScreener index'],
     [/dexscreener/i, '⏳ Pool awaiting DexScreener index'], // Catch-all for DexScreener
     
-    // ===== RAYDIUM SPECIFIC =====
-    [/raydium.*5\d\d|raydium.*error/i, '🔄 Raydium API busy - using Jupiter'],
+    // ===== RAYDIUM SPECIFIC (no API busy messages) =====
     [/raydium.*pool.*not.*found/i, '🏊 Raydium pool not ready yet'],
     [/Raydium.*found|Raydium V4/i, '✅ Pool found on Raydium'],
     
