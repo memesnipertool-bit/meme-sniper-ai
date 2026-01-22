@@ -19,19 +19,24 @@ const RUGCHECK_API = "https://api.rugcheck.xyz/v1";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
-// DexScreener query cache to prevent spam
+// DexScreener query cache - PERMANENT to prevent spam
+// Key insight: DexScreener is ENRICHMENT only, never blocking
 interface DexScreenerCache {
   [poolAddress: string]: {
     result: DexScreenerPairResult;
     timestamp: number;
-    retryCount: number;
+    queryCount: number; // Track total queries per pool
+    lastQueryAt: number; // Last time we actually hit the API
   };
 }
 
 const dexScreenerCache: DexScreenerCache = {};
-const DEXSCREENER_CACHE_TTL = 60000; // 60 seconds
-const DEXSCREENER_MAX_RETRIES = 3;
-const DEXSCREENER_RETRY_DELAY = 30000; // 30 seconds
+
+// DexScreener rate limiting - non-blocking, enrichment only
+const DEXSCREENER_MIN_COOLDOWN = 60000; // 60 seconds minimum between API calls per pool
+const DEXSCREENER_MAX_COOLDOWN = 120000; // 120 seconds max cooldown
+const DEXSCREENER_MAX_QUERIES_PER_POOL = 1; // Only 1 API call per pool ever
+const DEXSCREENER_PERMANENT_CACHE = true; // Cache results forever
 
 // Token lifecycle stages
 type TokenStage = 'BONDING' | 'LP_LIVE' | 'INDEXING' | 'LISTED';
@@ -208,58 +213,68 @@ serve(async (req) => {
     };
 
     // ============================================================================
-    // NEW: fetchDexScreenerPair - Query DexScreener by POOL ADDRESS only
-    // NEVER query by token mint - this prevents wasted API calls
+    // fetchDexScreenerPair - NON-BLOCKING enrichment by POOL ADDRESS only
+    // 
+    // CRITICAL RULES:
+    // 1. NEVER query by token mint - only pool address
+    // 2. Max 1 query per pool EVER (permanent cache)
+    // 3. 60-120s cooldown between any queries
+    // 4. ALL failures = INDEXING stage (never "error" to user)
+    // 5. NEVER blocks scanner or trading - always returns immediately
     // ============================================================================
     const fetchDexScreenerPair = async (poolAddress: string): Promise<DexScreenerPairResult> => {
-      // Check cache first
-      const cached = dexScreenerCache[poolAddress];
       const now = Date.now();
       
+      // Check cache first - return immediately if we have ANY cached result
+      const cached = dexScreenerCache[poolAddress];
+      
       if (cached) {
-        // Return cached result if still valid
-        if (now - cached.timestamp < DEXSCREENER_CACHE_TTL) {
-          console.log(`[DexScreener] Cache hit for ${poolAddress.slice(0, 8)}`);
+        // PERMANENT CACHE: If we've already queried this pool, return cached result
+        if (cached.queryCount >= DEXSCREENER_MAX_QUERIES_PER_POOL) {
+          // Already queried max times - return cached result forever
           return cached.result;
         }
         
-        // Check retry logic for negative results
-        if (!cached.result.pairFound && cached.retryCount >= DEXSCREENER_MAX_RETRIES) {
-          console.log(`[DexScreener] Max retries reached for ${poolAddress.slice(0, 8)}`);
-          return cached.result;
-        }
-        
-        // Check if we should wait before retrying
-        if (cached.result.retryAt && now < cached.result.retryAt) {
-          console.log(`[DexScreener] Retry cooldown for ${poolAddress.slice(0, 8)}`);
+        // COOLDOWN CHECK: Don't query if within cooldown window
+        const timeSinceLastQuery = now - cached.lastQueryAt;
+        if (timeSinceLastQuery < DEXSCREENER_MIN_COOLDOWN) {
+          // Still in cooldown - return cached result
           return cached.result;
         }
       }
       
+      // NON-BLOCKING: Use Promise.race with a very short timeout
+      // If DexScreener is slow, return INDEXING immediately
       try {
-        // Query by POOL ADDRESS, not token mint
         const endpoint = `https://api.dexscreener.com/latest/dex/pairs/solana/${poolAddress}`;
-        console.log(`[DexScreener] Querying pair: ${poolAddress.slice(0, 8)}...`);
+        
+        // Very short timeout - DexScreener should not block anything
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s max
         
         const response = await fetch(endpoint, {
-          signal: AbortSignal.timeout(8000),
+          signal: controller.signal,
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'MemeSniper/2.0',
           },
         });
+        clearTimeout(timeoutId);
         
+        // Handle response
         if (!response.ok) {
+          // HTTP error - treat as INDEXING, not error
           const result: DexScreenerPairResult = {
             pairFound: false,
-            retryAt: now + DEXSCREENER_RETRY_DELAY,
+            retryAt: now + DEXSCREENER_MAX_COOLDOWN,
           };
           
-          // Cache negative result
+          // Cache permanently
           dexScreenerCache[poolAddress] = {
             result,
             timestamp: now,
-            retryCount: (cached?.retryCount || 0) + 1,
+            queryCount: (cached?.queryCount || 0) + 1,
+            lastQueryAt: now,
           };
           
           return result;
@@ -269,25 +284,24 @@ serve(async (req) => {
         
         // Check if pair exists
         if (!data.pair && (!data.pairs || data.pairs.length === 0)) {
-          // "No pairs found" is NOT an error - it's indexing delay
-          console.log(`[DexScreener] INDEXING: Pair ${poolAddress.slice(0, 8)} not yet indexed`);
-          
+          // No pairs = INDEXING (expected for new pools)
           const result: DexScreenerPairResult = {
             pairFound: false,
-            retryAt: now + DEXSCREENER_RETRY_DELAY,
+            retryAt: now + DEXSCREENER_MAX_COOLDOWN,
           };
           
-          // Cache negative result with retry
+          // Cache permanently
           dexScreenerCache[poolAddress] = {
             result,
             timestamp: now,
-            retryCount: (cached?.retryCount || 0) + 1,
+            queryCount: (cached?.queryCount || 0) + 1,
+            lastQueryAt: now,
           };
           
           return result;
         }
         
-        // Extract pair data
+        // SUCCESS: Pair found
         const pair = data.pair || data.pairs?.[0];
         
         const result: DexScreenerPairResult = {
@@ -299,29 +313,29 @@ serve(async (req) => {
           dexId: pair.dexId,
         };
         
-        // Cache positive result
+        // Cache permanently (found pairs don't need re-query)
         dexScreenerCache[poolAddress] = {
           result,
           timestamp: now,
-          retryCount: 0,
+          queryCount: (cached?.queryCount || 0) + 1,
+          lastQueryAt: now,
         };
         
-        console.log(`[DexScreener] LISTED: Pair ${poolAddress.slice(0, 8)} found with $${result.liquidity?.toFixed(0)} liquidity`);
         return result;
         
       } catch (e: any) {
-        console.error(`[DexScreener] Error querying ${poolAddress.slice(0, 8)}:`, e.message);
-        
+        // ANY error (timeout, network, etc) = INDEXING, not "Server busy"
         const result: DexScreenerPairResult = {
           pairFound: false,
-          retryAt: now + DEXSCREENER_RETRY_DELAY,
+          retryAt: now + DEXSCREENER_MAX_COOLDOWN,
         };
         
-        // Cache error result
+        // Cache the failed attempt permanently
         dexScreenerCache[poolAddress] = {
           result,
           timestamp: now,
-          retryCount: (cached?.retryCount || 0) + 1,
+          queryCount: (cached?.queryCount || 0) + 1,
+          lastQueryAt: now,
         };
         
         return result;

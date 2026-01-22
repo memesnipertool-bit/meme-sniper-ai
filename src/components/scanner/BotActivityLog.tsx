@@ -103,10 +103,12 @@ function getFriendlyMessage(entry: BotLogEntry): string {
     [/birdeye.*5\d\d|birdeye.*error/i, '🔄 Birdeye busy - using other sources'],
     [/birdeye.*401|birdeye.*key/i, '🔐 Birdeye API key issue'],
     
-    // ===== DEXSCREENER SPECIFIC =====
-    [/dexscreener.*no.*pair|no.*pairs.*found/i, '⏳ Pool too new for DexScreener - normal'],
-    [/dexscreener.*429|dexscreener.*rate/i, '⏳ DexScreener rate limited'],
-    [/dexscreener.*5\d\d|dexscreener.*error/i, '🔄 DexScreener temporarily busy'],
+    // ===== DEXSCREENER SPECIFIC (never show "busy" - always INDEXING) =====
+    [/dexscreener.*no.*pair|no.*pairs.*found/i, '⏳ Pool awaiting DexScreener index'],
+    [/dexscreener.*429|dexscreener.*rate/i, '⏳ DexScreener indexing pool'],
+    [/dexscreener.*5\d\d|dexscreener.*error|dexscreener.*fail/i, '⏳ Pool awaiting DexScreener index'],
+    [/dexscreener.*timeout|dexscreener.*abort/i, '⏳ Pool awaiting DexScreener index'],
+    [/dexscreener/i, '⏳ Pool awaiting DexScreener index'], // Catch-all for DexScreener
     
     // ===== RAYDIUM SPECIFIC =====
     [/raydium.*5\d\d|raydium.*error/i, '🔄 Raydium API busy - using Jupiter'],
