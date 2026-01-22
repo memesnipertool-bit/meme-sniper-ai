@@ -1,6 +1,8 @@
 /**
  * Trading Engine Configuration
  * Default settings and configuration management
+ * 
+ * RPC-ONLY execution - No Raydium HTTP API
  */
 
 import type { TradingConfig, RiskFilters } from './types';
@@ -15,22 +17,20 @@ export const DEFAULT_RISK_FILTERS: RiskFilters = {
   maxOwnershipPercent: 50,
 };
 
-// Default trading configuration - with fallback support
-// IMPORTANT: No aggressive retry loops (<1 second)
+// Default trading configuration
 export const DEFAULT_TRADING_CONFIG: TradingConfig = {
   // Liquidity detection - balanced thresholds
-  minLiquidity: 5, // 5 SOL minimum - allows new tokens while filtering dust
-  maxRiskScore: 65, // Max 65/100 risk score - moderate filtering
+  minLiquidity: 5, // 5 SOL minimum
+  maxRiskScore: 65, // Max 65/100 risk score
   
   // Trading parameters
   buyAmount: 0.1, // 0.1 SOL default
   slippage: 0.15, // 15% slippage for new tokens
   priorityFee: 100000, // 0.0001 SOL priority fee
   
-  // Retry configuration - NO tight loops
-  // Minimum 1 second delay between retries with exponential backoff
-  maxRetries: 3,
-  retryDelayMs: 1000, // Base delay: 1 second (will use exponential backoff)
+  // Retry configuration - block-based delays
+  maxRetries: 2, // Reduced from 3 to 2 for RPC-only execution
+  retryDelayMs: 800, // ~2 blocks between retries
   
   // Polling configuration
   jupiterPollIntervalMs: 5000, // Poll every 5 seconds
@@ -44,18 +44,14 @@ export const DEFAULT_TRADING_CONFIG: TradingConfig = {
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
-// API endpoints
+// API endpoints - JUPITER ONLY for trading
+// Raydium HTTP APIs have been REMOVED
 export const API_ENDPOINTS = {
   // Jupiter - using free lite-api (no API key required)
   jupiterQuote: 'https://lite-api.jup.ag/swap/v1/quote',
   jupiterSwap: 'https://lite-api.jup.ag/swap/v1/swap',
   jupiterPrice: 'https://lite-api.jup.ag/price/v3',
   jupiterTokens: 'https://tokens.jup.ag/tokens?tags=verified',
-  
-  // Raydium
-  raydiumSwap: 'https://api-v3.raydium.io/swap',
-  raydiumPools: 'https://api-v3.raydium.io/pools/info/list',
-  raydiumMint: 'https://api-v3.raydium.io/mint/price',
   
   // Pump.fun
   pumpFunTrade: 'https://pumpportal.fun/api/trade',
@@ -64,11 +60,11 @@ export const API_ENDPOINTS = {
   // Safety checks
   rugCheck: 'https://api.rugcheck.xyz/v1/tokens',
   
-  // Token info
+  // Token info (enrichment only)
   dexScreener: 'https://api.dexscreener.com/latest/dex/tokens',
 };
 
-// Pool detection program IDs
+// Pool detection program IDs (for RPC validation)
 export const PROGRAM_IDS = {
   pumpFun: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
   raydiumAmm: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
