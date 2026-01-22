@@ -84,58 +84,88 @@ const categoryLabels: Record<string, string> = {
 function getFriendlyMessage(entry: BotLogEntry): string {
   const msg = entry.message;
   
-  // Common error patterns -> friendly messages
+  // Common error patterns -> friendly messages (ORDER MATTERS - more specific first)
   const errorMappings: [RegExp, string][] = [
-    // Network/API errors
-    [/dns error|failed to lookup|no address associated/i, '🌐 Network issue - API temporarily unavailable'],
-    [/timeout|timed out|aborted/i, '⏱️ Request timed out - trying again'],
-    [/fetch failed|failed to fetch/i, '📡 Connection failed - retrying'],
-    [/HTTP 4\d\d|HTTP 5\d\d/i, '⚠️ API error - using fallback'],
+    // Token lifecycle stages (NEW - specific Pump.fun/scanner messages)
+    [/BONDING|bonding.*curve/i, '🌱 Token on Pump.fun bonding curve'],
+    [/LP_LIVE|pool.*live/i, '🏊 Pool live - verifying tradability'],
+    [/INDEXING|not.*indexed|indexing/i, '⏳ Pool live, waiting for DexScreener'],
+    [/LISTED|pair.*found/i, '✅ Token listed and verified'],
+    
+    // Pump.fun specific (NEW)
+    [/pump\.?fun.*API.*failed|pump\.?fun.*503|pump\.?fun.*530/i, '🟡 Pump.fun API busy - using fallbacks'],
+    [/still.*on.*pump\.?fun|bonding.*curve.*not.*graduated/i, '🌱 New token still on Pump.fun'],
+    [/graduated.*raydium/i, '🎓 Token graduated to Raydium'],
+    
+    // Scanner stage messages (NEW)
+    [/stage.*BONDING/i, '🌱 Scanning bonding curve tokens'],
+    [/stage.*LP_LIVE/i, '🏊 Scanning live pools'],
+    [/stage.*INDEXING/i, '⏳ Pools waiting for index'],
+    [/stage.*LISTED/i, '✅ Listed tokens found'],
+    [/\d+ tradeable.*out of/i, '📊 Scan complete'],
+    
+    // API fallback messages (MORE SPECIFIC - before generic HTTP)
+    [/using.*fallback|fallback.*endpoint/i, '🔄 Using backup API'],
+    [/service.*busy.*backup/i, '🔄 Service busy - using backup'],
+    [/cloudflare.*protection/i, '☁️ Cloudflare protection - retrying'],
+    [/503.*service/i, '🔄 Service temporarily busy'],
+    [/530/i, '☁️ Cloudflare block - trying fallback'],
+    
+    // Network/API errors (GENERIC - comes after specific patterns)
+    [/dns error|failed to lookup|no address associated/i, '🌐 Network issue - retrying'],
+    [/timeout|timed out|aborted/i, '⏱️ Request timed out - retrying'],
+    [/fetch failed|failed to fetch/i, '📡 Connection issue - retrying'],
     [/401|unauthorized/i, '🔐 Authentication failed'],
     [/403|forbidden/i, '🚫 Access denied'],
     [/429|rate limit/i, '⏳ Rate limited - slowing down'],
-    [/503|service unavailable/i, '🔄 Service busy - using backup'],
-    [/530|cloudflare/i, '☁️ Cloudflare protection - retrying'],
+    [/HTTP 5\d\d/i, '🔄 Server busy - using fallback'],
+    [/HTTP 4\d\d/i, '⚠️ Request error - checking alternatives'],
     
     // Jupiter/DEX errors
-    [/not indexed on Jupiter/i, '🔍 Token too new - using Raydium/Orca'],
-    [/no route|no valid route/i, '🛤️ No route yet - checking alternatives'],
+    [/not indexed on Jupiter/i, '🔍 Token too new for Jupiter'],
+    [/no route|no valid route/i, '🛤️ No swap route yet'],
     [/Jupiter unavailable/i, '🔌 Jupiter offline - using direct DEX'],
+    [/swap.*verification.*failed/i, '🧪 Swap check failed - may be new token'],
     
-    // Liquidity/Pool errors
-    [/insufficient liquidity/i, '💧 Low liquidity - skipped for safety'],
+    // Liquidity/Pool errors  
+    [/insufficient liquidity/i, '💧 Low liquidity - skipped'],
     [/no.*pool.*found/i, '🏊 No pool found yet'],
-    [/liquidity.*SOL.*need/i, '💧 Waiting for more liquidity'],
-    [/DexScreener.*found/i, '✅ Pool found via DexScreener'],
-    [/Raydium.*found/i, '✅ Pool found on Raydium'],
+    [/liquidity.*SOL.*need/i, '💧 Waiting for liquidity'],
+    [/DexScreener.*found/i, '✅ Pool found on DexScreener'],
+    [/Raydium.*found|Raydium V4/i, '✅ Pool found on Raydium'],
     [/Orca.*found/i, '✅ Pool found on Orca'],
+    [/pool.*not.*verified/i, '⚠️ Pool exists but unverified'],
     
     // Trading errors
-    [/slippage|price impact/i, '📉 Price too volatile - skipped'],
-    [/insufficient.*balance/i, '💰 Need more SOL in wallet'],
-    [/transaction failed/i, '❌ Transaction failed on-chain'],
+    [/slippage|price impact/i, '📉 Price too volatile'],
+    [/insufficient.*balance/i, '💰 Need more SOL'],
+    [/transaction failed/i, '❌ Transaction failed'],
     [/simulation failed/i, '🧪 Swap simulation failed'],
-    [/wallet not connected/i, '🔗 Connect wallet to trade'],
-    [/connect wallet/i, '🔗 Connect wallet to enable trading'],
+    [/wallet not connected|connect wallet/i, '🔗 Connect wallet to trade'],
     
     // Token evaluation
     [/discarded|rejected/i, '⏭️ Didn\'t pass filters'],
-    [/risk.*high|high.*risk/i, '⚠️ Risk too high - skipped'],
-    [/honeypot|rug.*pull/i, '🚨 Scam detected - avoided'],
-    [/\d+ tokens evaluated.*0 approved/i, '🔍 Scanning - no matches yet'],
-    [/\d+ token.*approved/i, '✅ Found trading opportunity!'],
+    [/risk.*high|high.*risk/i, '⚠️ Risk too high'],
+    [/honeypot|rug.*pull|scam/i, '🚨 Scam detected - avoided'],
+    [/\d+ tokens? evaluated.*0 approved/i, '🔍 Scanning - no matches'],
+    [/\d+ token.*approved/i, '✅ Trading opportunity found!'],
+    [/evaluating.*\d+.*tokens?/i, '🔎 Evaluating tokens...'],
     
-    // Success messages - keep original
+    // Success messages
     [/tradable|tradeable/i, '✅ Token is tradeable'],
-    [/found.*pool|pool.*found/i, '✅ Liquidity pool discovered'],
+    [/found.*pool|pool.*found/i, '✅ Pool discovered'],
     [/snipe.*success|trade successful/i, '🎯 Trade executed!'],
-    [/3-stage snipe/i, '🚀 Starting trade execution'],
+    [/3-stage snipe/i, '🚀 Starting trade...'],
+    [/position closed/i, '💰 Position closed'],
     
     // System messages
     [/bot loop started/i, '🤖 Bot is running'],
-    [/cleared.*tokens.*cache/i, '🧹 Cache refreshed'],
+    [/cleared.*tokens.*cache|cache.*refreshed/i, '🧹 Cache refreshed'],
     [/max positions reached/i, '📊 Position limit reached'],
     [/executing.*trade/i, '⚡ Executing trade...'],
+    [/force scan/i, '🔄 Manual scan triggered'],
+    [/force evaluate/i, '🔎 Manual evaluation triggered'],
+    [/bot reset/i, '🔄 Bot state reset'],
   ];
   
   for (const [pattern, replacement] of errorMappings) {
