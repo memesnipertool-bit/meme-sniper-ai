@@ -168,10 +168,15 @@ function getFriendlyMessage(entry: BotLogEntry): string {
     [/wallet not connected|connect wallet/i, '🔗 Connect wallet to trade'],
     
     // ===== TOKEN EVALUATION =====
+    [/did not pass filters|didn.*pass filters/i, '⏭️ Filtered out by settings'],
+    [/Risk check failed.*holders|Only \d+ holders/i, '👥 Too few holders - filtered'],
+    [/Risk check failed.*Top holder|Top holder owns/i, '🐋 Whale concentration - filtered'],
+    [/Risk check failed/i, '⚠️ Risk filters applied'],
     [/discarded|rejected/i, '⏭️ Didn\'t pass filters'],
     [/risk.*high|high.*risk/i, '⚠️ Risk too high'],
     [/honeypot|rug.*pull|scam/i, '🚨 Scam detected - avoided'],
     [/\d+ tokens? evaluated.*0 approved/i, '🔍 Scanning - no matches'],
+    [/\d+ token.*did not pass/i, '⏭️ Tokens filtered'],
     [/\d+ token.*approved/i, '✅ Trading opportunity found!'],
     [/evaluating.*\d+.*tokens?/i, '🔎 Evaluating tokens...'],
     
