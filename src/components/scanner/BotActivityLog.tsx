@@ -83,67 +83,95 @@ const categoryLabels: Record<string, string> = {
 // Convert technical error messages to user-friendly messages
 function getFriendlyMessage(entry: BotLogEntry): string {
   const msg = entry.message;
+  const details = entry.details || '';
+  const combined = `${msg} ${details}`;
   
-  // Common error patterns -> friendly messages (ORDER MATTERS - more specific first)
+  // MOST SPECIFIC patterns first (API-specific errors with fallback context)
+  // These capture when a specific service failed but fallback worked
   const errorMappings: [RegExp, string][] = [
-    // Token lifecycle stages (NEW - specific Pump.fun/scanner messages)
-    [/BONDING|bonding.*curve/i, '🌱 Token on Pump.fun bonding curve'],
-    [/LP_LIVE|pool.*live/i, '🏊 Pool live - verifying tradability'],
-    [/INDEXING|not.*indexed|indexing/i, '⏳ Pool live, waiting for DexScreener'],
-    [/LISTED|pair.*found/i, '✅ Token listed and verified'],
-    
-    // Pump.fun specific (NEW)
-    [/pump\.?fun.*API.*failed|pump\.?fun.*503|pump\.?fun.*530/i, '🟡 Pump.fun API busy - using fallbacks'],
-    [/still.*on.*pump\.?fun|bonding.*curve.*not.*graduated/i, '🌱 New token still on Pump.fun'],
+    // ===== PUMP.FUN SPECIFIC (most common - Cloudflare blocks) =====
+    [/pump\.?fun.*503|503.*pump\.?fun/i, '🟡 Pump.fun overloaded - using backup API'],
+    [/pump\.?fun.*530|530.*pump\.?fun/i, '☁️ Pump.fun Cloudflare block - trying backup'],
+    [/pump\.?fun.*API.*fail|pump\.?fun.*error/i, '🟡 Pump.fun API busy - using fallbacks'],
+    [/pump\.?fun.*cloudflare/i, '☁️ Pump.fun behind Cloudflare - retrying'],
+    [/pump\.?fun.*fallback/i, '🔄 Pump.fun unavailable - using backup source'],
+    [/still.*on.*pump\.?fun|bonding.*curve.*not.*graduated/i, '🌱 Token still on Pump.fun'],
     [/graduated.*raydium/i, '🎓 Token graduated to Raydium'],
     
-    // Scanner stage messages (NEW)
+    // ===== BIRDEYE SPECIFIC =====
+    [/birdeye.*429|birdeye.*rate/i, '⏳ Birdeye rate limited - slowing requests'],
+    [/birdeye.*5\d\d|birdeye.*error/i, '🔄 Birdeye busy - using other sources'],
+    [/birdeye.*401|birdeye.*key/i, '🔐 Birdeye API key issue'],
+    
+    // ===== DEXSCREENER SPECIFIC =====
+    [/dexscreener.*no.*pair|no.*pairs.*found/i, '⏳ Pool too new for DexScreener - normal'],
+    [/dexscreener.*429|dexscreener.*rate/i, '⏳ DexScreener rate limited'],
+    [/dexscreener.*5\d\d|dexscreener.*error/i, '🔄 DexScreener temporarily busy'],
+    
+    // ===== RAYDIUM SPECIFIC =====
+    [/raydium.*5\d\d|raydium.*error/i, '🔄 Raydium API busy - using Jupiter'],
+    [/raydium.*pool.*not.*found/i, '🏊 Raydium pool not ready yet'],
+    [/Raydium.*found|Raydium V4/i, '✅ Pool found on Raydium'],
+    
+    // ===== JUPITER SPECIFIC =====
+    [/jupiter.*5\d\d|jupiter.*error/i, '🔄 Jupiter busy - will retry'],
+    [/not indexed on Jupiter/i, '🔍 Token too new for Jupiter'],
+    [/no route|no valid route/i, '🛤️ No swap route yet - pool may be new'],
+    [/Jupiter unavailable/i, '🔌 Jupiter offline - using direct DEX'],
+    
+    // ===== GECKOTERMINAL SPECIFIC =====
+    [/gecko.*5\d\d|gecko.*error/i, '🔄 GeckoTerminal busy - using other sources'],
+    [/gecko.*429|gecko.*rate/i, '⏳ GeckoTerminal rate limited'],
+    
+    // ===== TOKEN LIFECYCLE STAGES =====
+    [/BONDING|bonding.*curve/i, '🌱 Token on bonding curve'],
+    [/LP_LIVE|pool.*live/i, '🏊 Pool live - checking tradability'],
+    [/INDEXING|not.*indexed|indexing/i, '⏳ Pool live, awaiting DEX index'],
+    [/LISTED|pair.*found/i, '✅ Token listed and verified'],
+    
+    // ===== SCANNER STAGE SUMMARIES =====
     [/stage.*BONDING/i, '🌱 Scanning bonding curve tokens'],
     [/stage.*LP_LIVE/i, '🏊 Scanning live pools'],
     [/stage.*INDEXING/i, '⏳ Pools waiting for index'],
     [/stage.*LISTED/i, '✅ Listed tokens found'],
     [/\d+ tradeable.*out of/i, '📊 Scan complete'],
     
-    // API fallback messages (MORE SPECIFIC - before generic HTTP)
-    [/using.*fallback|fallback.*endpoint/i, '🔄 Using backup API'],
-    [/service.*busy.*backup/i, '🔄 Service busy - using backup'],
+    // ===== GENERIC FALLBACK MESSAGES (after specific API patterns) =====
+    [/using.*fallback|fallback.*endpoint/i, '🔄 Primary API busy - backup working'],
+    [/service.*busy.*backup/i, '🔄 Service busy - backup active'],
     [/cloudflare.*protection/i, '☁️ Cloudflare protection - retrying'],
-    [/503.*service/i, '🔄 Service temporarily busy'],
-    [/530/i, '☁️ Cloudflare block - trying fallback'],
     
-    // Network/API errors (GENERIC - comes after specific patterns)
+    // ===== NETWORK ERRORS =====
     [/dns error|failed to lookup|no address associated/i, '🌐 Network issue - retrying'],
     [/timeout|timed out|aborted/i, '⏱️ Request timed out - retrying'],
     [/fetch failed|failed to fetch/i, '📡 Connection issue - retrying'],
     [/401|unauthorized/i, '🔐 Authentication failed'],
     [/403|forbidden/i, '🚫 Access denied'],
     [/429|rate limit/i, '⏳ Rate limited - slowing down'],
-    [/HTTP 5\d\d/i, '🔄 Server busy - using fallback'],
+    
+    // ===== GENERIC HTTP ERRORS (last resort for HTTP codes) =====
+    [/503|service unavailable/i, '🔄 Service temporarily busy - using fallback'],
+    [/530/i, '☁️ Cloudflare block - trying fallback'],
+    [/HTTP 5\d\d/i, '🔄 API temporarily busy - fallback active'],
     [/HTTP 4\d\d/i, '⚠️ Request error - checking alternatives'],
     
-    // Jupiter/DEX errors
-    [/not indexed on Jupiter/i, '🔍 Token too new for Jupiter'],
-    [/no route|no valid route/i, '🛤️ No swap route yet'],
-    [/Jupiter unavailable/i, '🔌 Jupiter offline - using direct DEX'],
-    [/swap.*verification.*failed/i, '🧪 Swap check failed - may be new token'],
-    
-    // Liquidity/Pool errors  
+    // ===== LIQUIDITY/POOL MESSAGES =====
     [/insufficient liquidity/i, '💧 Low liquidity - skipped'],
     [/no.*pool.*found/i, '🏊 No pool found yet'],
     [/liquidity.*SOL.*need/i, '💧 Waiting for liquidity'],
     [/DexScreener.*found/i, '✅ Pool found on DexScreener'],
-    [/Raydium.*found|Raydium V4/i, '✅ Pool found on Raydium'],
     [/Orca.*found/i, '✅ Pool found on Orca'],
     [/pool.*not.*verified/i, '⚠️ Pool exists but unverified'],
     
-    // Trading errors
+    // ===== TRADING MESSAGES =====
     [/slippage|price impact/i, '📉 Price too volatile'],
     [/insufficient.*balance/i, '💰 Need more SOL'],
     [/transaction failed/i, '❌ Transaction failed'],
     [/simulation failed/i, '🧪 Swap simulation failed'],
+    [/swap.*verification.*failed/i, '🧪 Swap check failed - may be new token'],
     [/wallet not connected|connect wallet/i, '🔗 Connect wallet to trade'],
     
-    // Token evaluation
+    // ===== TOKEN EVALUATION =====
     [/discarded|rejected/i, '⏭️ Didn\'t pass filters'],
     [/risk.*high|high.*risk/i, '⚠️ Risk too high'],
     [/honeypot|rug.*pull|scam/i, '🚨 Scam detected - avoided'],
@@ -151,14 +179,14 @@ function getFriendlyMessage(entry: BotLogEntry): string {
     [/\d+ token.*approved/i, '✅ Trading opportunity found!'],
     [/evaluating.*\d+.*tokens?/i, '🔎 Evaluating tokens...'],
     
-    // Success messages
+    // ===== SUCCESS MESSAGES =====
     [/tradable|tradeable/i, '✅ Token is tradeable'],
     [/found.*pool|pool.*found/i, '✅ Pool discovered'],
     [/snipe.*success|trade successful/i, '🎯 Trade executed!'],
     [/3-stage snipe/i, '🚀 Starting trade...'],
     [/position closed/i, '💰 Position closed'],
     
-    // System messages
+    // ===== SYSTEM MESSAGES =====
     [/bot loop started/i, '🤖 Bot is running'],
     [/cleared.*tokens.*cache|cache.*refreshed/i, '🧹 Cache refreshed'],
     [/max positions reached/i, '📊 Position limit reached'],
@@ -169,7 +197,7 @@ function getFriendlyMessage(entry: BotLogEntry): string {
   ];
   
   for (const [pattern, replacement] of errorMappings) {
-    if (pattern.test(msg)) {
+    if (pattern.test(combined)) {
       return replacement;
     }
   }
