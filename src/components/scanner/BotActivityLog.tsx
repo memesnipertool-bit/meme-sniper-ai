@@ -89,53 +89,48 @@ function getFriendlyMessage(entry: BotLogEntry): string {
   // MOST SPECIFIC patterns first (API-specific errors with fallback context)
   // These capture when a specific service failed but fallback worked
   const errorMappings: [RegExp, string][] = [
-    // ===== PUMP.FUN SPECIFIC (most common - Cloudflare blocks) =====
-    [/pump\.?fun.*503|503.*pump\.?fun/i, '🟡 Pump.fun overloaded - using backup API'],
-    [/pump\.?fun.*530|530.*pump\.?fun/i, '☁️ Pump.fun Cloudflare block - trying backup'],
-    [/pump\.?fun.*API.*fail|pump\.?fun.*error/i, '🟡 Pump.fun API busy - using fallbacks'],
-    [/pump\.?fun.*cloudflare/i, '☁️ Pump.fun behind Cloudflare - retrying'],
-    [/pump\.?fun.*fallback/i, '🔄 Pump.fun unavailable - using backup source'],
-    [/still.*on.*pump\.?fun|bonding.*curve.*not.*graduated/i, '🌱 Token still on Pump.fun'],
-    [/graduated.*raydium/i, '🎓 Token graduated to Raydium'],
-    
-    // ===== BIRDEYE SPECIFIC =====
-    [/birdeye.*429|birdeye.*rate/i, '⏳ Birdeye rate limited - slowing requests'],
-    [/birdeye.*5\d\d|birdeye.*error/i, '🔄 Birdeye busy - using other sources'],
-    [/birdeye.*401|birdeye.*key/i, '🔐 Birdeye API key issue'],
+    // ===== RAYDIUM RPC DISCOVERY =====
+    [/Raydium.*RPC.*discovery/i, '🔍 Discovering Raydium pools via RPC'],
+    [/Raydium.*found|Raydium V4|Raydium AMM/i, '✅ Pool found on Raydium'],
+    [/raydium.*pool.*not.*found|no.*raydium.*pool/i, '🏊 Pool not yet initialized'],
+    [/pool.*not.*initialized|status.*0/i, '⏳ Pool initializing...'],
+    [/pool.*not.*open|opens.*in/i, '⏳ Pool not open yet'],
+    [/empty.*vaults|vault.*balance.*0/i, '⏳ Pool vaults empty'],
+    [/insufficient.*liquidity/i, '💧 Insufficient liquidity'],
     
     // ===== DEXSCREENER SPECIFIC (never show "busy" - always INDEXING) =====
     [/dexscreener.*no.*pair|no.*pairs.*found/i, '⏳ Pool awaiting DexScreener index'],
     [/dexscreener.*429|dexscreener.*rate/i, '⏳ DexScreener indexing pool'],
     [/dexscreener.*5\d\d|dexscreener.*error|dexscreener.*fail/i, '⏳ Pool awaiting DexScreener index'],
     [/dexscreener.*timeout|dexscreener.*abort/i, '⏳ Pool awaiting DexScreener index'],
-    [/dexscreener/i, '⏳ Pool awaiting DexScreener index'], // Catch-all for DexScreener
-    
-    // ===== RAYDIUM SPECIFIC (no API busy messages) =====
-    [/raydium.*pool.*not.*found/i, '🏊 Raydium pool not ready yet'],
-    [/Raydium.*found|Raydium V4/i, '✅ Pool found on Raydium'],
+    [/dexscreener/i, '⏳ Pool awaiting DexScreener index'],
     
     // ===== JUPITER SPECIFIC =====
     [/jupiter.*5\d\d|jupiter.*error/i, '🔄 Jupiter busy - will retry'],
-    [/not indexed on Jupiter/i, '🔍 Token too new for Jupiter'],
-    [/no route|no valid route/i, '🛤️ No swap route yet - pool may be new'],
-    [/Jupiter unavailable/i, '🔌 Jupiter offline - using direct DEX'],
+    [/not indexed on Jupiter|not.*indexed.*Jupiter/i, '🔍 Token too new for Jupiter'],
+    [/no route|no valid route/i, '🛤️ New pool - awaiting indexing'],
+    [/Jupiter unavailable/i, '🔌 Jupiter offline - using direct RPC'],
+    
+    // ===== BIRDEYE SPECIFIC =====
+    [/birdeye.*429|birdeye.*rate/i, '⏳ Birdeye rate limited'],
+    [/birdeye.*5\d\d|birdeye.*error/i, '🔄 Birdeye busy'],
+    [/birdeye.*401|birdeye.*key/i, '🔐 Birdeye API key issue'],
     
     // ===== GECKOTERMINAL SPECIFIC =====
-    [/gecko.*5\d\d|gecko.*error/i, '🔄 GeckoTerminal busy - using other sources'],
+    [/gecko.*5\d\d|gecko.*error/i, '🔄 GeckoTerminal busy'],
     [/gecko.*429|gecko.*rate/i, '⏳ GeckoTerminal rate limited'],
     
-    // ===== TOKEN LIFECYCLE STAGES =====
-    [/BONDING|bonding.*curve/i, '🌱 Token on bonding curve'],
-    [/LP_LIVE|pool.*live/i, '🏊 Pool live - checking tradability'],
-    [/INDEXING|not.*indexed|indexing/i, '⏳ Pool live, awaiting DEX index'],
-    [/LISTED|pair.*found/i, '✅ Token listed and verified'],
+    // ===== TOKEN LIFECYCLE STAGES (Raydium-only) =====
+    [/LP_LIVE|pool.*live|Live LP/i, '🏊 Pool live - checking tradability'],
+    [/INDEXING|not.*indexed|indexing|awaiting.*index/i, '⏳ Pool live, awaiting DEX index'],
+    [/LISTED|pair.*found|Listed on/i, '✅ Token listed and verified'],
     
     // ===== SCANNER STAGE SUMMARIES =====
-    [/stage.*BONDING/i, '🌱 Scanning bonding curve tokens'],
     [/stage.*LP_LIVE/i, '🏊 Scanning live pools'],
     [/stage.*INDEXING/i, '⏳ Pools waiting for index'],
     [/stage.*LISTED/i, '✅ Listed tokens found'],
-    [/\d+ tradeable.*out of/i, '📊 Scan complete'],
+    [/\d+ tradeable.*out of|\d+ tradable/i, '📊 Scan complete'],
+    [/tradable tokens.*verified/i, '📊 All tokens verified via RPC'],
     
     // ===== GENERIC FALLBACK MESSAGES (after specific API patterns) =====
     [/using.*fallback|fallback.*endpoint/i, '🔄 Primary API busy - backup working'],

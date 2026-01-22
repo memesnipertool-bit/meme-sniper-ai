@@ -3,13 +3,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAppMode } from '@/contexts/AppModeContext';
 
-// Token lifecycle stages
-export type TokenStage = 'BONDING' | 'LP_LIVE' | 'INDEXING' | 'LISTED';
+// Token lifecycle stages (Raydium-only - no bonding curve tokens)
+export type TokenStage = 'LP_LIVE' | 'INDEXING' | 'LISTED';
 
 export interface TokenStatus {
   tradable: boolean;
   stage: TokenStage;
   poolAddress?: string;
+  detectedAtSlot?: number;
   dexScreener: {
     pairFound: boolean;
     retryAt?: number;
@@ -69,7 +70,6 @@ interface ScanResult {
     pumpFun: number;
     filtered: number;
     stages?: {
-      bonding: number;
       lpLive: number;
       indexing: number;
       listed: number;
@@ -103,14 +103,15 @@ const RATE_LIMIT_WINDOW_MS = 60000;
 
 const generateSingleDemoToken = (idx: number): ScannedToken => {
   const token = demoTokenNames[idx % demoTokenNames.length];
-  const isPumpFun = Math.random() > 0.4; // 60% are Pump.fun tokens
+  const liquidity = Math.floor(Math.random() * 50) + 5; // 5-55 SOL liquidity
+  const stage: TokenStage = Math.random() > 0.5 ? 'LISTED' : 'LP_LIVE';
   return {
     id: `demo-${idx}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     address: `Demo${idx}...${Math.random().toString(36).substring(2, 8)}`,
     name: token.name,
     symbol: token.symbol,
     chain: 'solana',
-    liquidity: Math.floor(Math.random() * 50000) + 5000,
+    liquidity,
     liquidityLocked: Math.random() > 0.3,
     lockPercentage: Math.random() > 0.5 ? Math.floor(Math.random() * 50) + 50 : null,
     priceUsd: Math.random() * 0.001,
@@ -122,16 +123,22 @@ const generateSingleDemoToken = (idx: number): ScannedToken => {
     earlyBuyers: Math.floor(Math.random() * 8) + 1,
     buyerPosition: Math.floor(Math.random() * 5) + 1,
     riskScore: Math.floor(Math.random() * 60) + 20,
-    source: isPumpFun ? 'Pump.fun' : 'DexScreener',
+    source: 'Raydium AMM',
     pairAddress: `DemoPair${idx}`,
-    // Safety validation fields - mark demo tokens as tradeable
-    isPumpFun: isPumpFun,
+    // All demo tokens are Raydium-verified tradeable
+    isPumpFun: false,
     isTradeable: true,
     canBuy: true,
     canSell: true,
     freezeAuthority: null,
     mintAuthority: null,
-    safetyReasons: isPumpFun ? ['✅ Pump.fun bonding curve'] : ['✅ Demo token - always tradeable'],
+    safetyReasons: [`✅ Raydium V4 (${liquidity.toFixed(1)} SOL) - ${stage === 'LISTED' ? 'Listed' : 'Live LP'}`],
+    tokenStatus: {
+      tradable: true,
+      stage,
+      poolAddress: `DemoPool${idx}`,
+      dexScreener: { pairFound: stage === 'LISTED' },
+    },
   };
 };
 
@@ -141,7 +148,6 @@ export interface ScanStats {
   pumpFun: number;
   filtered: number;
   stages: {
-    bonding: number;
     lpLive: number;
     indexing: number;
     listed: number;
@@ -395,10 +401,9 @@ export function useTokenScanner() {
         setLastScanStats({
           total: result.stats.total,
           tradeable: result.stats.tradeable,
-          pumpFun: result.stats.pumpFun,
+          pumpFun: 0, // No Pump.fun tokens in Raydium-only pipeline
           filtered: result.stats.filtered,
           stages: result.stats.stages || {
-            bonding: 0,
             lpLive: 0,
             indexing: 0,
             listed: 0,
