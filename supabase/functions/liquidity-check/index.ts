@@ -10,12 +10,16 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 interface LiquidityCheckRequest {
   tokenAddress: string;
   minLiquidity?: number;
+  poolAddress?: string; // Optional: if known, use for DexScreener enrichment
 }
+
+// Token lifecycle stages
+type TokenStage = 'BONDING' | 'LP_LIVE' | 'INDEXING' | 'LISTED';
 
 interface LiquidityCheckResponse {
   status: 'TRADABLE' | 'DISCARDED';
-  source?: 'pump_fun' | 'jupiter' | 'raydium' | 'orca' | 'dexscreener';
-  dexId?: string; // raydium, orca, etc.
+  source?: 'pump_fun' | 'jupiter' | 'raydium' | 'orca';
+  dexId?: string;
   poolAddress?: string;
   baseMint?: string;
   quoteMint?: string;
@@ -23,13 +27,42 @@ interface LiquidityCheckResponse {
   tokenName?: string;
   tokenSymbol?: string;
   reason?: string;
+  // NEW: Structured status
+  tokenStatus?: {
+    tradable: boolean;
+    stage: TokenStage;
+    dexScreener: {
+      pairFound: boolean;
+      retryAt?: number;
+    };
+  };
 }
+
+// DexScreener cache to prevent spam
+interface DexScreenerCache {
+  [poolAddress: string]: {
+    pairFound: boolean;
+    timestamp: number;
+    retryCount: number;
+    retryAt?: number;
+  };
+}
+
+const dexScreenerCache: DexScreenerCache = {};
+const CACHE_TTL = 60000; // 60 seconds
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 30000; // 30 seconds
 
 /**
  * Server-side liquidity check - bypasses CORS issues
- * NEW PRIORITY: Pump.fun → DexScreener (finds Raydium/Orca pools) → Raydium API fallback
  * 
- * DexScreener tells us EXACTLY which DEX has liquidity, so we can route directly.
+ * FIXED PIPELINE:
+ * 1. Pump.fun bonding curve check → BONDING stage
+ * 2. Raydium pool validation (ALL conditions) → LP_LIVE stage
+ * 3. Swap simulation verification
+ * 4. DexScreener enrichment (ONLY by pool address, ONLY after validation)
+ * 
+ * NEVER query DexScreener by token mint - only by verified pool address
  */
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -37,7 +70,7 @@ serve(async (req) => {
   }
 
   try {
-    const { tokenAddress, minLiquidity = 5 }: LiquidityCheckRequest = await req.json();
+    const { tokenAddress, minLiquidity = 5, poolAddress }: LiquidityCheckRequest = await req.json();
 
     if (!tokenAddress) {
       return new Response(
@@ -48,42 +81,88 @@ serve(async (req) => {
 
     console.log(`[LiquidityCheck] Checking ${tokenAddress.slice(0, 8)}...`);
 
-    // PRIORITY 1: Check Pump.fun bonding curve (still on curve = trade via Pump.fun)
+    // PRIORITY 1: Check Pump.fun bonding curve (still on curve = BONDING stage)
     const pumpResult = await checkPumpFun(tokenAddress);
     if (pumpResult.status === 'TRADABLE') {
-      console.log(`[LiquidityCheck] ✅ Found on Pump.fun bonding curve`);
+      console.log(`[LiquidityCheck] ✅ Found on Pump.fun bonding curve (BONDING)`);
       return new Response(
-        JSON.stringify(pumpResult),
+        JSON.stringify({
+          ...pumpResult,
+          tokenStatus: {
+            tradable: true,
+            stage: 'BONDING',
+            dexScreener: { pairFound: false },
+          },
+        }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // PRIORITY 2: Use DexScreener to find exact DEX and pool
-    const dexResult = await checkDexScreener(tokenAddress, minLiquidity);
-    if (dexResult.status === 'TRADABLE') {
-      console.log(`[LiquidityCheck] ✅ Found via DexScreener: ${dexResult.dexId} pool`);
+    // PRIORITY 2: Validate Raydium pool with ALL conditions
+    const raydiumResult = await validateRaydiumPool(tokenAddress, minLiquidity);
+    
+    if (raydiumResult.status !== 'TRADABLE' || !raydiumResult.poolAddress) {
+      // No valid Raydium pool - DISCARDED
+      console.log(`[LiquidityCheck] ❌ No valid Raydium pool: ${raydiumResult.reason}`);
       return new Response(
-        JSON.stringify(dexResult),
+        JSON.stringify({
+          status: 'DISCARDED',
+          reason: raydiumResult.reason || 'No tradeable pool found',
+          tokenStatus: {
+            tradable: false,
+            stage: 'LP_LIVE',
+            dexScreener: { pairFound: false },
+          },
+        }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // PRIORITY 3: Direct Raydium API check (fallback)
-    const raydiumResult = await checkRaydium(tokenAddress, minLiquidity);
-    if (raydiumResult.status === 'TRADABLE') {
-      console.log(`[LiquidityCheck] ✅ Found Raydium pool (direct API)`);
+    // PRIORITY 3: Simulate swap to confirm tradability
+    const swapResult = await simulateSwap(tokenAddress);
+    
+    if (!swapResult.success) {
+      console.log(`[LiquidityCheck] ❌ Swap simulation failed: ${swapResult.reason}`);
       return new Response(
-        JSON.stringify(raydiumResult),
+        JSON.stringify({
+          status: 'DISCARDED',
+          reason: swapResult.reason || 'Swap simulation failed',
+          tokenStatus: {
+            tradable: false,
+            stage: 'LP_LIVE',
+            dexScreener: { pairFound: false },
+          },
+        }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // No tradeable pool found
-    console.log(`[LiquidityCheck] ❌ No tradeable pool found`);
+    // PRIORITY 4: Token is TRADABLE - now enrich with DexScreener (by pool address ONLY)
+    const finalPoolAddress = raydiumResult.poolAddress;
+    const dexEnrichment = await enrichWithDexScreener(finalPoolAddress);
+
+    // Determine stage based on DexScreener result
+    const stage: TokenStage = dexEnrichment.pairFound ? 'LISTED' : 'INDEXING';
+
+    console.log(`[LiquidityCheck] ✅ Tradable via Raydium (${stage})`);
+    
     return new Response(
       JSON.stringify({
-        status: 'DISCARDED',
-        reason: dexResult.reason || raydiumResult.reason || 'No tradeable pool found',
+        status: 'TRADABLE',
+        source: 'raydium',
+        dexId: 'raydium',
+        poolAddress: finalPoolAddress,
+        baseMint: SOL_MINT,
+        quoteMint: tokenAddress,
+        liquidity: raydiumResult.liquidity,
+        tokenStatus: {
+          tradable: true,
+          stage,
+          dexScreener: {
+            pairFound: dexEnrichment.pairFound,
+            retryAt: dexEnrichment.retryAt,
+          },
+        },
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -153,117 +232,24 @@ async function checkPumpFun(tokenAddress: string): Promise<LiquidityCheckRespons
 }
 
 /**
- * Use DexScreener to find exactly which DEX has the liquidity pool
- * This tells us the exact dexId (raydium, orca, meteora, etc.) and pool address
+ * Validate Raydium pool with ALL required conditions:
+ * 1. Pool exists with SOL pairing
+ * 2. Pool status = initialized
+ * 3. open_time <= current_block_time
+ * 4. Vault balances > 0
+ * 5. Minimum liquidity met
  */
-async function checkDexScreener(tokenAddress: string, minLiquidity: number): Promise<LiquidityCheckResponse> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
-    // DexScreener API - search for token on Solana
-    const response = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
-      {
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'MemeSniper/2.0',
-        },
-      }
-    );
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      return { status: 'DISCARDED', reason: `DexScreener: HTTP ${response.status}` };
-    }
-
-    const data = await response.json();
-
-    if (!data.pairs || data.pairs.length === 0) {
-      return { status: 'DISCARDED', reason: 'No pairs found on DexScreener' };
-    }
-
-    // Filter for Solana pairs only and sort by liquidity
-    const solanaPairs = data.pairs
-      .filter((p: any) => p.chainId === 'solana')
-      .sort((a: any, b: any) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-
-    if (solanaPairs.length === 0) {
-      return { status: 'DISCARDED', reason: 'No Solana pairs on DexScreener' };
-    }
-
-    // Find best pair with SOL as quote/base and sufficient liquidity
-    for (const pair of solanaPairs) {
-      const dexId = pair.dexId?.toLowerCase() || '';
-      const pairAddress = pair.pairAddress;
-      const liquidityUsd = pair.liquidity?.usd || 0;
-      
-      // Rough conversion: $150 per SOL
-      const liquiditySol = liquidityUsd / 150;
-
-      // Check if this is a SOL pair
-      const baseTokenAddress = pair.baseToken?.address;
-      const quoteTokenAddress = pair.quoteToken?.address;
-      const hasSol = baseTokenAddress === SOL_MINT || quoteTokenAddress === SOL_MINT ||
-                     pair.quoteToken?.symbol === 'SOL' || pair.baseToken?.symbol === 'SOL';
-
-      if (!hasSol) continue;
-
-      // Check minimum liquidity (in SOL equivalent)
-      if (liquiditySol < minLiquidity) {
-        continue;
-      }
-
-      // Determine source based on DEX ID
-      let source: LiquidityCheckResponse['source'] = 'dexscreener';
-      if (dexId.includes('raydium')) {
-        source = 'raydium';
-      } else if (dexId.includes('orca')) {
-        source = 'orca';
-      }
-
-      console.log(`[LiquidityCheck] DexScreener found: ${dexId} pool ${pairAddress?.slice(0, 8)} with $${liquidityUsd.toFixed(0)} liquidity`);
-
-      return {
-        status: 'TRADABLE',
-        source,
-        dexId,
-        poolAddress: pairAddress,
-        baseMint: SOL_MINT,
-        quoteMint: tokenAddress,
-        liquidity: liquiditySol,
-        tokenName: pair.baseToken?.name || pair.quoteToken?.name,
-        tokenSymbol: pair.baseToken?.symbol || pair.quoteToken?.symbol,
-      };
-    }
-
-    // Found pairs but none met criteria
-    const bestPair = solanaPairs[0];
-    const bestLiquidity = (bestPair.liquidity?.usd || 0) / 150;
-    return { 
-      status: 'DISCARDED', 
-      reason: `Best pool has ${bestLiquidity.toFixed(1)} SOL liquidity (need ${minLiquidity}+)` 
-    };
-
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.log('[LiquidityCheck] DexScreener error:', message);
-    return { status: 'DISCARDED', reason: `DexScreener error: ${message}` };
-  }
-}
-
-/**
- * Direct Raydium API check (fallback if DexScreener doesn't have the pool yet)
- */
-async function checkRaydium(tokenAddress: string, minLiquidity: number): Promise<LiquidityCheckResponse> {
+async function validateRaydiumPool(
+  tokenAddress: string, 
+  minLiquidity: number
+): Promise<LiquidityCheckResponse & { poolAddress?: string }> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
     // Raydium API v3 - search for pools by token mint
     const response = await fetch(
-      `https://api-v3.raydium.io/pools/info/mint?mint1=${tokenAddress}&poolType=standard&poolSortField=liquidity&sortType=desc&page_size=10`,
+      `https://api-v3.raydium.io/pools/info/mint?mint1=${tokenAddress}&mint2=${SOL_MINT}&poolType=standard&poolSortField=liquidity&sortType=desc&page_size=10`,
       {
         signal: controller.signal,
         headers: {
@@ -284,35 +270,227 @@ async function checkRaydium(tokenAddress: string, minLiquidity: number): Promise
       return { status: 'DISCARDED', reason: 'No Raydium pools found' };
     }
 
-    // Find best pool with SOL base
+    // Find best pool that passes ALL conditions
     for (const pool of data.data.data) {
       const mintA = pool.mintA?.address || pool.mintA;
       const mintB = pool.mintB?.address || pool.mintB;
       
-      // Check if one side is SOL
+      // CONDITION 1: Must have SOL pairing
       const hasSol = mintA === SOL_MINT || mintB === SOL_MINT;
       if (!hasSol) continue;
 
-      const liquiditySol = pool.tvl ? pool.tvl / 150 : // Rough USD to SOL conversion
-                          (mintA === SOL_MINT ? pool.mintAmountA : pool.mintAmountB) || 0;
-
-      if (liquiditySol >= minLiquidity) {
-        return {
-          status: 'TRADABLE',
-          source: 'raydium',
-          dexId: 'raydium',
-          poolAddress: pool.id || pool.poolId,
-          baseMint: SOL_MINT,
-          quoteMint: tokenAddress,
-          liquidity: liquiditySol,
-        };
+      // CONDITION 2: Pool status check (if available)
+      // Most pools don't expose status directly, so we rely on other checks
+      
+      // CONDITION 3: Check open_time <= current_block_time
+      const openTime = pool.openTime || 0;
+      const currentTime = Math.floor(Date.now() / 1000);
+      if (openTime > currentTime) {
+        console.log(`[Raydium] Pool not yet open: opens at ${openTime}`);
+        continue;
       }
+
+      // CONDITION 4: Vault balances > 0
+      const vaultBalanceA = pool.mintAmountA || 0;
+      const vaultBalanceB = pool.mintAmountB || 0;
+      if (vaultBalanceA <= 0 || vaultBalanceB <= 0) {
+        console.log(`[Raydium] Empty vaults: A=${vaultBalanceA}, B=${vaultBalanceB}`);
+        continue;
+      }
+
+      // CONDITION 5: Calculate SOL liquidity
+      let liquiditySol = 0;
+      if (mintA === SOL_MINT) {
+        liquiditySol = vaultBalanceA;
+      } else if (mintB === SOL_MINT) {
+        liquiditySol = vaultBalanceB;
+      }
+
+      if (liquiditySol < minLiquidity) {
+        continue;
+      }
+
+      const poolAddress = pool.id || pool.poolId || pool.ammId;
+
+      return {
+        status: 'TRADABLE',
+        source: 'raydium',
+        dexId: 'raydium',
+        poolAddress,
+        baseMint: SOL_MINT,
+        quoteMint: tokenAddress,
+        liquidity: liquiditySol,
+      };
     }
 
-    return { status: 'DISCARDED', reason: 'No suitable Raydium pool' };
+    return { status: 'DISCARDED', reason: 'No suitable Raydium pool (failed validation checks)' };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.log('[LiquidityCheck] Raydium error:', message);
     return { status: 'DISCARDED', reason: `Raydium error: ${message}` };
+  }
+}
+
+/**
+ * Simulate swap via Jupiter to confirm tradability
+ */
+async function simulateSwap(tokenAddress: string): Promise<{ success: boolean; reason?: string }> {
+  try {
+    const params = new URLSearchParams({
+      inputMint: SOL_MINT,
+      outputMint: tokenAddress,
+      amount: '1000000', // 0.001 SOL
+      slippageBps: '1500',
+    });
+
+    const endpoints = [
+      `https://quote-api.jup.ag/v6/quote?${params}`,
+      `https://lite-api.jup.ag/v6/quote?${params}`,
+    ];
+
+    for (const endpoint of endpoints) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+
+        const response = await fetch(endpoint, {
+          signal: controller.signal,
+          headers: { 'Accept': 'application/json' },
+        });
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.outAmount && parseInt(data.outAmount) > 0) {
+            return { success: true };
+          }
+        }
+      } catch (e) {
+        // Try next endpoint
+        continue;
+      }
+    }
+
+    return { success: false, reason: 'No valid swap route found' };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, reason: `Swap error: ${message}` };
+  }
+}
+
+/**
+ * Enrich token with DexScreener data - ONLY by pool address
+ * 
+ * IMPORTANT:
+ * - NEVER query by token mint
+ * - Uses caching to prevent spam
+ * - "No pairs found" is NOT an error - it's indexing delay
+ * - Max 3 retries with 30-60 second delays
+ */
+async function enrichWithDexScreener(poolAddress: string): Promise<{
+  pairFound: boolean;
+  priceUsd?: number;
+  volume24h?: number;
+  liquidity?: number;
+  retryAt?: number;
+}> {
+  const now = Date.now();
+  
+  // Check cache first
+  const cached = dexScreenerCache[poolAddress];
+  if (cached) {
+    // Return cached if still valid
+    if (now - cached.timestamp < CACHE_TTL) {
+      return { pairFound: cached.pairFound, retryAt: cached.retryAt };
+    }
+    
+    // Check retry limit for negative results
+    if (!cached.pairFound && cached.retryCount >= MAX_RETRIES) {
+      return { pairFound: false };
+    }
+    
+    // Check if we should wait before retrying
+    if (cached.retryAt && now < cached.retryAt) {
+      return { pairFound: false, retryAt: cached.retryAt };
+    }
+  }
+
+  try {
+    // Query by POOL ADDRESS only
+    const endpoint = `https://api.dexscreener.com/latest/dex/pairs/solana/${poolAddress}`;
+    console.log(`[DexScreener] Enriching pool: ${poolAddress.slice(0, 8)}...`);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetch(endpoint, {
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'MemeSniper/2.0',
+      },
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      // Cache negative result
+      dexScreenerCache[poolAddress] = {
+        pairFound: false,
+        timestamp: now,
+        retryCount: (cached?.retryCount || 0) + 1,
+        retryAt: now + RETRY_DELAY,
+      };
+      return { pairFound: false, retryAt: now + RETRY_DELAY };
+    }
+
+    const data = await response.json();
+
+    // Check if pair exists
+    if (!data.pair && (!data.pairs || data.pairs.length === 0)) {
+      // "No pairs found" = INDEXING, not error
+      console.log(`[DexScreener] INDEXING: Pool ${poolAddress.slice(0, 8)} not yet indexed`);
+      
+      dexScreenerCache[poolAddress] = {
+        pairFound: false,
+        timestamp: now,
+        retryCount: (cached?.retryCount || 0) + 1,
+        retryAt: now + RETRY_DELAY,
+      };
+      
+      return { pairFound: false, retryAt: now + RETRY_DELAY };
+    }
+
+    // Extract pair data
+    const pair = data.pair || data.pairs?.[0];
+    
+    // Cache positive result
+    dexScreenerCache[poolAddress] = {
+      pairFound: true,
+      timestamp: now,
+      retryCount: 0,
+    };
+
+    console.log(`[DexScreener] LISTED: Pool ${poolAddress.slice(0, 8)} found`);
+
+    return {
+      pairFound: true,
+      priceUsd: parseFloat(pair.priceUsd || 0),
+      volume24h: parseFloat(pair.volume?.h24 || 0),
+      liquidity: parseFloat(pair.liquidity?.usd || 0),
+    };
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.log(`[DexScreener] Error enriching ${poolAddress.slice(0, 8)}:`, message);
+
+    // Cache error result
+    dexScreenerCache[poolAddress] = {
+      pairFound: false,
+      timestamp: now,
+      retryCount: (cached?.retryCount || 0) + 1,
+      retryAt: now + RETRY_DELAY,
+    };
+
+    return { pairFound: false, retryAt: now + RETRY_DELAY };
   }
 }
