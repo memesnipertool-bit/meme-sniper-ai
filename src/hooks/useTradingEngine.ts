@@ -3,6 +3,8 @@
  * Wraps the trading engine with state management and wallet integration
  * 
  * CRITICAL: This hook now persists positions to the database after successful snipes
+ * 
+ * Positions are saved with user's TP/SL settings from the config parameter
  */
 
 import { useState, useCallback, useRef } from 'react';
@@ -10,6 +12,19 @@ import { VersionedTransaction } from '@solana/web3.js';
 import { useToast } from '@/hooks/use-toast';
 import { useAppMode } from '@/contexts/AppModeContext';
 import { supabase } from '@/integrations/supabase/client';
+
+// Extended config with TP/SL settings for position persistence
+export interface TradingEngineConfig {
+  buyAmount?: number;
+  slippage?: number;
+  priorityFee?: number;
+  minLiquidity?: number;
+  maxRiskScore?: number;
+  skipRiskCheck?: boolean;
+  // Position management settings
+  profitTakePercent?: number;
+  stopLossPercent?: number;
+}
 
 import {
   runTradingFlow,
@@ -152,12 +167,13 @@ export function useTradingEngine() {
 
   /**
    * Quick snipe a token - detect liquidity and execute immediately
+   * @param config - Trading config including profitTakePercent and stopLossPercent for position persistence
    */
   const snipeToken = useCallback(async (
     tokenAddress: string,
     walletAddress: string,
     walletSignAndSend: (tx: VersionedTransaction) => Promise<SignAndSendResult>,
-    config?: Partial<TradingConfig>
+    config?: TradingEngineConfig
   ): Promise<TradingFlowResult | null> => {
     if (isExecutingRef.current) {
       console.log('[TradingEngine] Already executing, skipping');
@@ -241,7 +257,12 @@ export function useTradingEngine() {
             const position = result.position;
             const entryValue = position.solSpent;
             
-            // Save position
+            // Save position with user's TP/SL settings from config
+            const profitTakePercent = config?.profitTakePercent ?? 100; // Default to 100% if not provided
+            const stopLossPercent = config?.stopLossPercent ?? 20; // Default to 20% if not provided
+            
+            console.log(`[TradingEngine] Saving position with TP: ${profitTakePercent}%, SL: ${stopLossPercent}%`);
+            
             const { data: savedPosition, error: dbError } = await supabase
               .from('positions')
               .insert({
@@ -255,8 +276,8 @@ export function useTradingEngine() {
                 amount: position.tokenAmount,
                 entry_value: entryValue,
                 current_value: entryValue,
-                profit_take_percent: config?.maxRiskScore ? 100 : 50,
-                stop_loss_percent: 20,
+                profit_take_percent: profitTakePercent,
+                stop_loss_percent: stopLossPercent,
                 status: 'open',
               })
               .select()
