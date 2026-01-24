@@ -27,6 +27,10 @@ export interface TradingConfig {
   
   // Skip risk check (for pre-verified tokens from scanner)
   skipRiskCheck?: boolean;
+  
+  // Position management settings (for persistence)
+  profitTakePercent?: number;
+  stopLossPercent?: number;
 }
 
 export interface RiskFilters {

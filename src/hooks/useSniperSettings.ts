@@ -18,6 +18,10 @@ export interface SniperSettings {
   token_blacklist: string[];
   token_whitelist: string[];
   target_buyer_positions: number[];
+  // Optional slippage tolerance (percentage, e.g., 15 = 15%)
+  slippage_tolerance?: number;
+  // Optional max risk score threshold (0-100)
+  max_risk_score?: number;
 }
 
 const defaultSettings: Omit<SniperSettings, 'user_id'> = {
@@ -31,6 +35,8 @@ const defaultSettings: Omit<SniperSettings, 'user_id'> = {
   token_blacklist: [],
   token_whitelist: [],
   target_buyer_positions: [2, 3],
+  slippage_tolerance: 15, // 15% default for meme coins
+  max_risk_score: 70, // Default max risk score
 };
 
 export function useSniperSettings() {
@@ -71,6 +77,8 @@ export function useSniperSettings() {
           token_blacklist: (typedData.token_blacklist as string[]) || [],
           token_whitelist: (typedData.token_whitelist as string[]) || [],
           target_buyer_positions: (typedData.target_buyer_positions as number[]) || [2, 3],
+          slippage_tolerance: (typedData.slippage_tolerance as number) ?? defaultSettings.slippage_tolerance,
+          max_risk_score: (typedData.max_risk_score as number) ?? defaultSettings.max_risk_score,
         });
       } else {
         // Return default settings for new users
@@ -124,6 +132,8 @@ export function useSniperSettings() {
         token_blacklist: (typedData.token_blacklist as string[]) || [],
         token_whitelist: (typedData.token_whitelist as string[]) || [],
         target_buyer_positions: (typedData.target_buyer_positions as number[]) || [2, 3],
+        slippage_tolerance: (typedData.slippage_tolerance as number) ?? defaultSettings.slippage_tolerance,
+        max_risk_score: (typedData.max_risk_score as number) ?? defaultSettings.max_risk_score,
       });
 
       toast({ title: 'Settings saved successfully' });

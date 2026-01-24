@@ -68,12 +68,14 @@ export function useAutoExit() {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
       const amountInSmallestUnit = Math.floor(position.amount * 1e9);
       
-      // Get Jupiter quote
+      // Get Jupiter quote - using higher slippage for exits to ensure execution
+      // Exit slippage is intentionally higher (15%) to ensure positions can close
+      const EXIT_SLIPPAGE_BPS = '1500'; // 15% - higher for exits to ensure execution
       const quoteUrl = new URL('https://api.jup.ag/quote/v6');
       quoteUrl.searchParams.set('inputMint', position.token_address);
       quoteUrl.searchParams.set('outputMint', SOL_MINT);
       quoteUrl.searchParams.set('amount', amountInSmallestUnit.toString());
-      quoteUrl.searchParams.set('slippageBps', '1500');
+      quoteUrl.searchParams.set('slippageBps', EXIT_SLIPPAGE_BPS);
 
       const quoteRes = await fetch(quoteUrl.toString());
       if (!quoteRes.ok) {
@@ -321,7 +323,10 @@ export function useAutoExit() {
     }
   }, [toast, addNotification, isDemo, wallet.isConnected, executePendingExit]);
 
-  const startAutoExitMonitor = useCallback((intervalMs: number = 30000) => {
+  // Default monitor interval: 30 seconds - balanced between responsiveness and API load
+  const DEFAULT_MONITOR_INTERVAL_MS = 30000;
+  
+  const startAutoExitMonitor = useCallback((intervalMs: number = DEFAULT_MONITOR_INTERVAL_MS) => {
     if (intervalRef.current) {
       console.log('Auto-exit monitor already running');
       return;
