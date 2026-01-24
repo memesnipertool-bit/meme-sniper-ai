@@ -117,27 +117,36 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
     return chartData;
   }, [isDemo, getCurrentPortfolioData, allPositions, selectedPeriod]);
 
+  // Calculate stats from ALL positions (open + closed) for cumulative view
   const totalValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
-    return realOpenPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
-  }, [isDemo, demoTotalValue, realOpenPositions]);
+    // For open positions: current value; For closed positions: final exit value
+    const openValue = realOpenPositions.reduce((sum, p) => sum + (p.current_value ?? p.entry_value ?? 0), 0);
+    const closedPnL = realClosedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
+    return openValue + closedPnL; // Total portfolio = current holdings + realized P&L
+  }, [isDemo, demoTotalValue, realOpenPositions, realClosedPositions]);
   
   const totalPnL = useMemo(() => {
     if (isDemo) {
       return demoTotalPnL;
     }
-    return realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
-  }, [isDemo, demoTotalPnL, realOpenPositions]);
+    // Cumulative P&L from ALL positions
+    const openPnL = realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
+    const closedPnL = realClosedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
+    return openPnL + closedPnL;
+  }, [isDemo, demoTotalPnL, realOpenPositions, realClosedPositions]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {
       return demoTotalPnLPercent;
     }
-    const entryTotal = realOpenPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0);
+    // Calculate % based on total entry value of all positions
+    const allPositions = [...realOpenPositions, ...realClosedPositions];
+    const entryTotal = allPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0);
     return entryTotal > 0 ? (totalPnL / entryTotal) * 100 : 0;
-  }, [isDemo, demoTotalPnLPercent, realOpenPositions, totalPnL]);
+  }, [isDemo, demoTotalPnLPercent, realOpenPositions, realClosedPositions, totalPnL]);
 
   const todayPerformance = useMemo(() => {
     if (portfolioData.length < 2) return 0;
