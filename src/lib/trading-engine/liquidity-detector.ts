@@ -33,10 +33,27 @@ export interface TradablePoolResult {
   dexId?: string;
   detectedAt?: number;
   reason?: string;
+  tokenName?: string;
+  tokenSymbol?: string;
   tokenStatus?: {
     tradable: boolean;
     stage: 'BONDING' | 'LP_LIVE' | 'INDEXING' | 'LISTED';
   };
+}
+
+const PLACEHOLDER_RE = /^(unknown|unknown token|token|\?\?\?)$/i;
+
+function shortAddress(address: string) {
+  return address && address.length > 10
+    ? `${address.slice(0, 4)}…${address.slice(-4)}`
+    : address || 'TOKEN';
+}
+
+function normalizeTokenText(value: unknown, fallback: string): string {
+  const v = typeof value === 'string' ? value.trim() : '';
+  if (!v) return fallback;
+  if (PLACEHOLDER_RE.test(v)) return fallback;
+  return v;
 }
 
 // ============================================
@@ -89,6 +106,9 @@ export async function detectTradablePool(
     const data = await response.json();
     
     if (data.status === 'TRADABLE') {
+      const tokenSymbol = normalizeTokenText(data.tokenSymbol, shortAddress(tokenAddress));
+      const tokenName = normalizeTokenText(data.tokenName, `Token ${shortAddress(tokenAddress)}`);
+
       // Determine pool type from source/dexId
       const dexId = data.dexId || data.source || '';
       let poolType: 'pump_fun' | 'raydium' | 'orca' | 'unknown' = 'unknown';
@@ -107,8 +127,8 @@ export async function detectTradablePool(
         type: 'LIQUIDITY_DETECTED',
         data: {
           tokenAddress,
-          tokenName: data.tokenName || 'Unknown',
-          tokenSymbol: data.tokenSymbol || 'UNKNOWN',
+          tokenName,
+          tokenSymbol,
           poolAddress: data.poolAddress || '',
           poolType,
           baseMint: data.baseMint || SOL_MINT,
@@ -129,6 +149,8 @@ export async function detectTradablePool(
         poolType: 'raydium_v4', // Default for swap compatibility
         detectedAt: startTime,
         dexId: dexId,
+        tokenName,
+        tokenSymbol,
         tokenStatus: data.tokenStatus,
       } as TradablePoolResult;
     }
@@ -164,6 +186,9 @@ export async function detectLiquidity(
   const poolResult = await detectTradablePool(tokenAddress, config, onEvent);
   
   if (poolResult.status === 'TRADABLE') {
+    const tokenSymbol = normalizeTokenText(poolResult.tokenSymbol, shortAddress(tokenAddress));
+    const tokenName = normalizeTokenText(poolResult.tokenName, `Token ${shortAddress(tokenAddress)}`);
+
     // Skip risk assessment if token was pre-verified (from scanner)
     // This prevents double-checking tokens that already passed auto-sniper evaluation
     if (config.skipRiskCheck) {
@@ -187,8 +212,8 @@ export async function detectLiquidity(
         status: 'LP_READY',
         liquidityInfo: {
           tokenAddress,
-          tokenName: 'Unknown',
-          tokenSymbol: 'UNKNOWN',
+           tokenName,
+           tokenSymbol,
           poolAddress: poolResult.poolAddress || '',
           poolType: 'raydium',
           baseMint: poolResult.baseMint || SOL_MINT,
@@ -212,8 +237,8 @@ export async function detectLiquidity(
         status: 'RISK_FAILED',
         liquidityInfo: {
           tokenAddress,
-          tokenName: 'Unknown',
-          tokenSymbol: 'UNKNOWN',
+          tokenName,
+          tokenSymbol,
           poolAddress: poolResult.poolAddress || '',
           poolType: 'raydium',
           baseMint: poolResult.baseMint || SOL_MINT,
@@ -235,8 +260,8 @@ export async function detectLiquidity(
       status: 'LP_READY',
       liquidityInfo: {
         tokenAddress,
-        tokenName: 'Unknown',
-        tokenSymbol: 'UNKNOWN',
+        tokenName,
+        tokenSymbol,
         poolAddress: poolResult.poolAddress || '',
         poolType: 'raydium',
         baseMint: poolResult.baseMint || SOL_MINT,
