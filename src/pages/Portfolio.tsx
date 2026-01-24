@@ -1,4 +1,4 @@
-import React, { forwardRef, useState, useEffect, useRef } from "react";
+import React, { forwardRef, useState, useEffect } from "react";
 import AppLayout from "@/components/layout/AppLayout";
 import { useWallet } from "@/hooks/useWallet";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { usePositions, Position } from "@/hooks/usePositions";
 import { useTradeHistory } from "@/hooks/useTradeHistory";
+import { useAutoExit } from "@/hooks/useAutoExit";
 import { 
   TrendingUp, 
   TrendingDown,
@@ -24,6 +25,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   ExternalLink,
+  Wallet,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -67,21 +69,21 @@ const PositionCard = ({ position, onClose }: { position: Position; onClose: () =
           <div className="flex items-center gap-6">
             <div className="text-center">
               <p className="text-xs text-muted-foreground mb-0.5">Current Price</p>
-              <p className="font-semibold text-foreground">${position.current_price.toFixed(8)}</p>
+              <p className="font-semibold text-foreground">${(position.current_price ?? 0).toFixed(8)}</p>
             </div>
             
             <div className="text-center">
               <p className="text-xs text-muted-foreground mb-0.5">P&L %</p>
               <div className={`flex items-center gap-1 font-bold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
                 {isProfit ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {isProfit ? '+' : ''}{position.profit_loss_percent.toFixed(2)}%
+                {isProfit ? '+' : ''}{(position.profit_loss_percent ?? 0).toFixed(2)}%
               </div>
             </div>
 
             <div className="text-center">
               <p className="text-xs text-muted-foreground mb-0.5">P&L Value</p>
               <p className={`font-semibold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-                {isProfit ? '+' : ''}{formatCurrency(position.profit_loss_value)}
+                {isProfit ? '+' : ''}{formatCurrency(position.profit_loss_value ?? 0)}
               </p>
             </div>
 
@@ -128,53 +130,51 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
     openPositions, 
     closedPositions, 
     loading, 
-    checkingExits,
-    lastExitCheck,
-    exitResults,
-    checkExitConditions,
     closePosition,
     fetchPositions,
   } = usePositions();
 
+  const {
+    checking: checkingExits,
+    lastCheck: lastExitCheck,
+    results: exitResults,
+    pendingExits,
+    checkExitConditions,
+    startAutoExitMonitor,
+    stopAutoExitMonitor,
+    isMonitoring,
+  } = useAutoExit();
+
   const { trades, loading: tradesLoading, refetch: refetchTrades } = useTradeHistory(50);
   const [autoMonitor, setAutoMonitor] = useState(false);
-  const [autoExecute, setAutoExecute] = useState(false);
-  const monitorInterval = 30; // seconds
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [autoExecute, setAutoExecute] = useState(true); // Default to true for real execution
+  const { wallet, connectPhantom, disconnect } = useWallet();
 
-  // Auto-monitoring effect
+  // Sync auto monitor state with hook
   useEffect(() => {
-    if (autoMonitor && openPositions.length > 0) {
-      intervalRef.current = setInterval(() => {
-        checkExitConditions(autoExecute);
-      }, monitorInterval * 1000);
-
-      return () => {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-        }
-      };
+    if (autoMonitor && openPositions.length > 0 && wallet.isConnected) {
+      startAutoExitMonitor(30000); // Check every 30 seconds
     } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+      stopAutoExitMonitor();
     }
-  }, [autoMonitor, autoExecute, monitorInterval, openPositions.length, checkExitConditions]);
+  }, [autoMonitor, openPositions.length, wallet.isConnected, startAutoExitMonitor, stopAutoExitMonitor]);
 
   const handleClosePosition = async (position: Position) => {
-    await closePosition(position.id, position.current_price);
+    await closePosition(position.id, position.current_price ?? position.entry_price);
+  };
+
+  const handleCheckNow = () => {
+    checkExitConditions(autoExecute);
   };
 
   // Calculate totals
-  const totalValue = openPositions.reduce((sum, p) => sum + p.current_value, 0);
-  const totalPnL = openPositions.reduce((sum, p) => sum + p.profit_loss_value, 0);
+  const totalValue = openPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
+  const totalPnL = openPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
   const totalPnLPercent = openPositions.length > 0 
-    ? (totalPnL / openPositions.reduce((sum, p) => sum + p.entry_value, 0)) * 100 
+    ? (totalPnL / openPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0)) * 100 
     : 0;
 
   const recentExits = exitResults.filter(r => r.action !== 'hold');
-
-  const { wallet, connectPhantom, disconnect } = useWallet();
 
   const handleConnectWallet = async () => {
     if (wallet.isConnected) {
@@ -284,46 +284,87 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                   <div>
                     <h3 className="font-semibold text-foreground">Auto-Exit Monitor</h3>
                     <p className="text-xs text-muted-foreground">
-                      Continuously tracks prices and triggers exits at TP/SL thresholds
+                      {wallet.isConnected 
+                        ? 'Continuously tracks prices and executes real exits via Jupiter'
+                        : 'Connect wallet to enable real auto-exit execution'}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={autoMonitor}
-                      onCheckedChange={setAutoMonitor}
-                      disabled={openPositions.length === 0}
-                    />
-                    <span className="text-sm text-muted-foreground">Monitor</span>
-                  </div>
+                  {!wallet.isConnected ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleConnectWallet}
+                    >
+                      <Wallet className="w-4 h-4 mr-2" />
+                      Connect Wallet
+                    </Button>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={autoMonitor}
+                          onCheckedChange={setAutoMonitor}
+                          disabled={openPositions.length === 0}
+                        />
+                        <span className="text-sm text-muted-foreground">Monitor</span>
+                        {isMonitoring && (
+                          <span className="flex items-center gap-1 text-xs text-green-500">
+                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                            Active
+                          </span>
+                        )}
+                      </div>
 
-                  {autoMonitor && (
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={autoExecute}
-                        onCheckedChange={setAutoExecute}
-                      />
-                      <span className="text-sm text-muted-foreground">Auto-Execute</span>
-                    </div>
+                      {autoMonitor && (
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={autoExecute}
+                            onCheckedChange={setAutoExecute}
+                          />
+                          <span className="text-sm text-muted-foreground">Auto-Execute</span>
+                        </div>
+                      )}
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCheckNow}
+                        disabled={checkingExits || openPositions.length === 0}
+                      >
+                        {checkingExits ? (
+                          <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                        ) : (
+                          <Play className="w-4 h-4 mr-1" />
+                        )}
+                        Check Now
+                      </Button>
+                    </>
                   )}
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => checkExitConditions(autoExecute)}
-                    disabled={checkingExits || openPositions.length === 0}
-                  >
-                    {checkingExits ? (
-                      <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                    ) : (
-                      <Play className="w-4 h-4 mr-1" />
-                    )}
-                    Check Now
-                  </Button>
                 </div>
               </div>
+
+              {/* Pending Exits Waiting for Signature */}
+              {pendingExits.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-border">
+                  <p className="text-sm font-medium text-yellow-400 mb-2 flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Pending Wallet Signatures:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {pendingExits.map((exit, idx) => (
+                      <Badge
+                        key={idx}
+                        className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+                      >
+                        {exit.symbol}: {exit.action === 'take_profit' ? 'TP' : 'SL'} @ {exit.profitLossPercent.toFixed(2)}%
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Recent Exit Alerts */}
               {recentExits.length > 0 && (

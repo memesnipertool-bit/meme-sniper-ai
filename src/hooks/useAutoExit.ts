@@ -173,6 +173,25 @@ export function useAutoExit() {
         })
         .eq('id', result.positionId);
 
+      // Log sell to trade_history
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from('trade_history')
+          .insert({
+            user_id: user.id,
+            token_address: position.token_address,
+            token_symbol: position.token_symbol,
+            token_name: position.token_name,
+            trade_type: 'sell',
+            amount: position.amount,
+            price_sol: result.currentPrice,
+            price_usd: null,
+            status: 'completed',
+            tx_hash: signResult.signature,
+          });
+      }
+
       // Success notification
       toast({
         title: result.action === 'take_profit' ? '💰 Take Profit Executed!' : '🛑 Stop Loss Executed!',
