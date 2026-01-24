@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { fetchDexScreenerTokenMetadata, isPlaceholderTokenText } from '@/lib/dexscreener';
 
 export interface TradeHistoryEntry {
   id: string;
@@ -24,6 +25,9 @@ export function useTradeHistory(limit: number = 20) {
   const { user } = useAuth();
   const { toast } = useToast();
 
+  // Cache DexScreener metadata by token address to avoid repeated external calls
+  const tokenMetaCacheRef = useState(() => new Map<string, { name: string; symbol: string }>())[0];
+
   const fetchTrades = useCallback(async () => {
     if (!user) {
       setTrades([]);
@@ -42,7 +46,39 @@ export function useTradeHistory(limit: number = 20) {
 
       if (error) throw error;
 
-      setTrades((data || []) as TradeHistoryEntry[]);
+      const rawTrades = ((data || []) as TradeHistoryEntry[]).map((t) => ({ ...t }));
+      setTrades(rawTrades);
+
+      // Enrich missing/placeholder token metadata
+      const addressesToFetch = Array.from(
+        new Set(
+          rawTrades
+            .filter((t) => isPlaceholderTokenText(t.token_symbol) || isPlaceholderTokenText(t.token_name))
+            .map((t) => t.token_address)
+            .filter((addr) => !tokenMetaCacheRef.has(addr))
+        )
+      );
+
+      if (addressesToFetch.length > 0) {
+        const metaMap = await fetchDexScreenerTokenMetadata(addressesToFetch);
+        for (const [addr, meta] of metaMap.entries()) {
+          tokenMetaCacheRef.set(addr, { name: meta.name, symbol: meta.symbol });
+        }
+
+        if (metaMap.size > 0) {
+          setTrades((prev) =>
+            prev.map((t) => {
+              const meta = tokenMetaCacheRef.get(t.token_address);
+              if (!meta) return t;
+              return {
+                ...t,
+                token_symbol: isPlaceholderTokenText(t.token_symbol) ? meta.symbol : t.token_symbol,
+                token_name: isPlaceholderTokenText(t.token_name) ? meta.name : t.token_name,
+              };
+            })
+          );
+        }
+      }
     } catch (error: any) {
       console.error('Error fetching trade history:', error);
       toast({

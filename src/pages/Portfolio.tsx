@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { usePositions, Position } from "@/hooks/usePositions";
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { useAutoExit } from "@/hooks/useAutoExit";
+import { isPlaceholderTokenText } from "@/lib/dexscreener";
 import { 
   TrendingUp, 
   TrendingDown,
@@ -35,10 +36,22 @@ const formatCurrency = (value: number) => {
   return `$${value.toFixed(2)}`;
 };
 
+const shortAddress = (address: string) =>
+  address && address.length > 10
+    ? `${address.slice(0, 4)}…${address.slice(-4)}`
+    : address || 'Token';
+
 const PositionCard = ({ position, onClose }: { position: Position; onClose: () => void }) => {
   const isProfit = position.profit_loss_percent >= 0;
   const isPendingTakeProfit = position.profit_loss_percent >= position.profit_take_percent * 0.8;
   const isPendingStopLoss = position.profit_loss_percent <= -position.stop_loss_percent * 0.8;
+
+  const displaySymbol = !isPlaceholderTokenText(position.token_symbol)
+    ? (position.token_symbol as string)
+    : shortAddress(position.token_address);
+  const displayName = !isPlaceholderTokenText(position.token_name)
+    ? (position.token_name as string)
+    : 'Token';
 
   return (
     <Card className={`border ${
@@ -51,8 +64,8 @@ const PositionCard = ({ position, onClose }: { position: Position; onClose: () =
           {/* Token Info */}
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-semibold text-foreground">{position.token_symbol}</h3>
-              <Badge variant="outline" className="text-xs">{position.token_name}</Badge>
+              <h3 className="font-semibold text-foreground">{displaySymbol}</h3>
+              <Badge variant="outline" className="text-xs">{displayName}</Badge>
               <Badge variant="outline" className="text-xs capitalize">{position.chain}</Badge>
               {position.status === 'open' ? (
                 <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Open</Badge>
@@ -484,7 +497,9 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                           <div>
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-foreground">
-                                {trade.token_symbol || 'Unknown'}
+                                {!isPlaceholderTokenText(trade.token_symbol)
+                                  ? (trade.token_symbol as string)
+                                  : shortAddress(trade.token_address)}
                               </span>
                               <Badge variant="outline" className="text-xs capitalize">
                                 {trade.trade_type}

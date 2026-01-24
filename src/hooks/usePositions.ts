@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { fetchDexScreenerTokenMetadata, isPlaceholderTokenText } from '@/lib/dexscreener';
 
 export interface Position {
   id: string;
@@ -55,6 +56,9 @@ export function usePositions() {
   const [exitResults, setExitResults] = useState<ExitResult[]>([]);
   const { toast } = useToast();
 
+  // Cache DexScreener metadata by token address to avoid repeated external calls
+  const tokenMetaCacheRef = useState(() => new Map<string, { name: string; symbol: string }>())[0];
+
   // Fetch positions
   const fetchPositions = useCallback(async () => {
     try {
@@ -65,7 +69,43 @@ export function usePositions() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setPositions((data as unknown as Position[]) || []);
+
+      const rawPositions = ((data as unknown as Position[]) || []).map((p) => ({ ...p }));
+      setPositions(rawPositions);
+
+      // Enrich missing/placeholder token metadata (prevents the UI from showing UNKNOWN everywhere)
+      const addressesToFetch = Array.from(
+        new Set(
+          rawPositions
+            .filter((p) =>
+              isPlaceholderTokenText(p.token_symbol) || isPlaceholderTokenText(p.token_name)
+            )
+            .map((p) => p.token_address)
+            .filter((addr) => !tokenMetaCacheRef.has(addr))
+        )
+      );
+
+      if (addressesToFetch.length > 0) {
+        const metaMap = await fetchDexScreenerTokenMetadata(addressesToFetch);
+
+        for (const [addr, meta] of metaMap.entries()) {
+          tokenMetaCacheRef.set(addr, { name: meta.name, symbol: meta.symbol });
+        }
+
+        if (metaMap.size > 0) {
+          setPositions((prev) =>
+            prev.map((p) => {
+              const meta = tokenMetaCacheRef.get(p.token_address);
+              if (!meta) return p;
+              return {
+                ...p,
+                token_symbol: isPlaceholderTokenText(p.token_symbol) ? meta.symbol : p.token_symbol,
+                token_name: isPlaceholderTokenText(p.token_name) ? meta.name : p.token_name,
+              };
+            })
+          );
+        }
+      }
     } catch (error: unknown) {
       const err = error as Error;
       toast({
