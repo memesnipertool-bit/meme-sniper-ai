@@ -14,7 +14,6 @@ import { usePositions } from "@/hooks/usePositions";
 import { useWallet } from "@/hooks/useWallet";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useDemoPortfolio } from "@/contexts/DemoPortfolioContext";
-import { useTokenScanner } from "@/hooks/useTokenScanner";
 import { PortfolioChart } from "@/components/charts/PriceCharts";
 import { TrendingUp, ArrowUpRight, FlaskConical, Coins, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -26,11 +25,10 @@ const formatCurrency = (value: number) => {
 };
 
 const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
-  const { openPositions: realOpenPositions, closedPositions: realClosedPositions, loading: positionsLoading } = usePositions();
+  const { openPositions: realOpenPositions, closedPositions: realClosedPositions, positions: allPositions, loading: positionsLoading } = usePositions();
   const { wallet } = useWallet();
   const { isDemo } = useAppMode();
   const { toast } = useToast();
-  const { tokens, loading: tokensLoading } = useTokenScanner();
   
   // Demo portfolio context
   const {
@@ -54,33 +52,90 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
   // Calculate win count from closed positions
   const winCount = useMemo(() => {
     return closedPositions.filter(p => {
-      const pnl = 'profit_loss_percent' in p ? p.profit_loss_percent : (p as any).pnl;
+      const pnl = 'profit_loss_percent' in p ? (p.profit_loss_percent ?? 0) : (p as any).pnl ?? 0;
       return pnl > 0;
     }).length;
   }, [closedPositions]);
 
-  // Get portfolio data based on mode
-  const portfolioData = useMemo(() => getCurrentPortfolioData(), [getCurrentPortfolioData, selectedPeriod]);
+  // Generate portfolio chart data from actual positions
+  const portfolioData = useMemo(() => {
+    if (isDemo) {
+      return getCurrentPortfolioData();
+    }
+    
+    // For live mode, generate chart data from position history
+    if (allPositions.length === 0) {
+      // Return placeholder data when no positions
+      const now = new Date();
+      const periods = selectedPeriod === '1H' ? 12 : selectedPeriod === '24H' ? 24 : selectedPeriod === '7D' ? 7 : 30;
+      const interval = selectedPeriod === '1H' ? 5 : selectedPeriod === '24H' ? 60 : 1440;
+      
+      return Array.from({ length: periods }, (_, i) => {
+        const date = new Date(now.getTime() - (periods - i - 1) * interval * 60 * 1000);
+        const label = selectedPeriod === '1H' || selectedPeriod === '24H'
+          ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+          : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return { date: label, value: 0, pnl: 0 };
+      });
+    }
+    
+    // Build chart data from positions
+    const sortedPositions = [...allPositions].sort((a, b) => 
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    
+    const now = new Date();
+    const periods = selectedPeriod === '1H' ? 12 : selectedPeriod === '24H' ? 24 : selectedPeriod === '7D' ? 7 : 30;
+    const intervalMs = selectedPeriod === '1H' ? 5 * 60 * 1000 : selectedPeriod === '24H' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+    
+    const chartData = [];
+    
+    for (let i = 0; i < periods; i++) {
+      const pointTime = new Date(now.getTime() - (periods - i - 1) * intervalMs);
+      const label = selectedPeriod === '1H' || selectedPeriod === '24H'
+        ? pointTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+        : pointTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      
+      // Calculate portfolio value at this point in time
+      let valueAtPoint = 0;
+      let pnlAtPoint = 0;
+      
+      sortedPositions.forEach(pos => {
+        const createdAt = new Date(pos.created_at);
+        const closedAt = pos.closed_at ? new Date(pos.closed_at) : null;
+        
+        // Position was active at this time point
+        if (createdAt <= pointTime && (!closedAt || closedAt > pointTime)) {
+          valueAtPoint += pos.current_value ?? pos.entry_value ?? 0;
+          pnlAtPoint += pos.profit_loss_value ?? 0;
+        }
+      });
+      
+      chartData.push({ date: label, value: valueAtPoint, pnl: pnlAtPoint });
+    }
+    
+    return chartData;
+  }, [isDemo, getCurrentPortfolioData, allPositions, selectedPeriod]);
 
   const totalValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
-    return realOpenPositions.reduce((sum, p) => sum + p.current_value, 0);
+    return realOpenPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
   }, [isDemo, demoTotalValue, realOpenPositions]);
   
   const totalPnL = useMemo(() => {
     if (isDemo) {
       return demoTotalPnL;
     }
-    return realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value || 0), 0);
+    return realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
   }, [isDemo, demoTotalPnL, realOpenPositions]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {
       return demoTotalPnLPercent;
     }
-    const entryTotal = realOpenPositions.reduce((sum, p) => sum + p.entry_value, 0);
+    const entryTotal = realOpenPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0);
     return entryTotal > 0 ? (totalPnL / entryTotal) * 100 : 0;
   }, [isDemo, demoTotalPnLPercent, realOpenPositions, totalPnL]);
 
@@ -96,7 +151,7 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
     resetDemoPortfolio();
     toast({
       title: "Demo Reset",
-      description: "Demo balance reset to 5,000 SOL. All positions cleared.",
+      description: "Demo balance reset to 100 SOL. All positions cleared.",
     });
   };
 
@@ -216,7 +271,7 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
                 positions={openPositions} 
                 loading={positionsLoading}
               />
-              <MarketOverview tokens={tokens} loading={tokensLoading} />
+              <MarketOverview />
             </div>
           </div>
 

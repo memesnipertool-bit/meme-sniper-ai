@@ -300,11 +300,13 @@ export function usePositions() {
 
   const openPositions = positions.filter(p => p.status === 'open');
   const closedPositions = positions.filter(p => p.status === 'closed');
+  const pendingPositions = positions.filter(p => p.status === 'pending');
 
   return {
     positions,
     openPositions,
     closedPositions,
+    pendingPositions,
     loading,
     checkingExits,
     lastExitCheck,
