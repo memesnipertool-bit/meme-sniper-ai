@@ -136,6 +136,7 @@ export async function runTradingFlow(
           position = {
             tokenAddress,
             tokenSymbol: liquidityResult.liquidityInfo.tokenSymbol,
+            tokenName: liquidityResult.liquidityInfo.tokenName,
             entryPrice: snipeResult.entryPrice || 0,
             tokenAmount: snipeResult.tokenAmount || 0,
             solSpent: snipeResult.solSpent || 0,

@@ -139,6 +139,7 @@ export interface TradingFlowResult {
 export interface PositionInfo {
   tokenAddress: string;
   tokenSymbol: string;
+  tokenName: string;
   entryPrice: number;
   tokenAmount: number;
   solSpent: number;

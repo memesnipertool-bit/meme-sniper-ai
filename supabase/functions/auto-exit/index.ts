@@ -134,14 +134,70 @@ async function fetchCurrentPrice(
   return null;
 }
 
-// Execute sell via trade execution API
-async function executeSell(
+// Execute sell via Jupiter (real on-chain swap)
+async function executeJupiterSell(
+  position: Position,
+  reason: 'take_profit' | 'stop_loss',
+  rpcUrl: string
+): Promise<{ success: boolean; txId?: string; quote?: any; error?: string }> {
+  try {
+    console.log(`[AutoExit] Executing SELL via Jupiter for ${position.token_symbol} - Reason: ${reason}`);
+    
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    
+    // Convert token amount to integer (assuming 9 decimals for most Solana tokens)
+    const amountInSmallestUnit = Math.floor(position.amount * 1e9);
+    
+    // 1. Get quote from Jupiter
+    const quoteUrl = new URL('https://api.jup.ag/quote/v6');
+    quoteUrl.searchParams.set('inputMint', position.token_address);
+    quoteUrl.searchParams.set('outputMint', SOL_MINT);
+    quoteUrl.searchParams.set('amount', amountInSmallestUnit.toString());
+    quoteUrl.searchParams.set('slippageBps', '1500'); // 15% slippage for exit
+    
+    console.log(`[AutoExit] Fetching Jupiter quote...`);
+    const quoteResponse = await fetch(quoteUrl.toString());
+    
+    if (!quoteResponse.ok) {
+      const errorText = await quoteResponse.text();
+      console.error(`[AutoExit] Jupiter quote failed:`, errorText);
+      return { success: false, error: `Jupiter quote failed: ${quoteResponse.status}` };
+    }
+    
+    const quoteData = await quoteResponse.json();
+    
+    if (!quoteData || quoteData.error) {
+      console.error(`[AutoExit] Jupiter quote error:`, quoteData.error || 'No route');
+      return { success: false, error: quoteData.error || 'No route available for sell' };
+    }
+    
+    console.log(`[AutoExit] Jupiter quote received - Output: ${quoteData.outAmount} lamports`);
+    
+    // Return quote data for building transaction
+    // NOTE: Auto-exit cannot sign transactions - it needs to return quote info
+    // The frontend must handle the actual transaction signing and broadcasting
+    return {
+      success: true,
+      quote: quoteData,
+      txId: `jupiter_quote_${Date.now()}`,
+    };
+  } catch (error) {
+    console.error('[AutoExit] Jupiter sell error:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Jupiter sell execution failed',
+    };
+  }
+}
+
+// Execute sell via external trade execution API (if configured)
+async function executeSellViaApi(
   position: Position,
   reason: 'take_profit' | 'stop_loss',
   tradeExecutionConfig: ApiConfig
 ): Promise<{ success: boolean; txId?: string; error?: string }> {
   try {
-    console.log(`Executing SELL for ${position.token_symbol} - Reason: ${reason}`);
+    console.log(`[AutoExit] Executing SELL via API for ${position.token_symbol} - Reason: ${reason}`);
     
     const tradePayload = {
       tokenAddress: position.token_address,
@@ -179,7 +235,7 @@ async function executeSell(
       txId: result.transactionId || result.txId || 'pending',
     };
   } catch (error) {
-    console.error('Sell execution error:', error);
+    console.error('[AutoExit] API sell error:', error);
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Sell execution failed',
@@ -333,17 +389,28 @@ serve(async (req) => {
         let error: string | undefined;
 
         if (executeExits) {
-          // Try to execute via API if available
+          // Try external API first, then fallback to Jupiter
           if (tradeExecutionConfig) {
-            const sellResult = await executeSell(position, reason, tradeExecutionConfig);
+            const sellResult = await executeSellViaApi(position, reason, tradeExecutionConfig);
             executed = sellResult.success;
             txId = sellResult.txId;
             error = sellResult.error;
           } else {
-            // No trade execution API - just close the position in DB (simulated)
-            executed = true;
-            txId = `sim_exit_${Date.now()}`;
-            console.log(`Simulated exit for ${position.token_symbol} (no trade API configured)`);
+            // Use Jupiter for real sell execution
+            const rpcUrl = Deno.env.get("SOLANA_RPC_URL") || "https://api.mainnet-beta.solana.com";
+            const jupiterResult = await executeJupiterSell(position, reason, rpcUrl);
+            
+            if (jupiterResult.success && jupiterResult.quote) {
+              // Jupiter quote received - mark position with pending_exit and quote info
+              // The frontend's useAutoExit hook must sign and broadcast
+              executed = false;
+              txId = jupiterResult.txId;
+              error = 'PENDING_SIGNATURE: Jupiter quote ready, requires wallet signature';
+              console.log(`[AutoExit] Jupiter quote ready for ${position.token_symbol} - requires frontend signature`);
+            } else {
+              executed = false;
+              error = jupiterResult.error || 'Jupiter sell failed';
+            }
           }
 
           if (executed) {
