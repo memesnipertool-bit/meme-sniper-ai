@@ -590,9 +590,11 @@ export type Database = {
           created_at: string
           id: string
           max_concurrent_trades: number | null
+          max_risk_score: number | null
           min_liquidity: number | null
           priority: string | null
           profit_take_percentage: number | null
+          slippage_tolerance: number | null
           stop_loss_percentage: number | null
           target_buyer_positions: Json | null
           token_blacklist: Json | null
@@ -606,9 +608,11 @@ export type Database = {
           created_at?: string
           id?: string
           max_concurrent_trades?: number | null
+          max_risk_score?: number | null
           min_liquidity?: number | null
           priority?: string | null
           profit_take_percentage?: number | null
+          slippage_tolerance?: number | null
           stop_loss_percentage?: number | null
           target_buyer_positions?: Json | null
           token_blacklist?: Json | null
@@ -622,9 +626,11 @@ export type Database = {
           created_at?: string
           id?: string
           max_concurrent_trades?: number | null
+          max_risk_score?: number | null
           min_liquidity?: number | null
           priority?: string | null
           profit_take_percentage?: number | null
+          slippage_tolerance?: number | null
           stop_loss_percentage?: number | null
           target_buyer_positions?: Json | null
           token_blacklist?: Json | null
