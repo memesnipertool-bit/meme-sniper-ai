@@ -405,21 +405,10 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
     const blacklist = new Set(settings.token_blacklist || []);
     const candidates = unseenTokens.filter((t) => {
-      // Basic validation
       if (!t.address) return false;
       if (blacklist.has(t.address)) return false;
       if (t.symbol?.toUpperCase() === 'SOL' && t.address !== SOL_MINT) return false;
-      
-      // CRITICAL: Only trade tokens verified as tradeable by the scanner
-      // This prevents trading on tokens that will fail or cause losses
-      if (t.isTradeable === false) return false;
-      if (t.canBuy === false) return false;
       if (t.canSell === false) return false;
-      
-      // Reject fake/demo addresses (safety check)
-      if (t.address.includes('...') || t.address.startsWith('Demo')) return false;
-      if (t.address.length < 32 || t.address.length > 50) return false;
-      
       return true;
     });
 
@@ -460,15 +449,11 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       batch.forEach(t => processedTokensRef.current.add(t.address));
       
       const targetPositions = settings.target_buyer_positions || [2, 3];
-      
-      // STRICT filtering for demo trades to match real trading criteria
       const approvedToken = tokenData.find(t => 
-        t.isTradeable === true &&
-        t.canBuy === true &&
         t.buyerPosition && 
         targetPositions.includes(t.buyerPosition) && 
         t.riskScore < 70 &&
-        t.liquidity >= (settings.min_liquidity || 5) // Min 5 SOL liquidity
+        t.liquidity >= (settings.min_liquidity || 300)
       );
       
       if (approvedToken && settings.trade_amount && demoBalance >= settings.trade_amount) {

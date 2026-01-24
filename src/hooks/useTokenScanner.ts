@@ -84,12 +84,63 @@ export interface RateLimitState {
   countdown: number;
 }
 
-// NOTE: Demo mode now uses REAL tokens from the live API
-// This ensures realistic testing with actual market data
-// Demo tokens previously generated fake addresses that couldn't be traded
+// Demo tokens for testing without real API calls
+const demoTokenNames = [
+  { name: 'DogeMoon', symbol: 'DOGEM' },
+  { name: 'ShibaRocket', symbol: 'SHIBR' },
+  { name: 'PepeGold', symbol: 'PEPEG' },
+  { name: 'FlokiMax', symbol: 'FLOKM' },
+  { name: 'BabyWhale', symbol: 'BBYWH' },
+  { name: 'SafeApe', symbol: 'SAPE' },
+  { name: 'MoonShot', symbol: 'MSHOT' },
+  { name: 'RocketFuel', symbol: 'RFUEL' },
+  { name: 'DiamondHands', symbol: 'DHAND' },
+  { name: 'GigaChad', symbol: 'GIGA' },
+];
 
 const MAX_SCANS_PER_MINUTE = 10;
 const RATE_LIMIT_WINDOW_MS = 60000;
+
+const generateSingleDemoToken = (idx: number): ScannedToken => {
+  const token = demoTokenNames[idx % demoTokenNames.length];
+  const liquidity = Math.floor(Math.random() * 50) + 5; // 5-55 SOL liquidity
+  const stage: TokenStage = Math.random() > 0.5 ? 'LISTED' : 'LP_LIVE';
+  return {
+    id: `demo-${idx}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    address: `Demo${idx}...${Math.random().toString(36).substring(2, 8)}`,
+    name: token.name,
+    symbol: token.symbol,
+    chain: 'solana',
+    liquidity,
+    liquidityLocked: Math.random() > 0.3,
+    lockPercentage: Math.random() > 0.5 ? Math.floor(Math.random() * 50) + 50 : null,
+    priceUsd: Math.random() * 0.001,
+    priceChange24h: (Math.random() - 0.3) * 200,
+    volume24h: Math.floor(Math.random() * 100000) + 1000,
+    marketCap: Math.floor(Math.random() * 500000) + 10000,
+    holders: Math.floor(Math.random() * 500) + 50,
+    createdAt: new Date(Date.now() - Math.random() * 86400000).toISOString(),
+    earlyBuyers: Math.floor(Math.random() * 8) + 1,
+    buyerPosition: Math.floor(Math.random() * 5) + 1,
+    riskScore: Math.floor(Math.random() * 60) + 20,
+    source: 'Raydium AMM',
+    pairAddress: `DemoPair${idx}`,
+    // All demo tokens are Raydium-verified tradeable
+    isPumpFun: false,
+    isTradeable: true,
+    canBuy: true,
+    canSell: true,
+    freezeAuthority: null,
+    mintAuthority: null,
+    safetyReasons: [`✅ Raydium V4 (${liquidity.toFixed(1)} SOL) - ${stage === 'LISTED' ? 'Listed' : 'Live LP'}`],
+    tokenStatus: {
+      tradable: true,
+      stage,
+      poolAddress: `DemoPool${idx}`,
+      dexScreener: { pairFound: stage === 'LISTED' },
+    },
+  };
+};
 
 export interface ScanStats {
   total: number;
@@ -287,9 +338,37 @@ export function useTokenScanner() {
     setApiErrors([]);
 
     try {
-      // IMPORTANT: Both demo and live modes now use REAL tokens from the API
-      // Demo mode simulates trades without real execution
-      // This ensures realistic testing with actual market data
+      // Demo mode: return simulated data
+      if (isDemo) {
+        // Generate 3-5 new demo tokens per scan
+        const numNewTokens = Math.floor(Math.random() * 3) + 3;
+        const newDemoTokens: ScannedToken[] = [];
+        
+        for (let i = 0; i < numNewTokens; i++) {
+          const token = generateSingleDemoToken(Math.floor(Math.random() * 10));
+          if (token.liquidity >= minLiquidity) {
+            newDemoTokens.push(token);
+          }
+        }
+
+        // Merge tokens seamlessly (no flicker)
+        mergeTokens(newDemoTokens, () => {
+          setLoading(false);
+          setIsInitialLoad(false);
+          scanInProgress.current = false;
+        });
+
+        setLastScan(new Date().toISOString());
+        setApiCount(3);
+        
+        return { 
+          tokens: newDemoTokens, 
+          errors: [], 
+          apiErrors: [], 
+          timestamp: new Date().toISOString(), 
+          apiCount: 3 
+        };
+      }
 
       // Live mode: call real API
       const { data, error } = await supabase.functions.invoke('token-scanner', {
