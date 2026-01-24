@@ -187,6 +187,7 @@ export function useTradingEngine() {
         position: {
           tokenAddress,
           tokenSymbol: 'DEMO',
+          tokenName: 'Demo Token',
           entryPrice: 0.0001,
           tokenAmount: 1000000,
           solSpent: config?.buyAmount || 0.1,
@@ -246,7 +247,7 @@ export function useTradingEngine() {
                 user_id: user.id,
                 token_address: position.tokenAddress,
                 token_symbol: position.tokenSymbol,
-                token_name: position.tokenSymbol, // Use symbol as fallback
+                token_name: position.tokenName || position.tokenSymbol,
                 chain: 'solana',
                 entry_price: position.entryPrice,
                 current_price: position.entryPrice,
