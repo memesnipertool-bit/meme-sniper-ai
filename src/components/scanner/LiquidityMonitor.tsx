@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { ScannedToken } from "@/hooks/useTokenScanner";
 import { 
   Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, 
-  Loader2, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye,
-  Activity, Clock, RefreshCw
+  Loader2, Search, LogOut, DollarSign, Eye,
+  Activity, Clock, RefreshCw, BarChart3, Users
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -65,12 +65,12 @@ const formatVolume = (value: number) => {
 };
 
 const avatarColors = [
-  'bg-gradient-to-br from-primary/30 to-primary/10 text-primary',
-  'bg-gradient-to-br from-blue-500/30 to-blue-500/10 text-blue-400',
-  'bg-gradient-to-br from-purple-500/30 to-purple-500/10 text-purple-400',
-  'bg-gradient-to-br from-orange-500/30 to-orange-500/10 text-orange-400',
-  'bg-gradient-to-br from-pink-500/30 to-pink-500/10 text-pink-400',
-  'bg-gradient-to-br from-cyan-500/30 to-cyan-500/10 text-cyan-400',
+  'bg-gradient-to-br from-primary/40 to-primary/20 text-primary',
+  'bg-gradient-to-br from-blue-500/40 to-blue-500/20 text-blue-400',
+  'bg-gradient-to-br from-purple-500/40 to-purple-500/20 text-purple-400',
+  'bg-gradient-to-br from-orange-500/40 to-orange-500/20 text-orange-400',
+  'bg-gradient-to-br from-pink-500/40 to-pink-500/20 text-pink-400',
+  'bg-gradient-to-br from-cyan-500/40 to-cyan-500/20 text-cyan-400',
 ];
 
 // Helper to generate short address format for fallback
@@ -93,21 +93,31 @@ interface LivePriceData {
   flashDirection?: 'up' | 'down' | null;
 }
 
-// Memoized Pool Row with live price + flash indicator
+// Memoized Pool Row - production-grade design with better info density
 const PoolRow = memo(({ 
   pool, 
   colorIndex, 
-  isNew, 
+  isNew,
+  revealDelay,
   onViewDetails,
   livePrice 
 }: { 
   pool: ScannedToken; 
   colorIndex: number; 
-  isNew?: boolean; 
+  isNew?: boolean;
+  revealDelay?: number;
   onViewDetails: (pool: ScannedToken) => void;
   livePrice?: LivePriceData;
 }) => {
-  const [expanded, setExpanded] = useState(false);
+  const [isVisible, setIsVisible] = useState(revealDelay === undefined);
+  
+  // Staggered reveal animation
+  useEffect(() => {
+    if (revealDelay !== undefined) {
+      const timer = setTimeout(() => setIsVisible(true), revealDelay);
+      return () => clearTimeout(timer);
+    }
+  }, [revealDelay]);
   
   // Use live price if available, otherwise fallback to pool data
   const currentPrice = livePrice?.priceUsd ?? pool.priceUsd;
@@ -131,165 +141,115 @@ const PoolRow = memo(({
   const canBuy = pool.canBuy !== false;
   const canSell = pool.canSell !== false;
 
-  const handleViewDetails = (e: React.MouseEvent) => {
+  const handleViewDetails = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     onViewDetails(pool);
-  };
+  }, [onViewDetails, pool]);
+
+  if (!isVisible) {
+    return (
+      <div className="h-[52px] border-b border-border/10" />
+    );
+  }
 
   return (
-    <div className="border-b border-border/20">
-      <div 
-        className={cn(
-          "grid grid-cols-[36px_1fr_auto_auto] md:grid-cols-[40px_minmax(120px,1fr)_100px_80px_32px] items-center gap-2 md:gap-3 px-2 md:px-3 py-2 hover:bg-secondary/30 transition-all duration-200 cursor-pointer",
-          isNew && "animate-fade-in bg-primary/5",
-          flashDirection === 'up' && "bg-success/5",
-          flashDirection === 'down' && "bg-destructive/5"
-        )}
-        onClick={() => setExpanded(!expanded)}
-      >
-        {/* Avatar */}
-        <div className={cn(
-          "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-[10px] border border-white/5 shrink-0",
-          avatarClass
-        )}>
-          {initials}
-        </div>
-        
-        {/* Token Info */}
-        <div className="min-w-0 space-y-0.5">
-          <div className="flex items-center gap-1.5">
-            <span className="font-semibold text-foreground text-xs truncate max-w-[80px]">{displaySymbol}</span>
+    <div 
+      className={cn(
+        "grid grid-cols-[32px_1fr] gap-2 px-2 py-2 border-b border-border/10 hover:bg-secondary/40 transition-all duration-300 cursor-pointer group",
+        isNew && "bg-primary/5 border-l-2 border-l-primary",
+        flashDirection === 'up' && "bg-success/10",
+        flashDirection === 'down' && "bg-destructive/10",
+        "animate-fade-in"
+      )}
+      onClick={handleViewDetails}
+    >
+      {/* Avatar */}
+      <div className={cn(
+        "w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[10px] border border-white/10 shrink-0",
+        avatarClass
+      )}>
+        {initials}
+      </div>
+      
+      {/* Token Info - Dense Layout */}
+      <div className="min-w-0 flex flex-col justify-center gap-0.5">
+        {/* Row 1: Symbol + Price + Change */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="font-bold text-foreground text-xs truncate">{displaySymbol}</span>
             {isNew && (
-              <Badge className="bg-primary/20 text-primary text-[8px] px-1 py-0 h-3.5">NEW</Badge>
+              <Badge className="bg-primary/30 text-primary text-[8px] px-1 py-0 h-3.5 shrink-0">NEW</Badge>
             )}
-            <Badge 
-              variant="outline" 
-              className={cn(
-                "text-[8px] px-1 py-0 h-4 shrink-0",
-                isTradeable && canBuy && canSell
-                  ? "border-success/40 text-success bg-success/10" 
-                  : "border-destructive/40 text-destructive bg-destructive/10"
-              )}
-            >
-              {isTradeable && canBuy && canSell ? '✓' : '✗'}
-            </Badge>
-          </div>
-          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <span className="font-mono">{pool.address.slice(0, 4)}...{pool.address.slice(-3)}</span>
-            {/* Safety indicator */}
             {honeypotSafe ? (
               <ShieldCheck className="w-3 h-3 text-success shrink-0" />
             ) : (
               <ShieldX className="w-3 h-3 text-destructive shrink-0" />
             )}
           </div>
-        </div>
-        
-        {/* LIVE Price - Primary Column */}
-        <div className="text-right">
-          <div className={cn(
-            "font-bold text-sm tabular-nums transition-all duration-300",
-            flashDirection === 'up' && "text-success animate-pulse",
-            flashDirection === 'down' && "text-destructive animate-pulse",
-            !flashDirection && "text-foreground"
-          )}>
-            {formatPrice(currentPrice)}
-          </div>
-          <div className={cn(
-            "flex items-center justify-end gap-0.5 text-[10px] tabular-nums font-medium",
-            isPositive ? 'text-success' : 'text-destructive'
-          )}>
-            {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
-            {isPositive ? '+' : ''}{priceChange.toFixed(1)}%
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={cn(
+              "font-bold text-xs tabular-nums transition-colors duration-200",
+              flashDirection === 'up' && "text-success",
+              flashDirection === 'down' && "text-destructive",
+              !flashDirection && "text-foreground"
+            )}>
+              {formatPrice(currentPrice)}
+            </span>
+            <span className={cn(
+              "text-[10px] tabular-nums font-semibold min-w-[42px] text-right",
+              isPositive ? 'text-success' : 'text-destructive'
+            )}>
+              {isPositive ? '+' : ''}{priceChange.toFixed(1)}%
+            </span>
           </div>
         </div>
         
-        {/* Liquidity */}
-        <div className="text-right">
-          <div className="text-xs text-foreground tabular-nums font-semibold">
-            {formatLiquidity(pool.liquidity)}
+        {/* Row 2: Stats - Liq | Vol | MCap | Risk */}
+        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground/60">Liq:</span>
+            <span className="font-medium text-foreground/80">{formatLiquidity(pool.liquidity)}</span>
           </div>
-          <div className="text-[10px] text-muted-foreground">
-            R:{pool.riskScore}
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground/60">Vol:</span>
+            <span className="font-medium text-foreground/80">{formatVolume(pool.volume24h)}</span>
           </div>
-        </div>
-
-        {/* Expand */}
-        <ChevronDown className={cn(
-          "w-4 h-4 text-muted-foreground transition-transform hidden md:block",
-          expanded && "rotate-180"
-        )} />
-      </div>
-      
-      {/* Expanded Details */}
-      {expanded && (
-        <div className="px-3 pb-3 pt-1 bg-secondary/20 animate-fade-in">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-2.5 bg-background/50 rounded-lg text-xs">
-            <div>
-              <span className="text-muted-foreground block text-[10px]">Volume 24h</span>
-              <span className="font-semibold text-foreground">{formatVolume(pool.volume24h)}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block text-[10px]">Market Cap</span>
-              <span className="font-semibold text-foreground">{formatLiquidity(pool.marketCap)}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block text-[10px]">Holders</span>
-              <span className="font-semibold text-foreground">{pool.holders || '-'}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block text-[10px]">Source</span>
-              <span className="font-semibold text-purple-400">{pool.source || 'DEX'}</span>
-            </div>
-          </div>
-          
-          {/* Safety Reasons - Compact */}
-          {pool.safetyReasons && pool.safetyReasons.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {[...new Set(pool.safetyReasons)]
-                .slice(0, 3)
-                .map((reason, idx) => (
-                  <Badge 
-                    key={idx} 
-                    variant="outline" 
-                    className={cn(
-                      "text-[9px] px-1.5 py-0 h-4",
-                      reason.startsWith('✅') && "border-success/40 text-success bg-success/5",
-                      reason.startsWith('⚠️') && "border-warning/40 text-warning bg-warning/5",
-                      reason.startsWith('❌') && "border-destructive/40 text-destructive bg-destructive/5"
-                    )}
-                  >
-                    {reason.slice(0, 30)}
-                  </Badge>
-                ))}
+          {pool.marketCap > 0 && (
+            <div className="flex items-center gap-1">
+              <span className="text-muted-foreground/60">MCap:</span>
+              <span className="font-medium text-foreground/80">{formatLiquidity(pool.marketCap)}</span>
             </div>
           )}
-          
-          {/* Actions */}
-          <div className="flex items-center gap-2 mt-2">
-            <Button size="sm" variant="outline" className="flex-1 h-7 text-xs gap-1" onClick={handleViewDetails}>
-              <Eye className="w-3 h-3" /> Details
-            </Button>
-            <a 
-              href={`https://solscan.io/token/${pool.address}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
+          <div className="flex items-center gap-1 ml-auto">
+            <span className={cn(
+              "font-medium px-1.5 py-0.5 rounded text-[9px]",
+              pool.riskScore < 30 && "bg-success/20 text-success",
+              pool.riskScore >= 30 && pool.riskScore < 60 && "bg-warning/20 text-warning",
+              pool.riskScore >= 60 && "bg-destructive/20 text-destructive"
+            )}>
+              R:{pool.riskScore}
+            </span>
+            <Badge 
+              variant="outline" 
+              className={cn(
+                "text-[8px] px-1 py-0 h-4",
+                isTradeable && canBuy && canSell
+                  ? "border-success/50 text-success bg-success/10" 
+                  : "border-destructive/50 text-destructive bg-destructive/10"
+              )}
             >
-              <Button size="sm" variant="ghost" className="h-7 w-7 p-0">
-                <ExternalLink className="w-3 h-3" />
-              </Button>
-            </a>
+              {isTradeable && canBuy && canSell ? '✓ Trade' : '✗'}
+            </Badge>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 });
 
 PoolRow.displayName = 'PoolRow';
 
-// Memoized Trade Row with live price + P&L
+// Memoized Trade Row - aligned with Pool row layout
 const TradeRow = memo(({ 
   trade, 
   colorIndex, 
@@ -301,7 +261,7 @@ const TradeRow = memo(({
   onExit?: (id: string, price: number) => void;
   livePrice?: LivePriceData;
 }) => {
-  // Use live price if available
+  // Use live price if available - no state-based animation to avoid blinking
   const currentPrice = livePrice?.priceUsd ?? trade.current_price;
   const flashDirection = livePrice?.flashDirection;
   
@@ -338,72 +298,78 @@ const TradeRow = memo(({
   }, [trade.created_at]);
 
   return (
-    <div className={cn(
-      "grid grid-cols-[36px_1fr_auto_auto] md:grid-cols-[40px_minmax(100px,1fr)_90px_80px_auto] items-center gap-2 md:gap-3 px-2 md:px-3 py-2.5 border-b border-border/20 hover:bg-secondary/30 transition-all duration-200",
-      flashDirection === 'up' && "bg-success/5",
-      flashDirection === 'down' && "bg-destructive/5"
-    )}>
-      {/* Avatar */}
+    <div 
+      className={cn(
+        "grid grid-cols-[32px_1fr_auto] gap-2 px-2 py-2 border-b border-border/10 hover:bg-secondary/40 transition-colors duration-200 group",
+        flashDirection === 'up' && "bg-success/10",
+        flashDirection === 'down' && "bg-destructive/10"
+      )}
+    >
+      {/* Avatar - same size as Pool */}
       <div className={cn(
-        "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-[10px] border border-white/5 shrink-0",
+        "w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[10px] border border-white/10 shrink-0",
         avatarClass
       )}>
         {initials}
       </div>
       
-      {/* Token Info */}
-      <div className="min-w-0 space-y-0.5">
-        <div className="flex items-center gap-1.5">
-          <span className="font-semibold text-foreground text-xs">{displaySymbol}</span>
-          <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 text-muted-foreground">
-            <Clock className="w-2 h-2 mr-0.5" />{timeHeld}
-          </Badge>
+      {/* Token Info - Dense Layout aligned with Pool */}
+      <div className="min-w-0 flex flex-col justify-center gap-0.5">
+        {/* Row 1: Symbol + Current Price + P&L % */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="font-bold text-foreground text-xs truncate">{displaySymbol}</span>
+            <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 text-muted-foreground shrink-0">
+              <Clock className="w-2 h-2 mr-0.5" />{timeHeld}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={cn(
+              "font-bold text-xs tabular-nums transition-colors duration-200",
+              flashDirection === 'up' && "text-success",
+              flashDirection === 'down' && "text-destructive",
+              !flashDirection && "text-foreground"
+            )}>
+              {formatPrice(currentPrice)}
+            </span>
+            <span className={cn(
+              "text-[10px] tabular-nums font-bold min-w-[42px] text-right",
+              isPositive ? 'text-success' : 'text-destructive'
+            )}>
+              {isPositive ? '+' : ''}{pnlPercent.toFixed(1)}%
+            </span>
+          </div>
         </div>
-        <div className="text-[10px] text-muted-foreground tabular-nums flex items-center gap-1">
-          <span>Entry: {formatPrice(trade.entry_price)}</span>
-        </div>
-      </div>
-      
-      {/* LIVE Current Price */}
-      <div className="text-right">
-        <div className={cn(
-          "font-bold text-sm tabular-nums transition-all duration-300",
-          flashDirection === 'up' && "text-success animate-pulse",
-          flashDirection === 'down' && "text-destructive animate-pulse",
-          !flashDirection && "text-foreground"
-        )}>
-          {formatPrice(currentPrice)}
-        </div>
-        <div className={cn(
-          "flex items-center justify-end gap-0.5 text-[10px] tabular-nums font-medium",
-          isPositive ? 'text-success' : 'text-destructive'
-        )}>
-          {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
-          {isPositive ? '+' : ''}{pnlPercent.toFixed(1)}%
-        </div>
-      </div>
-      
-      {/* P&L Value */}
-      <div className="text-right">
-        <div className={cn(
-          "font-bold text-sm tabular-nums",
-          isPositive ? 'text-success' : 'text-destructive'
-        )}>
-          {isPositive ? '+' : ''}${Math.abs(pnlValue).toFixed(2)}
-        </div>
-        <div className="text-[10px] text-muted-foreground tabular-nums">
-          ${currentValue.toFixed(2)}
+        
+        {/* Row 2: Entry | Value | P&L $ */}
+        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground/60">Entry:</span>
+            <span className="font-medium text-foreground/80 tabular-nums">{formatPrice(trade.entry_price)}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground/60">Value:</span>
+            <span className="font-medium text-foreground/80 tabular-nums">${currentValue.toFixed(2)}</span>
+          </div>
+          <div className="flex items-center gap-1 ml-auto">
+            <span className={cn(
+              "font-bold tabular-nums",
+              isPositive ? 'text-success' : 'text-destructive'
+            )}>
+              {isPositive ? '+' : ''}${Math.abs(pnlValue).toFixed(2)}
+            </span>
+          </div>
         </div>
       </div>
       
       {/* Exit Button */}
       <Button
-        variant="outline"
+        variant="ghost"
         size="sm"
-        className="h-7 px-2 text-destructive border-destructive/30 hover:bg-destructive/10 shrink-0"
+        className="h-8 w-8 p-0 text-destructive/70 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity self-center"
         onClick={handleExit}
       >
-        <LogOut className="w-3 h-3" />
+        <LogOut className="w-3.5 h-3.5" />
       </Button>
     </div>
   );
@@ -411,21 +377,13 @@ const TradeRow = memo(({
 
 TradeRow.displayName = 'TradeRow';
 
-// Loading skeleton
+// Loading skeleton - compact
 const PoolSkeleton = memo(() => (
-  <div className="grid grid-cols-[40px_1fr_100px_80px] items-center gap-3 px-3 py-2.5 border-b border-border/20 animate-pulse">
-    <div className="w-9 h-9 rounded-lg bg-secondary/60" />
+  <div className="grid grid-cols-[32px_1fr] gap-2 px-2 py-2 border-b border-border/10 animate-pulse">
+    <div className="w-8 h-8 rounded-lg bg-secondary/60" />
     <div className="space-y-1.5">
-      <div className="h-4 w-24 bg-secondary/60 rounded" />
-      <div className="h-3 w-16 bg-secondary/40 rounded" />
-    </div>
-    <div className="text-right space-y-1">
-      <div className="h-4 w-16 bg-secondary/60 rounded ml-auto" />
-      <div className="h-3 w-12 bg-secondary/40 rounded ml-auto" />
-    </div>
-    <div className="text-right space-y-1">
-      <div className="h-4 w-12 bg-secondary/40 rounded ml-auto" />
-      <div className="h-3 w-8 bg-secondary/30 rounded ml-auto" />
+      <div className="h-4 w-full max-w-[200px] bg-secondary/60 rounded" />
+      <div className="h-3 w-full max-w-[280px] bg-secondary/40 rounded" />
     </div>
   </div>
 ));
@@ -450,6 +408,9 @@ export default function LiquidityMonitor({
   const [livePrices, setLivePrices] = useState<Map<string, LivePriceData>>(new Map());
   const previousPricesRef = useRef<Map<string, number>>(new Map());
   
+  // Track revealed pool IDs for staggered animation
+  const [revealedPoolIds, setRevealedPoolIds] = useState<Set<string>>(new Set());
+  
   // Handle navigation to token detail page
   const handleViewDetails = useCallback((pool: ScannedToken) => {
     const tokenDataParam = encodeURIComponent(JSON.stringify(pool));
@@ -459,8 +420,8 @@ export default function LiquidityMonitor({
   // Track new tokens (added in last 5 seconds)
   const [newTokenIds, setNewTokenIds] = useState<Set<string>>(new Set());
   
-  // Update new token tracking
-  useMemo(() => {
+  // Update new token tracking and reveal animation
+  useEffect(() => {
     const now = Date.now();
     const fiveSecondsAgo = now - 5000;
     const newIds = new Set<string>();
@@ -470,15 +431,21 @@ export default function LiquidityMonitor({
       if (createdTime > fiveSecondsAgo) {
         newIds.add(pool.id);
       }
+      
+      // Mark as revealed for staggered animation
+      if (!revealedPoolIds.has(pool.id)) {
+        setRevealedPoolIds(prev => new Set([...prev, pool.id]));
+      }
     });
     
     if (newIds.size > 0) {
       setNewTokenIds(newIds);
-      setTimeout(() => setNewTokenIds(new Set()), 5000);
+      const timer = setTimeout(() => setNewTokenIds(new Set()), 5000);
+      return () => clearTimeout(timer);
     }
-  }, [pools.length]);
+  }, [pools]);
 
-  // Real-time price updates for pools
+  // Real-time price updates - stable implementation to prevent blinking
   const updateLivePrices = useCallback(async () => {
     // Get all unique addresses from pools and active trades
     const allAddresses = [
@@ -495,48 +462,46 @@ export default function LiquidityMonitor({
       
       if (priceMap.size === 0) return;
 
-      setLivePrices(prev => {
-        const newPrices = new Map<string, LivePriceData>();
+      // Batch update to prevent multiple re-renders
+      const newPrices = new Map<string, LivePriceData>();
+      
+      priceMap.forEach((data, address) => {
+        const previousPrice = previousPricesRef.current.get(address);
+        let flashDirection: 'up' | 'down' | null = null;
         
-        priceMap.forEach((data, address) => {
-          const previousPrice = previousPricesRef.current.get(address);
-          let flashDirection: 'up' | 'down' | null = null;
-          
-          // Determine flash direction based on price change
-          if (previousPrice && data.priceUsd !== previousPrice) {
-            flashDirection = data.priceUsd > previousPrice ? 'up' : 'down';
-          }
-          
-          newPrices.set(address, {
-            priceUsd: data.priceUsd,
-            priceChange24h: data.priceChange24h,
-            previousPrice,
-            flashDirection,
-          });
-          
-          // Update previous prices for next comparison
-          previousPricesRef.current.set(address, data.priceUsd);
+        // Only flash if there's a meaningful price change (> 0.01%)
+        if (previousPrice && Math.abs((data.priceUsd - previousPrice) / previousPrice) > 0.0001) {
+          flashDirection = data.priceUsd > previousPrice ? 'up' : 'down';
+        }
+        
+        newPrices.set(address, {
+          priceUsd: data.priceUsd,
+          priceChange24h: data.priceChange24h,
+          previousPrice,
+          flashDirection,
         });
         
-        // Clear flash after 1 second
-        setTimeout(() => {
-          setLivePrices(current => {
-            const clearedPrices = new Map(current);
-            clearedPrices.forEach((val, key) => {
-              if (val.flashDirection) {
-                clearedPrices.set(key, { ...val, flashDirection: null });
-              }
-            });
-            return clearedPrices;
-          });
-        }, 1000);
-        
-        return newPrices;
+        // Update previous prices for next comparison
+        previousPricesRef.current.set(address, data.priceUsd);
       });
       
+      setLivePrices(newPrices);
       setLastPriceUpdate(new Date());
+      
+      // Clear flash after 800ms
+      setTimeout(() => {
+        setLivePrices(current => {
+          const clearedPrices = new Map(current);
+          clearedPrices.forEach((val, key) => {
+            if (val.flashDirection) {
+              clearedPrices.set(key, { ...val, flashDirection: null });
+            }
+          });
+          return clearedPrices;
+        });
+      }, 800);
     } catch (err) {
-      console.log('Live price update failed (non-critical):', err);
+      console.log('Live price update (non-critical):', err);
     }
   }, [pools, activeTrades]);
 
@@ -614,60 +579,50 @@ export default function LiquidityMonitor({
   };
 
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-      <CardHeader className="pb-2 px-4 pt-4">
+    <Card className="bg-card/90 backdrop-blur-sm border-border/50">
+      <CardHeader className="pb-2 px-3 pt-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/20">
-              <Activity className="w-5 h-5 text-primary" />
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/20">
+              <Activity className="w-4 h-4 text-primary" />
             </div>
             <div>
-              <CardTitle className="text-base font-semibold">Liquidity Monitor</CardTitle>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <CardTitle className="text-sm font-semibold">Liquidity Monitor</CardTitle>
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                 <span className="tabular-nums">{pools.length} pools</span>
-                <span>•</span>
-                <span className="tabular-nums">{openTrades.length} trades</span>
+                <span className="text-border">•</span>
+                <span className="tabular-nums">{openTrades.length} active</span>
                 {lastPriceUpdate && (
                   <>
-                    <span>•</span>
-                    <span className="flex items-center gap-1">
-                      <RefreshCw className="w-3 h-3" />
-                      {lastPriceUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </span>
+                    <span className="text-border">•</span>
+                    <RefreshCw className="w-2.5 h-2.5" />
+                    <span>{lastPriceUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                   </>
                 )}
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {getStatusBadge()}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setIsExpanded(!isExpanded)}
-            >
-              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </Button>
-          </div>
+          {getStatusBadge()}
         </div>
       </CardHeader>
       
       {isExpanded && (
         <CardContent className="p-0">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <div className="px-4 pb-2">
-              <TabsList className="w-full bg-secondary/60 h-9">
+            <div className="px-3 pb-2">
+              <TabsList className="w-full bg-secondary/60 h-8">
                 <TabsTrigger 
                   value="pools" 
-                  className="flex-1 text-xs h-8 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+                  className="flex-1 text-xs h-7 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground gap-1"
                 >
+                  <BarChart3 className="w-3 h-3" />
                   Pools ({filteredPools.length})
                 </TabsTrigger>
                 <TabsTrigger 
                   value="trades" 
-                  className="flex-1 text-xs h-8 data-[state=active]:bg-success data-[state=active]:text-success-foreground"
+                  className="flex-1 text-xs h-7 data-[state=active]:bg-success data-[state=active]:text-success-foreground gap-1"
                 >
+                  <DollarSign className="w-3 h-3" />
                   Active ({openTrades.length})
                 </TabsTrigger>
               </TabsList>
@@ -675,29 +630,20 @@ export default function LiquidityMonitor({
             
             <TabsContent value="pools" className="mt-0">
               {/* Search */}
-              <div className="px-4 pb-3">
+              <div className="px-3 pb-2">
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                   <Input
                     placeholder="Search tokens..."
                     value={searchTerm}
                     onChange={(e) => handleSearchChange(e.target.value)}
-                    className="pl-9 bg-secondary/40 border-border/30 h-9 text-sm"
+                    className="pl-8 bg-secondary/40 border-border/30 h-8 text-xs"
                   />
                 </div>
               </div>
               
-              {/* Column Headers */}
-              <div className="grid grid-cols-[40px_1fr_100px_80px_32px] items-center gap-3 px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-y border-border/30 bg-secondary/20">
-                <div></div>
-                <div>Token</div>
-                <div className="text-right">Price</div>
-                <div className="text-right">Liq / Risk</div>
-                <div className="hidden md:block"></div>
-              </div>
-              
               {/* Pool List */}
-              <div className="divide-y divide-border/10">
+              <div className="max-h-[400px] overflow-y-auto">
                 {loading && pools.length === 0 ? (
                   <>
                     {[1, 2, 3, 4, 5].map((i) => (
@@ -705,12 +651,12 @@ export default function LiquidityMonitor({
                     ))}
                   </>
                 ) : displayedPools.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                    <Zap className="w-10 h-10 mb-3 opacity-20" />
-                    <p className="font-medium text-sm mb-1">
+                  <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                    <Zap className="w-8 h-8 mb-2 opacity-20" />
+                    <p className="font-medium text-xs mb-0.5">
                       {searchTerm ? 'No matching pools' : 'No pools detected'}
                     </p>
-                    <p className="text-xs text-muted-foreground/70">
+                    <p className="text-[10px] text-muted-foreground/70">
                       {searchTerm ? 'Try a different search' : 'Enable scanner to start'}
                     </p>
                   </div>
@@ -721,6 +667,7 @@ export default function LiquidityMonitor({
                       pool={pool} 
                       colorIndex={idx}
                       isNew={newTokenIds.has(pool.id)}
+                      revealDelay={!revealedPoolIds.has(pool.id) ? idx * 50 : undefined}
                       onViewDetails={handleViewDetails}
                       livePrice={livePrices.get(pool.address)}
                     />
@@ -730,12 +677,12 @@ export default function LiquidityMonitor({
 
               {/* Load More */}
               {hasMore && (
-                <div className="px-4 py-3 border-t border-border/30">
+                <div className="px-3 py-2 border-t border-border/30">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
                     onClick={loadMore}
-                    className="w-full h-8 text-xs"
+                    className="w-full h-7 text-xs text-muted-foreground"
                   >
                     Show more ({filteredPools.length - displayCount} remaining)
                   </Button>
@@ -744,22 +691,13 @@ export default function LiquidityMonitor({
             </TabsContent>
             
             <TabsContent value="trades" className="mt-0">
-              {/* Column Headers for Trades */}
-              <div className="grid grid-cols-[40px_1fr_90px_80px_auto] items-center gap-3 px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-y border-border/30 bg-secondary/20">
-                <div></div>
-                <div>Position</div>
-                <div className="text-right">Price</div>
-                <div className="text-right">P&L</div>
-                <div></div>
-              </div>
-              
               {/* Trade List */}
-              <div className="divide-y divide-border/10">
+              <div className="max-h-[400px] overflow-y-auto">
                 {openTrades.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                    <DollarSign className="w-10 h-10 mb-3 opacity-20" />
-                    <p className="font-medium text-sm mb-1">No active trades</p>
-                    <p className="text-xs text-muted-foreground/70">Trades appear here when executed</p>
+                  <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                    <DollarSign className="w-8 h-8 mb-2 opacity-20" />
+                    <p className="font-medium text-xs mb-0.5">No active trades</p>
+                    <p className="text-[10px] text-muted-foreground/70">Trades appear here when executed</p>
                   </div>
                 ) : (
                   openTrades.map((trade, idx) => (
@@ -776,9 +714,9 @@ export default function LiquidityMonitor({
               
               {/* Trades Summary */}
               {openTrades.length > 0 && (
-                <div className="px-4 py-3 border-t border-border/30 bg-secondary/10">
+                <div className="px-3 py-2 border-t border-border/30 bg-secondary/20">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Total P&L (Live)</span>
+                    <span className="text-[10px] text-muted-foreground">Total P&L (Live)</span>
                     <span className={cn(
                       "font-bold text-sm tabular-nums",
                       totalPnL >= 0 ? 'text-success' : 'text-destructive'
