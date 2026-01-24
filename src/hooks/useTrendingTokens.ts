@@ -69,10 +69,12 @@ export function useTrendingTokens() {
         const liquidity = pair.liquidity?.usd || 0;
 
         if (!existing || liquidity > existing.liquidity) {
+          // Use short address as fallback instead of "UNKNOWN"
+          const shortAddr = address.length > 8 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address;
           tokenMap.set(address, {
             address,
-            symbol: pair.baseToken?.symbol || 'UNKNOWN',
-            name: pair.baseToken?.name || 'Unknown Token',
+            symbol: pair.baseToken?.symbol || shortAddr,
+            name: pair.baseToken?.name || `Token ${shortAddr}`,
             priceUsd: parseFloat(pair.priceUsd) || 0,
             priceChange24h: pair.priceChange?.h24 || 0,
             volume24h: pair.volume?.h24 || 0,

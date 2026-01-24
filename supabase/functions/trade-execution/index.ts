@@ -887,8 +887,9 @@ Deno.serve(async (req) => {
           .insert({
             user_id: user.id,
             token_address: body.outputMint,
-            token_symbol: body.tokenSymbol || "TOKEN",
-            token_name: body.tokenName || "Unknown Token",
+            // Use short address format as fallback instead of "UNKNOWN"
+            token_symbol: body.tokenSymbol || (body.outputMint ? `${body.outputMint.slice(0, 4)}…${body.outputMint.slice(-4)}` : "TOKEN"),
+            token_name: body.tokenName || (body.outputMint ? `Token ${body.outputMint.slice(0, 4)}…${body.outputMint.slice(-4)}` : "New Token"),
             chain: "solana",
             entry_price: entryPrice,
             current_price: entryPrice,

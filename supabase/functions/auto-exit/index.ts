@@ -35,6 +35,19 @@ interface Position {
   status: 'open' | 'closed' | 'pending';
 }
 
+// Helper: generate short address format instead of "Unknown"
+function shortAddress(address: string | null | undefined): string {
+  if (!address || address.length < 10) return 'TOKEN';
+  return `${address.slice(0, 4)}…${address.slice(-4)}`;
+}
+
+function safeTokenSymbol(symbol: string | null | undefined, address: string): string {
+  if (symbol && symbol.trim() && !/^(unknown|\?\?\?|n\/a|token)$/i.test(symbol.trim())) {
+    return symbol.trim();
+  }
+  return shortAddress(address);
+}
+
 interface PriceData {
   address: string;
   price: number;
@@ -451,7 +464,7 @@ serve(async (req) => {
 
         results.push({
           positionId: position.id,
-          symbol: position.token_symbol,
+          symbol: safeTokenSymbol(position.token_symbol, position.token_address),
           action: reason,
           currentPrice,
           profitLossPercent,
@@ -462,7 +475,7 @@ serve(async (req) => {
       } else {
         results.push({
           positionId: position.id,
-          symbol: position.token_symbol,
+          symbol: safeTokenSymbol(position.token_symbol, position.token_address),
           action: 'hold',
           currentPrice,
           profitLossPercent,

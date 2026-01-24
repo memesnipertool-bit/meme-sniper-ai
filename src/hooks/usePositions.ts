@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { fetchDexScreenerTokenMetadata, isPlaceholderTokenText } from '@/lib/dexscreener';
+import { fetchDexScreenerTokenMetadata, fetchDexScreenerPrices, isPlaceholderTokenText, isLikelyRealSolanaMint } from '@/lib/dexscreener';
 
 export interface Position {
   id: string;
@@ -48,16 +48,20 @@ export interface AutoExitSummary {
   executed: number;
 }
 
+// Price update interval: 15 seconds for real-time feel
+const PRICE_UPDATE_INTERVAL_MS = 15000;
+
 export function usePositions() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkingExits, setCheckingExits] = useState(false);
   const [lastExitCheck, setLastExitCheck] = useState<string | null>(null);
   const [exitResults, setExitResults] = useState<ExitResult[]>([]);
+  const [lastPriceUpdate, setLastPriceUpdate] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Cache DexScreener metadata by token address to avoid repeated external calls
-  const tokenMetaCacheRef = useState(() => new Map<string, { name: string; symbol: string }>())[0];
+  const tokenMetaCacheRef = useRef(new Map<string, { name: string; symbol: string }>());
 
   // Fetch positions
   const fetchPositions = useCallback(async () => {
@@ -81,7 +85,7 @@ export function usePositions() {
               isPlaceholderTokenText(p.token_symbol) || isPlaceholderTokenText(p.token_name)
             )
             .map((p) => p.token_address)
-            .filter((addr) => !tokenMetaCacheRef.has(addr))
+            .filter((addr) => !tokenMetaCacheRef.current.has(addr))
         )
       );
 
@@ -89,13 +93,13 @@ export function usePositions() {
         const metaMap = await fetchDexScreenerTokenMetadata(addressesToFetch);
 
         for (const [addr, meta] of metaMap.entries()) {
-          tokenMetaCacheRef.set(addr, { name: meta.name, symbol: meta.symbol });
+          tokenMetaCacheRef.current.set(addr, { name: meta.name, symbol: meta.symbol });
         }
 
         if (metaMap.size > 0) {
           setPositions((prev) =>
             prev.map((p) => {
-              const meta = tokenMetaCacheRef.get(p.token_address);
+              const meta = tokenMetaCacheRef.current.get(p.token_address);
               if (!meta) return p;
               return {
                 ...p,
@@ -314,7 +318,51 @@ export function usePositions() {
     }
   }, [positions, toast, fetchPositions]);
 
-  // Subscribe to realtime updates
+  // Fetch real-time prices for open positions and update UI state
+  const updatePricesFromDexScreener = useCallback(async () => {
+    const openAddresses = positions
+      .filter((p) => p.status === 'open' || p.status === 'pending')
+      .map((p) => p.token_address)
+      .filter((addr) => isLikelyRealSolanaMint(addr));
+
+    if (openAddresses.length === 0) return;
+
+    try {
+      const priceMap = await fetchDexScreenerPrices(openAddresses);
+      
+      if (priceMap.size === 0) return;
+
+      setPositions((prev) =>
+        prev.map((p) => {
+          if (p.status !== 'open' && p.status !== 'pending') return p;
+          
+          const priceData = priceMap.get(p.token_address);
+          if (!priceData || priceData.priceUsd <= 0) return p;
+
+          const currentValue = p.amount * priceData.priceUsd;
+          const entryValue = p.entry_value || p.amount * p.entry_price;
+          const profitLossValue = currentValue - entryValue;
+          const profitLossPercent = p.entry_price > 0 
+            ? ((priceData.priceUsd - p.entry_price) / p.entry_price) * 100 
+            : 0;
+
+          return {
+            ...p,
+            current_price: priceData.priceUsd,
+            current_value: currentValue,
+            profit_loss_value: profitLossValue,
+            profit_loss_percent: profitLossPercent,
+          };
+        })
+      );
+
+      setLastPriceUpdate(new Date().toISOString());
+    } catch (err) {
+      console.log('Price update failed (non-critical):', err);
+    }
+  }, [positions]);
+
+  // Subscribe to realtime updates + periodic price refresh
   useEffect(() => {
     fetchPositions();
 
@@ -333,10 +381,22 @@ export function usePositions() {
       )
       .subscribe();
 
+    // Real-time price updates every 15 seconds
+    const priceInterval = setInterval(() => {
+      updatePricesFromDexScreener();
+    }, PRICE_UPDATE_INTERVAL_MS);
+
+    // Initial price fetch after 2 seconds
+    const initialPriceTimeout = setTimeout(() => {
+      updatePricesFromDexScreener();
+    }, 2000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(priceInterval);
+      clearTimeout(initialPriceTimeout);
     };
-  }, [fetchPositions]);
+  }, [fetchPositions, updatePricesFromDexScreener]);
 
   const openPositions = positions.filter(p => p.status === 'open');
   const closedPositions = positions.filter(p => p.status === 'closed');
@@ -351,9 +411,11 @@ export function usePositions() {
     checkingExits,
     lastExitCheck,
     exitResults,
+    lastPriceUpdate,
     fetchPositions,
     createPosition,
     checkExitConditions,
     closePosition,
+    updatePricesFromDexScreener,
   };
 }

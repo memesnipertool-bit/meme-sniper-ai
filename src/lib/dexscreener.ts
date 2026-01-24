@@ -4,6 +4,14 @@ export type DexTokenMetadata = {
   name: string;
 };
 
+export type DexTokenPriceData = {
+  address: string;
+  priceUsd: number;
+  priceChange24h: number;
+  volume24h: number;
+  liquidity: number;
+};
+
 const PLACEHOLDER_RE = /^(unknown|unknown token|token|\?\?\?|n\/a)$/i;
 
 export function isPlaceholderTokenText(value: string | null | undefined): boolean {
@@ -80,6 +88,64 @@ export async function fetchDexScreenerTokenMetadata(
       }
     } catch {
       // Ignore: best-effort enrichment
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Fetch live price data for multiple tokens from DexScreener.
+ * Returns real-time price, 24h change, volume, and liquidity.
+ */
+export async function fetchDexScreenerPrices(
+  addresses: string[],
+  opts?: { timeoutMs?: number; chunkSize?: number }
+): Promise<Map<string, DexTokenPriceData>> {
+  const timeoutMs = opts?.timeoutMs ?? 5000;
+  const chunkSize = opts?.chunkSize ?? 25;
+
+  const unique = Array.from(
+    new Set(addresses.filter((a) => isLikelyRealSolanaMint(a)))
+  );
+  const result = new Map<string, DexTokenPriceData>();
+  if (unique.length === 0) return result;
+
+  for (const batch of chunk(unique, chunkSize)) {
+    try {
+      const url = `https://api.dexscreener.com/latest/dex/tokens/${batch.join(',')}`;
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (!res.ok) continue;
+      const data = await res.json();
+      const pairs: any[] = data?.pairs || [];
+
+      // Choose best pair per token by highest liquidity.usd
+      const bestByAddress = new Map<string, { pair: any; liquidityUsd: number }>();
+      for (const pair of pairs) {
+        if (pair?.chainId !== 'solana') continue;
+        const addr = pair?.baseToken?.address;
+        if (!addr) continue;
+        const liquidityUsd = Number(pair?.liquidity?.usd ?? 0);
+        const prev = bestByAddress.get(addr);
+        if (!prev || liquidityUsd > prev.liquidityUsd) {
+          bestByAddress.set(addr, { pair, liquidityUsd });
+        }
+      }
+
+      for (const [addr, { pair, liquidityUsd }] of bestByAddress.entries()) {
+        result.set(addr, {
+          address: addr,
+          priceUsd: parseFloat(pair?.priceUsd || '0') || 0,
+          priceChange24h: parseFloat(pair?.priceChange?.h24 || '0') || 0,
+          volume24h: parseFloat(pair?.volume?.h24 || '0') || 0,
+          liquidity: liquidityUsd,
+        });
+      }
+    } catch {
+      // Ignore: best-effort price fetch
     }
   }
 

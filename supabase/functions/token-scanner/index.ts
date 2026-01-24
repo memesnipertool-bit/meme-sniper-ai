@@ -46,6 +46,26 @@ interface DexScreenerPairResult {
 // Token lifecycle stages (only tradable stages now)
 type TokenStage = 'LP_LIVE' | 'INDEXING' | 'LISTED';
 
+// Helper: generate short address format instead of "Unknown"
+function shortAddress(address: string | null | undefined): string {
+  if (!address || address.length < 10) return 'TOKEN';
+  return `${address.slice(0, 4)}…${address.slice(-4)}`;
+}
+
+function safeTokenName(name: string | null | undefined, address: string): string {
+  if (name && name.trim() && !/^(unknown|unknown token|token|\?\?\?|n\/a)$/i.test(name.trim())) {
+    return name.trim();
+  }
+  return `Token ${shortAddress(address)}`;
+}
+
+function safeTokenSymbol(symbol: string | null | undefined, address: string): string {
+  if (symbol && symbol.trim() && !/^(unknown|\?\?\?|n\/a)$/i.test(symbol.trim())) {
+    return symbol.trim();
+  }
+  return shortAddress(address);
+}
+
 interface TokenStatus {
   tradable: boolean;
   stage: TokenStage;
@@ -376,8 +396,8 @@ serve(async (req) => {
             tokens.push({
               id: `gecko-${pool.id}`,
               address: tokenAddress,
-              name: attrs.name?.split('/')[0] || 'Unknown',
-              symbol: attrs.name?.split('/')[0]?.slice(0, 10) || '???',
+              name: safeTokenName(attrs.name?.split('/')[0], tokenAddress),
+              symbol: safeTokenSymbol(attrs.name?.split('/')[0]?.slice(0, 10), tokenAddress),
               chain: 'solana',
               liquidity: liquidityInSol,
               liquidityLocked: false,
@@ -460,8 +480,8 @@ serve(async (req) => {
             tokens.push({
               id: `birdeye-${tokenItem.address}`,
               address: tokenItem.address || '',
-              name: tokenItem.name || 'Unknown',
-              symbol: tokenItem.symbol || '???',
+              name: safeTokenName(tokenItem.name, tokenItem.address),
+              symbol: safeTokenSymbol(tokenItem.symbol, tokenItem.address),
               chain: 'solana',
               liquidity: liquidityInSol,
               liquidityLocked: false,
@@ -544,8 +564,8 @@ serve(async (req) => {
             tokens.push({
               id: `dex-${pair.pairAddress}`,
               address: tokenAddress,
-              name: pair.baseToken?.name || 'Unknown',
-              symbol: pair.baseToken?.symbol || '???',
+              name: safeTokenName(pair.baseToken?.name, tokenAddress),
+              symbol: safeTokenSymbol(pair.baseToken?.symbol, tokenAddress),
               chain: 'solana',
               liquidity: liquidityInSol,
               liquidityLocked: false,
