@@ -895,7 +895,7 @@ Deno.serve(async (req) => {
             amount: outputAmountDecimal,
             entry_value: inputAmountDecimal,
             current_value: inputAmountDecimal,
-            profit_take_percent: body.profitTakePercent || 50,
+            profit_take_percent: body.profitTakePercent || 100,
             stop_loss_percent: body.stopLossPercent || 20,
             status: "pending",
           })

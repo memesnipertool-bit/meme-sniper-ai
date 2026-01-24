@@ -632,6 +632,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             maxRiskScore: 70,
             // Skip risk check for pre-verified tokens from scanner
             skipRiskCheck: true,
+            // Pass user's TP/SL settings for position persistence
+            profitTakePercent: settings.profit_take_percentage,
+            stopLossPercent: settings.stop_loss_percentage,
           }
         );
 
