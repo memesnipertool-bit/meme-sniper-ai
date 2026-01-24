@@ -241,6 +241,7 @@ export function useTradingEngine() {
             const position = result.position;
             const entryValue = position.solSpent;
             
+            // Save position
             const { data: savedPosition, error: dbError } = await supabase
               .from('positions')
               .insert({
@@ -254,8 +255,8 @@ export function useTradingEngine() {
                 amount: position.tokenAmount,
                 entry_value: entryValue,
                 current_value: entryValue,
-                profit_take_percent: config?.maxRiskScore ? 100 : 50, // Default TP
-                stop_loss_percent: 20, // Default SL
+                profit_take_percent: config?.maxRiskScore ? 100 : 50,
+                stop_loss_percent: 20,
                 status: 'open',
               })
               .select()
@@ -263,14 +264,34 @@ export function useTradingEngine() {
 
             if (dbError) {
               console.error('[TradingEngine] Failed to persist position:', dbError);
-              // Don't fail the trade, just log
             } else {
               console.log('[TradingEngine] Position saved to database:', savedPosition?.id);
+            }
+
+            // Log to trade_history for Transaction History display
+            const { error: historyError } = await supabase
+              .from('trade_history')
+              .insert({
+                user_id: user.id,
+                token_address: position.tokenAddress,
+                token_symbol: position.tokenSymbol,
+                token_name: position.tokenName || position.tokenSymbol,
+                trade_type: 'buy',
+                amount: position.tokenAmount,
+                price_sol: position.entryPrice,
+                price_usd: null, // Could add USD conversion later
+                status: 'completed',
+                tx_hash: position.entryTxHash,
+              });
+
+            if (historyError) {
+              console.error('[TradingEngine] Failed to log trade history:', historyError);
+            } else {
+              console.log('[TradingEngine] Trade logged to history');
             }
           }
         } catch (persistError) {
           console.error('[TradingEngine] Position persistence error:', persistError);
-          // Trade succeeded, don't fail on DB error
         }
       }
 
