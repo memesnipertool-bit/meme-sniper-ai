@@ -3,13 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Activity, Loader2, TrendingUp, TrendingDown, ArrowRight, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
-import { formatDistanceToNow } from "date-fns";
 
 interface Position {
   id: string;
   token_symbol: string;
   token_name?: string;
+  token_address?: string;
   created_at: string;
+  entry_price?: number;
+  current_price?: number;
   profit_loss_percent: number | null;
   current_value: number;
 }
@@ -24,6 +26,22 @@ const formatCurrency = (value: number) => {
   if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
   if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}K`;
   return `$${value.toFixed(2)}`;
+};
+
+const formatPrice = (value: number) => {
+  if (!value || value === 0) return '$0.00';
+  if (value < 0.00001) return `$${value.toExponential(2)}`;
+  if (value < 0.01) return `$${value.toFixed(6)}`;
+  if (value < 1) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+};
+
+const shortAddress = (addr: string | undefined) => 
+  addr && addr.length > 10 ? `${addr.slice(0, 4)}…${addr.slice(-4)}` : 'TOKEN';
+
+const isPlaceholder = (val: string | null | undefined) => {
+  if (!val) return true;
+  return /^(unknown|unknown token|\?\?\?|n\/a)$/i.test(val.trim());
 };
 
 const avatarColors = [
@@ -105,36 +123,36 @@ export default function ActiveTradesCard({ positions, loading, onStartSnipping }
                   className="group flex items-center justify-between p-3.5 bg-secondary/30 hover:bg-secondary/50 rounded-xl border border-transparent hover:border-border/50 transition-all duration-300 animate-fade-in"
                   style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
                     {/* Token Avatar */}
-                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${colorClass} border flex items-center justify-center font-bold text-sm transition-transform group-hover:scale-105`}>
-                      {position.token_symbol.slice(0, 2).toUpperCase()}
+                    <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${colorClass} border flex items-center justify-center font-bold text-xs transition-transform group-hover:scale-105`}>
+                      {(isPlaceholder(position.token_symbol) ? shortAddress(position.token_address) : position.token_symbol).slice(0, 2).toUpperCase()}
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-sm text-foreground">{position.token_symbol}</p>
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-secondary/50">
-                          SOL
-                        </Badge>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-semibold text-sm text-foreground truncate">
+                          {isPlaceholder(position.token_symbol) ? shortAddress(position.token_address) : position.token_symbol}
+                        </p>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDistanceToNow(new Date(position.created_at), { addSuffix: true })}
+                      <p className="text-[10px] text-muted-foreground tabular-nums">
+                        Entry: {formatPrice(position.entry_price || 0)}
                       </p>
                     </div>
                   </div>
                   
-                  <div className="text-right">
-                    <div className={`flex items-center justify-end gap-1 font-bold text-sm ${isProfit ? 'text-success' : 'text-destructive'}`}>
-                      {isProfit ? (
-                        <TrendingUp className="w-3.5 h-3.5" />
-                      ) : (
-                        <TrendingDown className="w-3.5 h-3.5" />
-                      )}
-                      {isProfit ? '+' : ''}{pnlPercent.toFixed(2)}%
+                  {/* Live Current Price */}
+                  <div className="text-right min-w-[70px]">
+                    <div className="font-bold text-sm text-foreground tabular-nums">
+                      {formatPrice(position.current_price || 0)}
                     </div>
-                    <p className="text-xs text-muted-foreground font-medium">
-                      {formatCurrency(position.current_value)}
-                    </p>
+                    <div className={`flex items-center justify-end gap-0.5 text-xs tabular-nums ${isProfit ? 'text-success' : 'text-destructive'}`}>
+                      {isProfit ? (
+                        <TrendingUp className="w-3 h-3" />
+                      ) : (
+                        <TrendingDown className="w-3 h-3" />
+                      )}
+                      {isProfit ? '+' : ''}{pnlPercent.toFixed(1)}%
+                    </div>
                   </div>
                 </div>
               );
