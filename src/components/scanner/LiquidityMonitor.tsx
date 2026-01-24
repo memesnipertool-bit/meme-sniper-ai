@@ -6,9 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScannedToken } from "@/hooks/useTokenScanner";
 import { 
-  Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, 
+  Zap, TrendingUp, TrendingDown, ShieldCheck, ShieldX, 
   Loader2, Search, LogOut, DollarSign, Eye,
-  Activity, Clock, RefreshCw, BarChart3, Users
+  Activity, Clock, BarChart3
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -98,27 +98,15 @@ const PoolRow = memo(({
   pool, 
   colorIndex, 
   isNew,
-  revealDelay,
   onViewDetails,
   livePrice 
 }: { 
   pool: ScannedToken; 
   colorIndex: number; 
   isNew?: boolean;
-  revealDelay?: number;
   onViewDetails: (pool: ScannedToken) => void;
   livePrice?: LivePriceData;
 }) => {
-  const [isVisible, setIsVisible] = useState(revealDelay === undefined);
-  
-  // Staggered reveal animation
-  useEffect(() => {
-    if (revealDelay !== undefined) {
-      const timer = setTimeout(() => setIsVisible(true), revealDelay);
-      return () => clearTimeout(timer);
-    }
-  }, [revealDelay]);
-  
   // Use live price if available, otherwise fallback to pool data
   const currentPrice = livePrice?.priceUsd ?? pool.priceUsd;
   const priceChange = livePrice?.priceChange24h ?? pool.priceChange24h;
@@ -146,20 +134,13 @@ const PoolRow = memo(({
     onViewDetails(pool);
   }, [onViewDetails, pool]);
 
-  if (!isVisible) {
-    return (
-      <div className="h-[52px] border-b border-border/10" />
-    );
-  }
-
   return (
     <div 
       className={cn(
-        "grid grid-cols-[32px_1fr] gap-2 px-2 py-2 border-b border-border/10 hover:bg-secondary/40 transition-all duration-300 cursor-pointer group",
+        "grid grid-cols-[32px_1fr_auto] gap-2 px-3 py-2.5 border-b border-border/20 hover:bg-secondary/50 transition-colors duration-200 cursor-pointer group",
         isNew && "bg-primary/5 border-l-2 border-l-primary",
-        flashDirection === 'up' && "bg-success/10",
-        flashDirection === 'down' && "bg-destructive/10",
-        "animate-fade-in"
+        flashDirection === 'up' && "bg-success/5",
+        flashDirection === 'down' && "bg-destructive/5"
       )}
       onClick={handleViewDetails}
     >
@@ -173,10 +154,10 @@ const PoolRow = memo(({
       
       {/* Token Info - Dense Layout */}
       <div className="min-w-0 flex flex-col justify-center gap-0.5">
-        {/* Row 1: Symbol + Price + Change */}
+        {/* Row 1: Symbol + Safety + Price */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="font-bold text-foreground text-xs truncate">{displaySymbol}</span>
+            <span className="font-bold text-foreground text-xs truncate max-w-[80px]">{displaySymbol}</span>
             {isNew && (
               <Badge className="bg-primary/30 text-primary text-[8px] px-1 py-0 h-3.5 shrink-0">NEW</Badge>
             )}
@@ -188,7 +169,7 @@ const PoolRow = memo(({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className={cn(
-              "font-bold text-xs tabular-nums transition-colors duration-200",
+              "font-bold text-xs tabular-nums",
               flashDirection === 'up' && "text-success",
               flashDirection === 'down' && "text-destructive",
               !flashDirection && "text-foreground"
@@ -196,7 +177,7 @@ const PoolRow = memo(({
               {formatPrice(currentPrice)}
             </span>
             <span className={cn(
-              "text-[10px] tabular-nums font-semibold min-w-[42px] text-right",
+              "text-[10px] tabular-nums font-semibold min-w-[40px] text-right",
               isPositive ? 'text-success' : 'text-destructive'
             )}>
               {isPositive ? '+' : ''}{priceChange.toFixed(1)}%
@@ -204,45 +185,38 @@ const PoolRow = memo(({
           </div>
         </div>
         
-        {/* Row 2: Stats - Liq | Vol | MCap | Risk */}
-        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-          <div className="flex items-center gap-1">
-            <span className="text-muted-foreground/60">Liq:</span>
-            <span className="font-medium text-foreground/80">{formatLiquidity(pool.liquidity)}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-muted-foreground/60">Vol:</span>
-            <span className="font-medium text-foreground/80">{formatVolume(pool.volume24h)}</span>
-          </div>
+        {/* Row 2: Stats */}
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span className="tabular-nums">Liq: <span className="text-foreground/80 font-medium">{formatLiquidity(pool.liquidity)}</span></span>
+          <span className="text-border/50">|</span>
+          <span className="tabular-nums">Vol: <span className="text-foreground/80 font-medium">{formatVolume(pool.volume24h)}</span></span>
           {pool.marketCap > 0 && (
-            <div className="flex items-center gap-1">
-              <span className="text-muted-foreground/60">MCap:</span>
-              <span className="font-medium text-foreground/80">{formatLiquidity(pool.marketCap)}</span>
-            </div>
+            <>
+              <span className="text-border/50">|</span>
+              <span className="tabular-nums">MCap: <span className="text-foreground/80 font-medium">{formatLiquidity(pool.marketCap)}</span></span>
+            </>
           )}
-          <div className="flex items-center gap-1 ml-auto">
-            <span className={cn(
-              "font-medium px-1.5 py-0.5 rounded text-[9px]",
-              pool.riskScore < 30 && "bg-success/20 text-success",
-              pool.riskScore >= 30 && pool.riskScore < 60 && "bg-warning/20 text-warning",
-              pool.riskScore >= 60 && "bg-destructive/20 text-destructive"
-            )}>
-              R:{pool.riskScore}
-            </span>
-            <Badge 
-              variant="outline" 
-              className={cn(
-                "text-[8px] px-1 py-0 h-4",
-                isTradeable && canBuy && canSell
-                  ? "border-success/50 text-success bg-success/10" 
-                  : "border-destructive/50 text-destructive bg-destructive/10"
-              )}
-            >
-              {isTradeable && canBuy && canSell ? '✓ Trade' : '✗'}
-            </Badge>
-          </div>
+          <span className={cn(
+            "ml-auto font-medium px-1.5 py-0.5 rounded text-[9px]",
+            pool.riskScore < 30 && "bg-success/20 text-success",
+            pool.riskScore >= 30 && pool.riskScore < 60 && "bg-warning/20 text-warning",
+            pool.riskScore >= 60 && "bg-destructive/20 text-destructive"
+          )}>
+            Risk:{pool.riskScore}
+          </span>
         </div>
       </div>
+      
+      {/* View Details Button */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 px-2 text-[10px] text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity self-center shrink-0"
+        onClick={handleViewDetails}
+      >
+        <Eye className="w-3.5 h-3.5 mr-1" />
+        View
+      </Button>
     </div>
   );
 });
@@ -408,8 +382,6 @@ export default function LiquidityMonitor({
   const [livePrices, setLivePrices] = useState<Map<string, LivePriceData>>(new Map());
   const previousPricesRef = useRef<Map<string, number>>(new Map());
   
-  // Track revealed pool IDs for staggered animation
-  const [revealedPoolIds, setRevealedPoolIds] = useState<Set<string>>(new Set());
   
   // Handle navigation to token detail page
   const handleViewDetails = useCallback((pool: ScannedToken) => {
@@ -420,7 +392,7 @@ export default function LiquidityMonitor({
   // Track new tokens (added in last 5 seconds)
   const [newTokenIds, setNewTokenIds] = useState<Set<string>>(new Set());
   
-  // Update new token tracking and reveal animation
+  // Update new token tracking
   useEffect(() => {
     const now = Date.now();
     const fiveSecondsAgo = now - 5000;
@@ -430,11 +402,6 @@ export default function LiquidityMonitor({
       const createdTime = new Date(pool.createdAt).getTime();
       if (createdTime > fiveSecondsAgo) {
         newIds.add(pool.id);
-      }
-      
-      // Mark as revealed for staggered animation
-      if (!revealedPoolIds.has(pool.id)) {
-        setRevealedPoolIds(prev => new Set([...prev, pool.id]));
       }
     });
     
@@ -592,13 +559,6 @@ export default function LiquidityMonitor({
                 <span className="tabular-nums">{pools.length} pools</span>
                 <span className="text-border">•</span>
                 <span className="tabular-nums">{openTrades.length} active</span>
-                {lastPriceUpdate && (
-                  <>
-                    <span className="text-border">•</span>
-                    <RefreshCw className="w-2.5 h-2.5" />
-                    <span>{lastPriceUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                  </>
-                )}
               </div>
             </div>
           </div>
@@ -667,7 +627,6 @@ export default function LiquidityMonitor({
                       pool={pool} 
                       colorIndex={idx}
                       isNew={newTokenIds.has(pool.id)}
-                      revealDelay={!revealedPoolIds.has(pool.id) ? idx * 50 : undefined}
                       onViewDetails={handleViewDetails}
                       livePrice={livePrices.get(pool.address)}
                     />
