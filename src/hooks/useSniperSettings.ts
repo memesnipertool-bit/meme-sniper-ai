@@ -25,7 +25,7 @@ export interface SniperSettings {
 }
 
 const defaultSettings: Omit<SniperSettings, 'user_id'> = {
-  min_liquidity: 300,
+  min_liquidity: 5, // Lowered from 300 to allow more tokens - 5 SOL minimum
   profit_take_percentage: 100,
   stop_loss_percentage: 20,
   trade_amount: 0.1,
@@ -34,7 +34,7 @@ const defaultSettings: Omit<SniperSettings, 'user_id'> = {
   category_filters: ['animals', 'parody', 'trend', 'utility'],
   token_blacklist: [],
   token_whitelist: [],
-  target_buyer_positions: [2, 3],
+  target_buyer_positions: [1, 2, 3, 4, 5], // Allow all buyer positions 1-5
   slippage_tolerance: 15, // 15% default for meme coins
   max_risk_score: 70, // Default max risk score
 };
