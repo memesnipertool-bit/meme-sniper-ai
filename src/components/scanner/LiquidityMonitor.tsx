@@ -58,7 +58,7 @@ const avatarColors = [
   'bg-gradient-to-br from-cyan-500/30 to-cyan-500/10 text-cyan-400',
 ];
 
-// Memoized Pool Row with improved visibility and criteria details
+// Memoized Pool Row with live price focus
 const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: ScannedToken; colorIndex: number; isNew?: boolean; onViewDetails: (pool: ScannedToken) => void }) => {
   const [expanded, setExpanded] = useState(false);
   const isPositive = pool.priceChange24h >= 0;
@@ -74,10 +74,8 @@ const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: Scanne
   const initials = displaySymbol.slice(0, 2).toUpperCase();
   const avatarClass = avatarColors[colorIndex % avatarColors.length];
   const honeypotSafe = pool.riskScore < 50;
-  const liquidityLocked = pool.liquidityLocked;
 
   // Criteria badges
-  const isPumpFun = pool.isPumpFun || pool.source?.toLowerCase().includes('pump');
   const isTradeable = pool.isTradeable !== false;
   const canBuy = pool.canBuy !== false;
   const canSell = pool.canSell !== false;
@@ -91,7 +89,7 @@ const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: Scanne
     <div className="border-b border-border/20">
       <div 
         className={cn(
-          "grid grid-cols-[32px_1fr_auto] md:grid-cols-[40px_1fr_auto_auto_auto] items-center gap-2 md:gap-3 px-2 md:px-3 py-2 md:py-2.5 hover:bg-secondary/30 transition-all duration-200 cursor-pointer",
+          "grid grid-cols-[32px_1fr_auto_auto] md:grid-cols-[40px_1fr_auto_auto_auto] items-center gap-2 md:gap-3 px-2 md:px-3 py-2 md:py-2.5 hover:bg-secondary/30 transition-all duration-200 cursor-pointer",
           isNew && "animate-fade-in bg-primary/5"
         )}
         onClick={() => setExpanded(!expanded)}
@@ -104,72 +102,40 @@ const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: Scanne
           {initials}
         </div>
         
-        {/* Token Info - More visible */}
+        {/* Token Info - Compact */}
         <div className="min-w-0 space-y-0.5">
           <div className="flex items-center gap-1.5 md:gap-2">
-            <span className="font-semibold text-foreground text-xs md:text-sm truncate">{displayName}</span>
-            <span className="text-muted-foreground text-[10px] md:text-xs font-medium hidden sm:inline">{displaySymbol}</span>
+            <span className="font-semibold text-foreground text-xs md:text-sm truncate">{displaySymbol}</span>
             {isNew && (
               <Badge className="bg-primary/20 text-primary text-[8px] md:text-[9px] px-1 py-0 h-3.5 md:h-4">NEW</Badge>
             )}
-          </div>
-          <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs">
-            <span className="font-mono text-muted-foreground/80 hidden sm:inline">{pool.address.slice(0, 4)}...{pool.address.slice(-3)}</span>
-            {/* Mobile: Show key info inline */}
+            {/* Trade status indicator */}
             <Badge 
               variant="outline" 
               className={cn(
-                "text-[8px] md:hidden px-1 py-0 h-4",
+                "text-[8px] md:text-[9px] px-1 py-0 h-4",
                 isTradeable && canBuy && canSell
                   ? "border-success/40 text-success bg-success/10" 
                   : "border-destructive/40 text-destructive bg-destructive/10"
               )}
             >
-              {isTradeable && canBuy && canSell ? '✓' : '✗'}
+              {isTradeable && canBuy && canSell ? '✓ Trade' : '✗'}
             </Badge>
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] md:text-xs text-muted-foreground">
+            <span className="font-mono">{pool.address.slice(0, 4)}...{pool.address.slice(-3)}</span>
           </div>
         </div>
         
-        {/* Source & Trade Status Badges - Desktop only */}
-        <div className="hidden md:flex items-center gap-1 flex-wrap">
-          <Badge 
-            variant="outline" 
-            className={cn(
-              "text-[9px] px-1.5 py-0 h-5",
-              isPumpFun 
-                ? "border-orange-500/40 text-orange-400 bg-orange-500/10" 
-                : "border-purple-500/40 text-purple-400 bg-purple-500/10"
-            )}
-          >
-            {isPumpFun ? '🎉 Pump' : pool.source || 'DEX'}
-          </Badge>
-          <Badge 
-            variant="outline" 
-            className={cn(
-              "text-[9px] px-1.5 py-0 h-5",
-              isTradeable && canBuy && canSell
-                ? "border-success/40 text-success bg-success/10" 
-                : "border-destructive/40 text-destructive bg-destructive/10"
-            )}
-          >
-            {isTradeable && canBuy && canSell ? '✓ Trade' : '✗ No Trade'}
-          </Badge>
-        </div>
-        
-        {/* Safety + Risk - Desktop only */}
+        {/* Safety + Risk - Desktop */}
         <div className="hidden md:flex items-center gap-1.5">
           {honeypotSafe ? (
-            <div className="p-1.5 rounded-md bg-success/15 border border-success/20">
-              <ShieldCheck className="w-3.5 h-3.5 text-success" />
+            <div className="p-1 rounded-md bg-success/15 border border-success/20">
+              <ShieldCheck className="w-3 h-3 text-success" />
             </div>
           ) : (
-            <div className="p-1.5 rounded-md bg-destructive/15 border border-destructive/20">
-              <ShieldX className="w-3.5 h-3.5 text-destructive" />
-            </div>
-          )}
-          {liquidityLocked && (
-            <div className="p-1.5 rounded-md bg-success/15 border border-success/20">
-              <Lock className="w-3.5 h-3.5 text-success" />
+            <div className="p-1 rounded-md bg-destructive/15 border border-destructive/20">
+              <ShieldX className="w-3 h-3 text-destructive" />
             </div>
           )}
           <Badge 
@@ -181,20 +147,28 @@ const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: Scanne
               "border-destructive/40 text-destructive bg-destructive/10"
             )}
           >
-            {pool.riskScore}
+            R:{pool.riskScore}
           </Badge>
         </div>
         
-        {/* Price & Liquidity - Always visible, compact on mobile */}
-        <div className="text-right min-w-[70px] md:min-w-[90px]">
+        {/* LIVE Current Price - Primary Display */}
+        <div className="text-right min-w-[80px] md:min-w-[100px]">
+          <div className="font-bold text-xs md:text-sm tabular-nums text-foreground">
+            {formatPrice(pool.priceUsd)}
+          </div>
           <div className={cn(
-            "flex items-center justify-end gap-0.5 md:gap-1 font-bold text-xs md:text-sm tabular-nums transition-colors duration-300",
+            "flex items-center justify-end gap-0.5 text-[10px] md:text-xs tabular-nums font-medium transition-colors duration-300",
             isPositive ? 'text-success' : 'text-destructive'
           )}>
-            {isPositive ? <TrendingUp className="w-3 h-3 md:w-3.5 md:h-3.5" /> : <TrendingDown className="w-3 h-3 md:w-3.5 md:h-3.5" />}
+            {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
             {isPositive ? '+' : ''}{pool.priceChange24h.toFixed(1)}%
           </div>
-          <div className="text-[10px] md:text-xs text-muted-foreground tabular-nums font-medium">
+        </div>
+        
+        {/* Liquidity - Desktop only */}
+        <div className="hidden md:block text-right min-w-[60px]">
+          <div className="text-xs text-muted-foreground font-medium">Liq</div>
+          <div className="text-xs text-foreground tabular-nums font-semibold">
             {formatLiquidity(pool.liquidity)}
           </div>
         </div>
@@ -206,11 +180,8 @@ const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: Scanne
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-background/50 rounded-lg text-xs">
             <div>
               <span className="text-muted-foreground block mb-0.5">Source</span>
-              <span className={cn(
-                "font-semibold",
-                isPumpFun ? "text-orange-400" : "text-purple-400"
-              )}>
-                {pool.source || (isPumpFun ? 'Pump.fun' : 'DexScreener')}
+              <span className="font-semibold text-purple-400">
+                {pool.source || 'DEX'}
               </span>
             </div>
             <div>
@@ -334,7 +305,7 @@ const isPlaceholder = (val: string | null | undefined) => {
   return /^(unknown|unknown token|token|\?\?\?|n\/a)$/i.test(v);
 };
 
-// Memoized Trade Row with improved visibility
+// Memoized Trade Row with live price focus
 const TradeRow = memo(({ trade, colorIndex, onExit }: { 
   trade: ActiveTradePosition; 
   colorIndex: number; 
@@ -348,9 +319,6 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   const displaySymbol = isPlaceholder(trade.token_symbol) 
     ? shortAddress(trade.token_address) 
     : trade.token_symbol;
-  const displayName = isPlaceholder(trade.token_name) 
-    ? `Token ${shortAddress(trade.token_address)}` 
-    : trade.token_name;
     
   const initials = displaySymbol.slice(0, 2).toUpperCase();
   const avatarClass = avatarColors[colorIndex % avatarColors.length];
@@ -359,47 +327,61 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
     onExit?.(trade.id, trade.current_price);
   }, [onExit, trade.id, trade.current_price]);
 
+  // Calculate price change from entry
+  const priceChangePercent = trade.entry_price > 0 
+    ? ((trade.current_price - trade.entry_price) / trade.entry_price) * 100 
+    : 0;
+
   return (
-    <div className="grid grid-cols-[40px_1fr_auto_auto] items-center gap-3 px-3 py-2.5 border-b border-border/20 hover:bg-secondary/30 transition-colors">
+    <div className="grid grid-cols-[36px_1fr_auto_auto] md:grid-cols-[40px_1fr_auto_auto_auto] items-center gap-2 md:gap-3 px-2 md:px-3 py-2 md:py-2.5 border-b border-border/20 hover:bg-secondary/30 transition-colors">
       {/* Avatar */}
       <div className={cn(
-        "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs border border-white/5",
+        "w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center font-bold text-[10px] md:text-xs border border-white/5",
         avatarClass
       )}>
         {initials}
       </div>
       
-      {/* Token Info */}
+      {/* Token Info - Compact */}
       <div className="min-w-0 space-y-0.5">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
-          <span className="text-muted-foreground text-xs">{displaySymbol}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="font-semibold text-foreground text-xs md:text-sm">{displaySymbol}</span>
+          <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 text-muted-foreground">
+            {trade.chain?.toUpperCase() || 'SOL'}
+          </Badge>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="tabular-nums">Entry: {formatPrice(trade.entry_price)}</span>
-          <span className="text-muted-foreground/40">→</span>
-          <span className={cn(
-            "tabular-nums font-medium transition-colors duration-300",
-            isPositive ? 'text-success' : 'text-destructive'
-          )}>
-            {formatPrice(trade.current_price)}
-          </span>
+        <div className="text-[10px] text-muted-foreground tabular-nums">
+          Entry: {formatPrice(trade.entry_price)}
         </div>
       </div>
       
-      {/* PnL - More visible */}
+      {/* LIVE Current Price - Primary */}
       <div className="text-right min-w-[70px]">
-        <div className={cn(
-          "font-bold text-sm tabular-nums transition-all duration-300",
-          isPositive ? 'text-success' : 'text-destructive'
-        )}>
-          {isPositive ? '+' : ''}{pnlPercent.toFixed(1)}%
+        <div className="font-bold text-xs md:text-sm tabular-nums text-foreground">
+          {formatPrice(trade.current_price)}
         </div>
         <div className={cn(
-          "text-xs tabular-nums font-medium transition-all duration-300",
-          isPositive ? 'text-success/80' : 'text-destructive/80'
+          "flex items-center justify-end gap-0.5 text-[10px] tabular-nums font-medium",
+          priceChangePercent >= 0 ? 'text-success' : 'text-destructive'
+        )}>
+          {priceChangePercent >= 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+          {priceChangePercent >= 0 ? '+' : ''}{priceChangePercent.toFixed(1)}%
+        </div>
+      </div>
+      
+      {/* PnL Value - Desktop */}
+      <div className="hidden md:block text-right min-w-[60px]">
+        <div className={cn(
+          "font-bold text-sm tabular-nums",
+          isPositive ? 'text-success' : 'text-destructive'
         )}>
           {isPositive ? '+' : ''}${Math.abs(pnlValue).toFixed(2)}
+        </div>
+        <div className={cn(
+          "text-[10px] tabular-nums font-medium",
+          isPositive ? 'text-success/70' : 'text-destructive/70'
+        )}>
+          {isPositive ? '+' : ''}{pnlPercent.toFixed(1)}%
         </div>
       </div>
       
@@ -407,11 +389,11 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
       <Button
         variant="outline"
         size="sm"
-        className="h-8 px-3 text-destructive border-destructive/30 hover:bg-destructive/10 hover:border-destructive/50"
+        className="h-7 px-2 md:px-3 text-destructive border-destructive/30 hover:bg-destructive/10"
         onClick={handleExit}
       >
-        <LogOut className="w-3.5 h-3.5 mr-1.5" />
-        <span className="text-xs font-medium">Exit</span>
+        <LogOut className="w-3 h-3 md:mr-1" />
+        <span className="hidden md:inline text-xs">Exit</span>
       </Button>
     </div>
   );
