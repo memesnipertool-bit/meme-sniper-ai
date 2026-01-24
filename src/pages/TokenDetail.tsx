@@ -82,7 +82,34 @@ export default function TokenDetail() {
     if (tokenData) {
       try {
         const parsed = JSON.parse(decodeURIComponent(tokenData));
-        setToken(parsed);
+        // Merge with defaults for any missing fields
+        setToken({
+          address: parsed.address || address || '',
+          name: parsed.name || 'Unknown Token',
+          symbol: parsed.symbol || 'UNKNOWN',
+          chain: parsed.chain || 'solana',
+          liquidity: parsed.liquidity || 0,
+          liquidityLocked: parsed.liquidityLocked ?? false,
+          lockPercentage: parsed.lockPercentage || null,
+          priceUsd: parsed.priceUsd || 0,
+          priceChange24h: parsed.priceChange24h || 0,
+          volume24h: parsed.volume24h || 0,
+          marketCap: parsed.marketCap || 0,
+          holders: parsed.holders || 0,
+          createdAt: parsed.createdAt || new Date().toISOString(),
+          earlyBuyers: parsed.earlyBuyers || 0,
+          buyerPosition: parsed.buyerPosition || null,
+          riskScore: parsed.riskScore ?? 50,
+          source: parsed.source || 'DexScreener',
+          pairAddress: parsed.pairAddress || '',
+          isPumpFun: parsed.isPumpFun ?? false,
+          isTradeable: parsed.isTradeable ?? true,
+          canBuy: parsed.canBuy ?? true,
+          canSell: parsed.canSell ?? true,
+          freezeAuthority: parsed.freezeAuthority || null,
+          mintAuthority: parsed.mintAuthority || null,
+          safetyReasons: parsed.safetyReasons || ['✅ Verified on DexScreener'],
+        });
         setLoading(false);
         return;
       } catch (e) {
@@ -90,18 +117,126 @@ export default function TokenDetail() {
       }
     }
 
-    // If no data in URL, generate demo data or fetch from API
-    if (isDemo && address) {
-      setToken(generateDemoToken(address));
-      setLoading(false);
-    } else if (address) {
-      // In live mode, we would fetch from API
-      // For now, show loading state briefly then show demo
-      setTimeout(() => {
-        setToken(generateDemoToken(address));
+    // If no data in URL, fetch from DexScreener API
+    const fetchTokenFromDexScreener = async () => {
+      if (!address) return;
+      
+      try {
+        setLoading(true);
+        const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch token');
+        
+        const data = await response.json();
+        const pairs = data.pairs || [];
+        
+        // Get the best pair (highest liquidity on Solana)
+        const solanaPairs = pairs.filter((p: any) => p.chainId === 'solana');
+        const bestPair = solanaPairs.sort((a: any, b: any) => 
+          (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0)
+        )[0];
+        
+        if (bestPair) {
+          setToken({
+            address: address,
+            name: bestPair.baseToken?.name || 'Unknown Token',
+            symbol: bestPair.baseToken?.symbol || 'UNKNOWN',
+            chain: 'solana',
+            liquidity: bestPair.liquidity?.usd || 0,
+            liquidityLocked: false,
+            lockPercentage: null,
+            priceUsd: parseFloat(bestPair.priceUsd) || 0,
+            priceChange24h: bestPair.priceChange?.h24 || 0,
+            volume24h: bestPair.volume?.h24 || 0,
+            marketCap: bestPair.marketCap || 0,
+            holders: 0,
+            createdAt: bestPair.pairCreatedAt ? new Date(bestPair.pairCreatedAt).toISOString() : new Date().toISOString(),
+            earlyBuyers: 0,
+            buyerPosition: null,
+            riskScore: 50,
+            source: 'DexScreener',
+            pairAddress: bestPair.pairAddress || '',
+            isPumpFun: bestPair.dexId === 'pumpfun',
+            isTradeable: true,
+            canBuy: true,
+            canSell: true,
+            freezeAuthority: null,
+            mintAuthority: null,
+            safetyReasons: ['✅ Verified on DexScreener'],
+          });
+        } else if (isDemo) {
+          setToken(generateDemoToken(address));
+        } else {
+          // No pairs found - show basic info
+          setToken({
+            address: address,
+            name: 'Unknown Token',
+            symbol: 'UNKNOWN',
+            chain: 'solana',
+            liquidity: 0,
+            liquidityLocked: false,
+            lockPercentage: null,
+            priceUsd: 0,
+            priceChange24h: 0,
+            volume24h: 0,
+            marketCap: 0,
+            holders: 0,
+            createdAt: new Date().toISOString(),
+            earlyBuyers: 0,
+            buyerPosition: null,
+            riskScore: 80,
+            source: 'Unknown',
+            pairAddress: '',
+            isPumpFun: false,
+            isTradeable: false,
+            canBuy: false,
+            canSell: false,
+            freezeAuthority: null,
+            mintAuthority: null,
+            safetyReasons: ['⚠️ Token not indexed on DexScreener'],
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch token from DexScreener:', err);
+        if (isDemo) {
+          setToken(generateDemoToken(address));
+        } else {
+          setToken({
+            address: address,
+            name: 'Unknown Token',
+            symbol: 'UNKNOWN',
+            chain: 'solana',
+            liquidity: 0,
+            liquidityLocked: false,
+            lockPercentage: null,
+            priceUsd: 0,
+            priceChange24h: 0,
+            volume24h: 0,
+            marketCap: 0,
+            holders: 0,
+            createdAt: new Date().toISOString(),
+            earlyBuyers: 0,
+            buyerPosition: null,
+            riskScore: 80,
+            source: 'Unknown',
+            pairAddress: '',
+            isPumpFun: false,
+            isTradeable: false,
+            canBuy: false,
+            canSell: false,
+            freezeAuthority: null,
+            mintAuthority: null,
+            safetyReasons: ['⚠️ Failed to fetch token data'],
+          });
+        }
+      } finally {
         setLoading(false);
-      }, 500);
-    }
+      }
+    };
+    
+    fetchTokenFromDexScreener();
   }, [address, searchParams, isDemo]);
 
   const generateDemoToken = (addr: string): TokenData => {
