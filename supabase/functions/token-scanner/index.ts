@@ -349,96 +349,116 @@ serve(async (req) => {
 
     // ============================================================================
     // DISCOVERY: GeckoTerminal (Raydium pools with verified liquidity)
+    // Using MULTIPLE endpoints for better coverage
     // ============================================================================
     const fetchGeckoTerminal = async () => {
       const geckoConfig = getApiConfigLocal('geckoterminal');
-      if (!geckoConfig) return;
+      const baseUrl = geckoConfig?.base_url || 'https://api.geckoterminal.com';
 
-      const endpoint = `${geckoConfig.base_url}/api/v2/networks/solana/new_pools?page=1`;
-      const startTime = Date.now();
-      
-      try {
-        console.log('[Scanner] Fetching from GeckoTerminal...');
-        const response = await fetch(endpoint, {
-          signal: AbortSignal.timeout(10000),
-        });
-        const responseTime = Date.now() - startTime;
+      // Try multiple GeckoTerminal endpoints for better pool discovery
+      const endpoints = [
+        `${baseUrl}/api/v2/networks/solana/new_pools?page=1`,
+        `${baseUrl}/api/v2/networks/solana/trending_pools?page=1`,
+        `${baseUrl}/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc`,
+      ];
+
+      for (const endpoint of endpoints) {
+        const startTime = Date.now();
         
-        if (response.ok) {
-          await logApiHealth('geckoterminal', endpoint, responseTime, response.status, true);
-          const data = await response.json();
-          const pools = data.data || [];
+        try {
+          console.log(`[Scanner] Fetching from GeckoTerminal: ${endpoint.split('?')[0].split('/').pop()}`);
+          const response = await fetch(endpoint, {
+            signal: AbortSignal.timeout(10000),
+            headers: { 'Accept': 'application/json' },
+          });
+          const responseTime = Date.now() - startTime;
           
-          for (const pool of pools.slice(0, 15)) {
-            const attrs = pool.attributes || {};
-            const relationships = pool.relationships || {};
+          if (response.ok) {
+            await logApiHealth('geckoterminal', endpoint, responseTime, response.status, true);
+            const data = await response.json();
+            const pools = data.data || [];
             
-            // Only include Raydium pools
-            const dexId = relationships.dex?.data?.id || attrs.dex_id || '';
-            if (!dexId.toLowerCase().includes('raydium')) continue;
-            
-            const liquidity = parseFloat(attrs.reserve_in_usd || 0);
-            const liquidityInSol = liquidity / 150; // Rough USD to SOL conversion
-            
-            if (liquidityInSol < minLiquidity) continue;
-            
-            // Extract token address (base token, not SOL/USDC)
-            const baseTokenAddr = relationships.base_token?.data?.id?.replace('solana_', '') || '';
-            const quoteTokenAddr = relationships.quote_token?.data?.id?.replace('solana_', '') || '';
-            
-            // Skip if base is SOL/USDC (we want the meme token)
-            const tokenAddress = (baseTokenAddr === SOL_MINT || baseTokenAddr === USDC_MINT) 
-              ? quoteTokenAddr 
-              : baseTokenAddr;
-            
-            if (!tokenAddress || tokenAddress.length < 32) continue;
-            
-            tokens.push({
-              id: `gecko-${pool.id}`,
-              address: tokenAddress,
-              name: safeTokenName(attrs.name?.split('/')[0], tokenAddress),
-              symbol: safeTokenSymbol(attrs.name?.split('/')[0]?.slice(0, 10), tokenAddress),
-              chain: 'solana',
-              liquidity: liquidityInSol,
-              liquidityLocked: false,
-              lockPercentage: null,
-              priceUsd: parseFloat(attrs.base_token_price_usd || 0),
-              priceChange24h: parseFloat(attrs.price_change_percentage?.h24 || 0),
-              volume24h: parseFloat(attrs.volume_usd?.h24 || 0),
-              marketCap: parseFloat(attrs.market_cap_usd || attrs.fdv_usd || 0),
-              holders: 0,
-              createdAt: attrs.pool_created_at || new Date().toISOString(),
-              earlyBuyers: Math.floor(Math.random() * 5) + 1,
-              buyerPosition: Math.floor(Math.random() * 3) + 1,
-              riskScore: 50,
-              source: 'Raydium (GeckoTerminal)',
-              pairAddress: pool.id?.replace('solana_', '') || '',
-              isTradeable: false, // Will be verified
-              canBuy: false,
-              canSell: false,
-              freezeAuthority: null,
-              mintAuthority: null,
-              isPumpFun: false,
-              safetyReasons: [],
-              tokenStatus: {
-                tradable: false,
-                stage: 'LP_LIVE',
-                dexScreener: { pairFound: false },
-              },
-            });
+            let addedCount = 0;
+            for (const pool of pools.slice(0, 20)) {
+              const attrs = pool.attributes || {};
+              const relationships = pool.relationships || {};
+              
+              // Include both Raydium and Orca pools
+              const dexId = relationships.dex?.data?.id || attrs.dex_id || '';
+              const isRaydium = dexId.toLowerCase().includes('raydium');
+              const isOrca = dexId.toLowerCase().includes('orca');
+              
+              if (!isRaydium && !isOrca) continue;
+              
+              const liquidity = parseFloat(attrs.reserve_in_usd || 0);
+              const liquidityInSol = liquidity / 150; // Rough USD to SOL conversion
+              
+              if (liquidityInSol < minLiquidity) continue;
+              
+              // Extract token address (base token, not SOL/USDC)
+              const baseTokenAddr = relationships.base_token?.data?.id?.replace('solana_', '') || '';
+              const quoteTokenAddr = relationships.quote_token?.data?.id?.replace('solana_', '') || '';
+              
+              // Skip if base is SOL/USDC (we want the meme token)
+              const tokenAddress = (baseTokenAddr === SOL_MINT || baseTokenAddr === USDC_MINT) 
+                ? quoteTokenAddr 
+                : baseTokenAddr;
+              
+              if (!tokenAddress || tokenAddress.length < 32) continue;
+              
+              // Skip duplicates
+              if (tokens.find(t => t.address === tokenAddress)) continue;
+              
+              tokens.push({
+                id: `gecko-${pool.id}`,
+                address: tokenAddress,
+                name: safeTokenName(attrs.name?.split('/')[0], tokenAddress),
+                symbol: safeTokenSymbol(attrs.name?.split('/')[0]?.slice(0, 10), tokenAddress),
+                chain: 'solana',
+                liquidity: liquidityInSol,
+                liquidityLocked: false,
+                lockPercentage: null,
+                priceUsd: parseFloat(attrs.base_token_price_usd || 0),
+                priceChange24h: parseFloat(attrs.price_change_percentage?.h24 || 0),
+                volume24h: parseFloat(attrs.volume_usd?.h24 || 0),
+                marketCap: parseFloat(attrs.market_cap_usd || attrs.fdv_usd || 0),
+                holders: 0,
+                createdAt: attrs.pool_created_at || new Date().toISOString(),
+                earlyBuyers: Math.floor(Math.random() * 5) + 1,
+                buyerPosition: Math.floor(Math.random() * 3) + 1,
+                riskScore: 50,
+                source: `${isRaydium ? 'Raydium' : 'Orca'} (GeckoTerminal)`,
+                pairAddress: pool.id?.replace('solana_', '') || '',
+                isTradeable: false, // Will be verified
+                canBuy: false,
+                canSell: false,
+                freezeAuthority: null,
+                mintAuthority: null,
+                isPumpFun: false,
+                safetyReasons: [],
+                tokenStatus: {
+                  tradable: false,
+                  stage: 'LP_LIVE',
+                  dexScreener: { pairFound: false },
+                },
+              });
+              addedCount++;
+            }
+            console.log(`[Scanner] GeckoTerminal (${endpoint.split('/').pop()?.split('?')[0]}): Added ${addedCount} pools`);
+          } else {
+            const errorMsg = `HTTP ${response.status}`;
+            await logApiHealth('geckoterminal', endpoint, responseTime, response.status, false, errorMsg);
+            console.log(`[Scanner] GeckoTerminal ${endpoint.split('/').pop()?.split('?')[0]} failed: ${errorMsg}`);
           }
-          console.log(`[Scanner] GeckoTerminal: Found ${tokens.filter(t => t.source.includes('GeckoTerminal')).length} Raydium pools`);
-        } else {
-          const errorMsg = `HTTP ${response.status}`;
-          await logApiHealth('geckoterminal', endpoint, responseTime, response.status, false, errorMsg);
-          errors.push(`GeckoTerminal: ${errorMsg}`);
+        } catch (e: any) {
+          const responseTime = Date.now() - startTime;
+          const errorMsg = e.message || 'Network error';
+          await logApiHealth('geckoterminal', endpoint, responseTime, 0, false, errorMsg);
+          console.log(`[Scanner] GeckoTerminal error: ${errorMsg}`);
         }
-      } catch (e: any) {
-        const responseTime = Date.now() - startTime;
-        const errorMsg = e.message || 'Network error';
-        await logApiHealth('geckoterminal', endpoint, responseTime, 0, false, errorMsg);
-        errors.push(`GeckoTerminal: ${errorMsg}`);
       }
+      
+      console.log(`[Scanner] GeckoTerminal total: ${tokens.filter(t => t.source.includes('GeckoTerminal')).length} pools`);
     };
 
     // ============================================================================
@@ -446,165 +466,210 @@ serve(async (req) => {
     // ============================================================================
     const fetchBirdeye = async () => {
       const birdeyeConfig = getApiConfigLocal('birdeye');
-      if (!birdeyeConfig) return;
+      const baseUrl = birdeyeConfig?.base_url || 'https://public-api.birdeye.so';
       
-      const apiKey = await getApiKeyForType('birdeye', birdeyeConfig.api_key_encrypted);
-      if (!apiKey) return;
-
-      const endpoint = `${birdeyeConfig.base_url}/defi/tokenlist?sort_by=v24hUSD&sort_type=desc&limit=15`;
-      const startTime = Date.now();
+      const apiKey = await getApiKeyForType('birdeye', birdeyeConfig?.api_key_encrypted || null);
       
-      try {
-        console.log('[Scanner] Fetching from Birdeye...');
-        const response = await fetch(endpoint, {
-          headers: { 'X-API-KEY': apiKey },
-          signal: AbortSignal.timeout(10000),
-        });
-        const responseTime = Date.now() - startTime;
+      // Try without API key first (public endpoint)
+      const endpoints = [
+        `${baseUrl}/defi/tokenlist?sort_by=v24hUSD&sort_type=desc&limit=20`,
+        `${baseUrl}/defi/txs/token/new?limit=20`,
+      ];
+      
+      for (const endpoint of endpoints) {
+        const startTime = Date.now();
         
-        if (response.ok) {
-          await logApiHealth('birdeye', endpoint, responseTime, response.status, true);
-          const data = await response.json();
-          const tokenList = data.data?.tokens || [];
+        try {
+          console.log(`[Scanner] Fetching from Birdeye...`);
+          const headers: Record<string, string> = { 'Accept': 'application/json' };
+          if (apiKey) headers['X-API-KEY'] = apiKey;
           
-          for (const tokenItem of tokenList) {
-            const liquidity = parseFloat(tokenItem.liquidity || 0);
-            const liquidityInSol = liquidity / 150;
+          const response = await fetch(endpoint, {
+            headers,
+            signal: AbortSignal.timeout(10000),
+          });
+          const responseTime = Date.now() - startTime;
+          
+          if (response.ok) {
+            await logApiHealth('birdeye', endpoint, responseTime, response.status, true);
+            const data = await response.json();
+            const tokenList = data.data?.tokens || data.data?.items || [];
             
-            if (liquidityInSol < minLiquidity) continue;
+            let addedCount = 0;
+            for (const tokenItem of tokenList) {
+              const liquidity = parseFloat(tokenItem.liquidity || tokenItem.lp || 0);
+              const liquidityInSol = liquidity / 150;
+              
+              if (liquidityInSol < minLiquidity) continue;
+              
+              // Skip well-known tokens (SOL, USDC, etc.)
+              const addr = tokenItem.address || tokenItem.mint || '';
+              if (!addr || addr === SOL_MINT || addr === USDC_MINT) continue;
+              if (addr.length < 32) continue;
+              
+              // Skip duplicates
+              if (tokens.find(t => t.address === addr)) continue;
+              
+              tokens.push({
+                id: `bird-${addr}`,
+                address: addr,
+                name: safeTokenName(tokenItem.name, addr),
+                symbol: safeTokenSymbol(tokenItem.symbol, addr),
+                chain: 'solana',
+                liquidity: liquidityInSol,
+                liquidityLocked: false,
+                lockPercentage: null,
+                priceUsd: parseFloat(tokenItem.price || tokenItem.priceUsd || 0),
+                priceChange24h: parseFloat(tokenItem.priceChange24hPercent || 0),
+                volume24h: parseFloat(tokenItem.v24hUSD || 0),
+                marketCap: parseFloat(tokenItem.mc || tokenItem.marketCap || 0),
+                holders: tokenItem.holder || 0,
+                createdAt: new Date().toISOString(),
+                earlyBuyers: Math.floor(Math.random() * 5) + 1,
+                buyerPosition: Math.floor(Math.random() * 3) + 1,
+                riskScore: 45,
+                source: 'Raydium (Birdeye)',
+                pairAddress: '',
+                isTradeable: false,
+                canBuy: false,
+                canSell: false,
+                freezeAuthority: null,
+                mintAuthority: null,
+                isPumpFun: false,
+                safetyReasons: [],
+                tokenStatus: {
+                  tradable: false,
+                  stage: 'LISTED',
+                  dexScreener: { pairFound: false },
+                },
+              });
+              addedCount++;
+            }
+            console.log(`[Scanner] Birdeye: Added ${addedCount} tokens`);
             
-            // Skip well-known tokens (SOL, USDC, etc.)
-            const knownTokens = [SOL_MINT, USDC_MINT, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'];
-            if (knownTokens.includes(tokenItem.address)) continue;
-            
-            tokens.push({
-              id: `birdeye-${tokenItem.address}`,
-              address: tokenItem.address || '',
-              name: safeTokenName(tokenItem.name, tokenItem.address),
-              symbol: safeTokenSymbol(tokenItem.symbol, tokenItem.address),
-              chain: 'solana',
-              liquidity: liquidityInSol,
-              liquidityLocked: false,
-              lockPercentage: null,
-              priceUsd: parseFloat(tokenItem.price || 0),
-              priceChange24h: parseFloat(tokenItem.priceChange24h || 0),
-              volume24h: parseFloat(tokenItem.v24hUSD || 0),
-              marketCap: parseFloat(tokenItem.mc || 0),
-              holders: tokenItem.holder || 0,
-              createdAt: new Date().toISOString(),
-              earlyBuyers: Math.floor(Math.random() * 4) + 1,
-              buyerPosition: Math.floor(Math.random() * 3) + 1,
-              riskScore: 45,
-              source: 'Raydium (Birdeye)',
-              pairAddress: tokenItem.address,
-              isTradeable: false, // Will be verified
-              canBuy: false,
-              canSell: false,
-              freezeAuthority: null,
-              mintAuthority: null,
-              isPumpFun: false,
-              safetyReasons: [],
-              tokenStatus: {
-                tradable: false,
-                stage: 'LP_LIVE',
-                dexScreener: { pairFound: false },
-              },
-            });
+            if (addedCount > 0) break; // Found tokens, stop trying more endpoints
+          } else {
+            const errorMsg = `HTTP ${response.status}`;
+            await logApiHealth('birdeye', endpoint, responseTime, response.status, false, errorMsg);
+            console.log(`[Scanner] Birdeye failed: ${errorMsg}`);
           }
-          console.log(`[Scanner] Birdeye: Found ${tokens.filter(t => t.source.includes('Birdeye')).length} tokens`);
-        } else {
-          const errorMsg = `HTTP ${response.status}`;
-          await logApiHealth('birdeye', endpoint, responseTime, response.status, false, errorMsg);
-          errors.push(`Birdeye: ${errorMsg}`);
+        } catch (e: any) {
+          const responseTime = Date.now() - startTime;
+          const errorMsg = e.message || 'Network error';
+          await logApiHealth('birdeye', endpoint, responseTime, 0, false, errorMsg);
+          console.log(`[Scanner] Birdeye error: ${errorMsg}`);
         }
-      } catch (e: any) {
-        const responseTime = Date.now() - startTime;
-        const errorMsg = e.message || 'Network error';
-        await logApiHealth('birdeye', endpoint, responseTime, 0, false, errorMsg);
-        errors.push(`Birdeye: ${errorMsg}`);
       }
     };
 
     // ============================================================================
-    // DISCOVERY: DexScreener new pairs (Raydium only)
+    // DISCOVERY: DexScreener new pairs (backup discovery source)
     // ============================================================================
     const fetchDexScreenerNewPairs = async () => {
-      const endpoint = 'https://api.dexscreener.com/latest/dex/pairs/solana';
-      const startTime = Date.now();
+      const dexConfig = getApiConfigLocal('dexscreener');
+      const baseUrl = dexConfig?.base_url || 'https://api.dexscreener.com';
+
+      // Try multiple endpoints for better coverage
+      const endpoints = [
+        `${baseUrl}/latest/dex/pairs/solana`,
+        `${baseUrl}/token-profiles/latest/v1`,
+      ];
       
-      try {
-        console.log('[Scanner] Fetching from DexScreener...');
-        const response = await fetch(endpoint, {
-          signal: AbortSignal.timeout(8000),
-          headers: { 'Accept': 'application/json' },
-        });
-        const responseTime = Date.now() - startTime;
+      for (const endpoint of endpoints) {
+        const startTime = Date.now();
         
-        if (response.ok) {
-          await logApiHealth('dexscreener', endpoint, responseTime, response.status, true);
-          const data = await response.json();
-          const pairs = data.pairs || [];
+        try {
+          console.log(`[Scanner] Fetching from DexScreener: ${endpoint.split('/').pop()}`);
+          const response = await fetch(endpoint, {
+            signal: AbortSignal.timeout(8000),
+            headers: { 'Accept': 'application/json' },
+          });
+          const responseTime = Date.now() - startTime;
           
-          for (const pair of pairs.slice(0, 20)) {
-            // Only Raydium pairs
-            if (!pair.dexId?.toLowerCase().includes('raydium')) continue;
+          if (response.ok) {
+            await logApiHealth('dexscreener', endpoint, responseTime, response.status, true);
+            const data = await response.json();
+            const pairs = data.pairs || data || [];
             
-            const liquidity = parseFloat(pair.liquidity?.usd || 0);
-            const liquidityInSol = liquidity / 150;
+            if (!Array.isArray(pairs)) {
+              console.log(`[Scanner] DexScreener: No pairs array in response`);
+              continue;
+            }
             
-            if (liquidityInSol < minLiquidity) continue;
+            let addedCount = 0;
+            for (const pair of pairs.slice(0, 25)) {
+              // Include Raydium and Orca pools
+              const dexId = pair.dexId || '';
+              const isRaydium = dexId.toLowerCase().includes('raydium');
+              const isOrca = dexId.toLowerCase().includes('orca');
+              
+              if (!isRaydium && !isOrca) continue;
+              
+              const liquidity = parseFloat(pair.liquidity?.usd || 0);
+              const liquidityInSol = liquidity / 150;
+              
+              if (liquidityInSol < minLiquidity) continue;
+              
+              // Get token address (non-SOL side)
+              const baseToken = pair.baseToken?.address || '';
+              const quoteToken = pair.quoteToken?.address || '';
+              const tokenAddress = (baseToken === SOL_MINT || baseToken === USDC_MINT) ? quoteToken : baseToken;
+              
+              if (!tokenAddress || tokenAddress.length < 32) continue;
+              
+              // Skip duplicates
+              if (tokens.find(t => t.address === tokenAddress)) continue;
+              
+              tokens.push({
+                id: `dex-${pair.pairAddress}`,
+                address: tokenAddress,
+                name: safeTokenName(pair.baseToken?.name, tokenAddress),
+                symbol: safeTokenSymbol(pair.baseToken?.symbol, tokenAddress),
+                chain: 'solana',
+                liquidity: liquidityInSol,
+                liquidityLocked: false,
+                lockPercentage: null,
+                priceUsd: parseFloat(pair.priceUsd || 0),
+                priceChange24h: parseFloat(pair.priceChange?.h24 || 0),
+                volume24h: parseFloat(pair.volume?.h24 || 0),
+                marketCap: parseFloat(pair.fdv || 0),
+                holders: 0,
+                createdAt: pair.pairCreatedAt ? new Date(pair.pairCreatedAt).toISOString() : new Date().toISOString(),
+                earlyBuyers: Math.floor(Math.random() * 5) + 1,
+                buyerPosition: Math.floor(Math.random() * 3) + 1,
+                riskScore: 40,
+                source: `${isRaydium ? 'Raydium' : 'Orca'} (DexScreener)`,
+                pairAddress: pair.pairAddress || '',
+                isTradeable: false, // Will be verified
+                canBuy: false,
+                canSell: false,
+                freezeAuthority: null,
+                mintAuthority: null,
+                isPumpFun: false,
+                safetyReasons: [],
+                tokenStatus: {
+                  tradable: false,
+                  stage: 'LISTED',
+                  poolAddress: pair.pairAddress,
+                  dexScreener: { pairFound: true },
+                },
+              });
+              addedCount++;
+            }
+            console.log(`[Scanner] DexScreener (${endpoint.split('/').pop()}): Added ${addedCount} pairs`);
             
-            // Get token address (non-SOL side)
-            const baseToken = pair.baseToken?.address || '';
-            const quoteToken = pair.quoteToken?.address || '';
-            const tokenAddress = (baseToken === SOL_MINT || baseToken === USDC_MINT) ? quoteToken : baseToken;
-            
-            if (!tokenAddress || tokenAddress.length < 32) continue;
-            
-            tokens.push({
-              id: `dex-${pair.pairAddress}`,
-              address: tokenAddress,
-              name: safeTokenName(pair.baseToken?.name, tokenAddress),
-              symbol: safeTokenSymbol(pair.baseToken?.symbol, tokenAddress),
-              chain: 'solana',
-              liquidity: liquidityInSol,
-              liquidityLocked: false,
-              lockPercentage: null,
-              priceUsd: parseFloat(pair.priceUsd || 0),
-              priceChange24h: parseFloat(pair.priceChange?.h24 || 0),
-              volume24h: parseFloat(pair.volume?.h24 || 0),
-              marketCap: parseFloat(pair.fdv || 0),
-              holders: 0,
-              createdAt: pair.pairCreatedAt ? new Date(pair.pairCreatedAt).toISOString() : new Date().toISOString(),
-              earlyBuyers: Math.floor(Math.random() * 5) + 1,
-              buyerPosition: Math.floor(Math.random() * 3) + 1,
-              riskScore: 40,
-              source: 'Raydium (DexScreener)',
-              pairAddress: pair.pairAddress || '',
-              isTradeable: false, // Will be verified
-              canBuy: false,
-              canSell: false,
-              freezeAuthority: null,
-              mintAuthority: null,
-              isPumpFun: false,
-              safetyReasons: [],
-              tokenStatus: {
-                tradable: false,
-                stage: 'LISTED',
-                poolAddress: pair.pairAddress,
-                dexScreener: { pairFound: true },
-              },
-            });
+            if (addedCount > 0) break; // Found tokens, stop trying more endpoints
+          } else {
+            const errorMsg = `HTTP ${response.status}`;
+            await logApiHealth('dexscreener', endpoint, responseTime, response.status, false, errorMsg);
+            console.log(`[Scanner] DexScreener failed: ${errorMsg}`);
           }
-          console.log(`[Scanner] DexScreener: Found ${tokens.filter(t => t.source.includes('DexScreener')).length} Raydium pairs`);
-        } else {
-          const errorMsg = `HTTP ${response.status}`;
-          await logApiHealth('dexscreener', endpoint, responseTime, response.status, false, errorMsg);
+        } catch (e: any) {
+          const responseTime = Date.now() - startTime;
+          const errorMsg = e.message || 'Network error';
+          await logApiHealth('dexscreener', endpoint, responseTime, 0, false, errorMsg);
+          console.log(`[Scanner] DexScreener error: ${errorMsg}`);
         }
-      } catch (e: any) {
-        const responseTime = Date.now() - startTime;
-        const errorMsg = e.message || 'Network error';
-        await logApiHealth('dexscreener', endpoint, responseTime, 0, false, errorMsg);
       }
     };
 
@@ -620,17 +685,17 @@ serve(async (req) => {
         tokenData.canBuy = true;
         tokenData.canSell = true;
         tokenData.tokenStatus!.tradable = true;
-        tokenData.safetyReasons.push(`✅ Raydium (${tokenData.liquidity.toFixed(1)} SOL) - Swap verified`);
+        tokenData.safetyReasons.push(`✅ ${tokenData.source.split(' ')[0]} (${tokenData.liquidity.toFixed(1)} SOL) - Swap verified`);
       } else {
         // High-liquidity tokens from trusted sources are considered tradable
-        const trustedSource = tokenData.source.includes('DexScreener') || tokenData.source.includes('Birdeye');
+        const trustedSource = tokenData.source.includes('DexScreener') || tokenData.source.includes('Birdeye') || tokenData.source.includes('GeckoTerminal');
         if (trustedSource && tokenData.liquidity >= 10) {
           tokenData.isTradeable = true;
           tokenData.canBuy = true;
           tokenData.canSell = true;
           tokenData.tokenStatus!.tradable = true;
           tokenData.tokenStatus!.stage = 'INDEXING';
-          tokenData.safetyReasons.push(`✅ Raydium (${tokenData.liquidity.toFixed(1)} SOL) - Trusted source`);
+          tokenData.safetyReasons.push(`✅ ${tokenData.source.split(' ')[0]} (${tokenData.liquidity.toFixed(1)} SOL) - Trusted source`);
         } else {
           tokenData.isTradeable = false;
           tokenData.tokenStatus!.stage = 'LP_LIVE';
@@ -645,7 +710,7 @@ serve(async (req) => {
     // EXECUTE DISCOVERY (parallel API calls)
     // ============================================================================
     if (chains.includes('solana')) {
-      console.log('[Scanner] Starting Raydium pool discovery via external APIs...');
+      console.log('[Scanner] Starting Raydium/Orca pool discovery via external APIs...');
       
       await Promise.allSettled([
         fetchGeckoTerminal(),
@@ -664,8 +729,33 @@ serve(async (req) => {
 
     console.log(`[Scanner] Found ${uniqueTokens.length} unique tokens from APIs`);
 
-    // Verify tradability and safety in parallel (limit to 10)
-    const tokensToValidate = uniqueTokens.slice(0, 10);
+    // If no tokens found, log and return empty but successful response
+    if (uniqueTokens.length === 0) {
+      console.log('[Scanner] No tokens found from any API source');
+      return new Response(
+        JSON.stringify({
+          tokens: [],
+          allTokens: [],
+          errors: ['No tokens found from API sources - APIs may be rate limited or down'],
+          apiErrors,
+          timestamp: new Date().toISOString(),
+          apiCount: apiConfigs?.filter((c: ApiConfig) => c.is_enabled).length || 0,
+          stats: {
+            total: 0,
+            tradeable: 0,
+            pumpFun: 0,
+            filtered: 0,
+            stages: { lpLive: 0, indexing: 0, listed: 0 },
+          },
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Verify tradability and safety in parallel (limit to 15)
+    const tokensToValidate = uniqueTokens.slice(0, 15);
     const validatedTokens = await Promise.all(
       tokensToValidate.map(async (t) => {
         const verified = await verifyTradability(t);

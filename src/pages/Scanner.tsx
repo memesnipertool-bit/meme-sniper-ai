@@ -448,12 +448,18 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     if (isDemo) {
       batch.forEach(t => processedTokensRef.current.add(t.address));
       
-      const targetPositions = settings.target_buyer_positions || [2, 3];
+      // Use more lenient matching for demo mode
+      const targetPositions = settings.target_buyer_positions || [1, 2, 3, 4, 5];
+      const minLiq = settings.min_liquidity || 5;
+      const maxRisk = settings.max_risk_score || 70;
+      
       const approvedToken = tokenData.find(t => 
-        t.buyerPosition && 
-        targetPositions.includes(t.buyerPosition) && 
-        t.riskScore < 70 &&
-        t.liquidity >= (settings.min_liquidity || 300)
+        // Check buyer position OR allow if position is unknown (null)
+        (t.buyerPosition === null || (t.buyerPosition && targetPositions.includes(t.buyerPosition))) && 
+        t.riskScore < maxRisk &&
+        t.liquidity >= minLiq &&
+        t.isTradeable !== false && // Must be tradeable
+        t.canBuy !== false // Must be buyable
       );
       
       if (approvedToken && settings.trade_amount && demoBalance >= settings.trade_amount) {
