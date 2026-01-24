@@ -617,8 +617,16 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           tokenAddress: next.token.address,
         });
 
-        const slippagePct = next.tradeParams?.slippage ?? 15;
-        const priorityFee = settings.priority === 'turbo' ? 500000 : settings.priority === 'fast' ? 200000 : 100000;
+        // Use user settings for slippage and priority, with sensible defaults
+        const slippagePct = next.tradeParams?.slippage ?? settings.slippage_tolerance ?? 15;
+        
+        // Priority fee mapping - configurable based on user's priority setting
+        const priorityFeeMap: Record<string, number> = {
+          turbo: 500000,  // 0.0005 SOL
+          fast: 200000,   // 0.0002 SOL
+          normal: 100000, // 0.0001 SOL
+        };
+        const priorityFee = priorityFeeMap[settings.priority] || priorityFeeMap.normal;
 
         const result = await snipeToken(
           next.token.address,
@@ -629,7 +637,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             slippage: slippagePct / 100,
             priorityFee,
             minLiquidity: settings.min_liquidity,
-            maxRiskScore: 70,
+            // Use user's max risk score from settings, default to 70
+            maxRiskScore: settings.max_risk_score ?? 70,
             // Skip risk check for pre-verified tokens from scanner
             skipRiskCheck: true,
             // Pass user's TP/SL settings for position persistence

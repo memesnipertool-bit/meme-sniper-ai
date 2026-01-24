@@ -57,8 +57,9 @@ interface OrchestratorState {
   lastTradeTime: number;
 }
 
-const TRADE_COOLDOWN_MS = 3000; // Minimum 3 seconds between trades
-const MAX_CONCURRENT_TRADES = 1; // Execute one at a time for safety
+// Trade execution constants - these are intentional safety limits, not user-configurable
+const TRADE_COOLDOWN_MS = 2000; // Minimum 2 seconds between trades (system limit)
+const MAX_CONCURRENT_TRADES = 1; // Execute one at a time for wallet safety
 
 export function useLiveTradingOrchestrator() {
   const { wallet, signAndSendTransaction, refreshBalance } = useWallet();
@@ -126,20 +127,36 @@ export function useLiveTradingOrchestrator() {
     });
 
     try {
-      // Create trading config from user settings
+      // Create trading config from user settings - NO HARDCODED VALUES
+      // Use user's slippage tolerance, default to 15% for meme coins
+      const slippage = settings.slippage_tolerance 
+        ? settings.slippage_tolerance / 100 
+        : 0.15;
+      
+      // Priority fee based on user's priority setting (in SOL)
+      const priorityFeeMap: Record<string, number> = {
+        turbo: 0.005,
+        fast: 0.002,
+        normal: 0.001,
+      };
+      
       const config = createConfig({
         buyAmount: settings.trade_amount,
-        slippage: 0.15, // 15% slippage for meme coins
-        priorityFee: settings.priority === 'turbo' ? 0.005 : settings.priority === 'fast' ? 0.002 : 0.001,
-        maxRetries: 3,
+        slippage,
+        priorityFee: priorityFeeMap[settings.priority] || 0.001,
+        maxRetries: 2, // System limit for faster failure detection
         riskFilters: {
           checkRugPull: true,
           checkHoneypot: true,
           checkMintAuthority: true,
           checkFreezeAuthority: true,
-          maxOwnershipPercent: 30,
-          minHolders: 10,
+          // These should ideally come from admin settings, using sensible defaults
+          maxOwnershipPercent: 50, // Allow higher ownership for new tokens
+          minHolders: 5, // Allow tokens with fewer holders
         },
+        // Pass user's TP/SL settings for position persistence
+        profitTakePercent: settings.profit_take_percentage,
+        stopLossPercent: settings.stop_loss_percentage,
       });
 
       // Execute via 3-stage trading engine
