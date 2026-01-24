@@ -62,7 +62,16 @@ const avatarColors = [
 const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: ScannedToken; colorIndex: number; isNew?: boolean; onViewDetails: (pool: ScannedToken) => void }) => {
   const [expanded, setExpanded] = useState(false);
   const isPositive = pool.priceChange24h >= 0;
-  const initials = pool.symbol.slice(0, 2).toUpperCase();
+  
+  // Use short address as fallback for placeholder names/symbols
+  const displaySymbol = isPlaceholder(pool.symbol) 
+    ? shortAddress(pool.address) 
+    : pool.symbol;
+  const displayName = isPlaceholder(pool.name) 
+    ? `Token ${shortAddress(pool.address)}` 
+    : pool.name;
+    
+  const initials = displaySymbol.slice(0, 2).toUpperCase();
   const avatarClass = avatarColors[colorIndex % avatarColors.length];
   const honeypotSafe = pool.riskScore < 50;
   const liquidityLocked = pool.liquidityLocked;
@@ -98,8 +107,8 @@ const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: Scanne
         {/* Token Info - More visible */}
         <div className="min-w-0 space-y-0.5">
           <div className="flex items-center gap-1.5 md:gap-2">
-            <span className="font-semibold text-foreground text-xs md:text-sm truncate">{pool.name}</span>
-            <span className="text-muted-foreground text-[10px] md:text-xs font-medium hidden sm:inline">{pool.symbol}</span>
+            <span className="font-semibold text-foreground text-xs md:text-sm truncate">{displayName}</span>
+            <span className="text-muted-foreground text-[10px] md:text-xs font-medium hidden sm:inline">{displaySymbol}</span>
             {isNew && (
               <Badge className="bg-primary/20 text-primary text-[8px] md:text-[9px] px-1 py-0 h-3.5 md:h-4">NEW</Badge>
             )}
@@ -313,6 +322,18 @@ const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: Scanne
 
 PoolRow.displayName = 'PoolRow';
 
+// Helper to generate short address format for fallback
+const shortAddress = (address: string) => 
+  address && address.length > 10 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address || 'TOKEN';
+
+// Check if text is a placeholder
+const isPlaceholder = (val: string | null | undefined) => {
+  if (!val) return true;
+  const v = val.trim();
+  if (!v) return true;
+  return /^(unknown|unknown token|token|\?\?\?|n\/a)$/i.test(v);
+};
+
 // Memoized Trade Row with improved visibility
 const TradeRow = memo(({ trade, colorIndex, onExit }: { 
   trade: ActiveTradePosition; 
@@ -322,7 +343,16 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   const pnlPercent = trade.profit_loss_percent || 0;
   const pnlValue = trade.profit_loss_value || 0;
   const isPositive = pnlPercent >= 0;
-  const initials = trade.token_symbol.slice(0, 2).toUpperCase();
+  
+  // Use short address as fallback for placeholder names/symbols
+  const displaySymbol = isPlaceholder(trade.token_symbol) 
+    ? shortAddress(trade.token_address) 
+    : trade.token_symbol;
+  const displayName = isPlaceholder(trade.token_name) 
+    ? `Token ${shortAddress(trade.token_address)}` 
+    : trade.token_name;
+    
+  const initials = displaySymbol.slice(0, 2).toUpperCase();
   const avatarClass = avatarColors[colorIndex % avatarColors.length];
 
   const handleExit = useCallback(() => {
@@ -342,8 +372,8 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
       {/* Token Info */}
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-foreground text-sm truncate">{trade.token_name}</span>
-          <span className="text-muted-foreground text-xs">{trade.token_symbol}</span>
+          <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
+          <span className="text-muted-foreground text-xs">{displaySymbol}</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="tabular-nums">Entry: {formatPrice(trade.entry_price)}</span>
