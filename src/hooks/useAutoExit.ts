@@ -195,16 +195,20 @@ export function useAutoExit() {
           });
       }
 
-      // Success notification & detailed log
+      // Success notification & detailed log with position data
       const exitLabel = result.action === 'take_profit' ? '💰 TAKE PROFIT' : '🛑 STOP LOSS';
       const pnlText = result.profitLossPercent >= 0 ? `+${result.profitLossPercent.toFixed(2)}%` : `${result.profitLossPercent.toFixed(2)}%`;
+      const entryPrice = position.entry_price_usd || position.entry_price || 0;
+      const exitValue = result.currentPrice * position.amount;
+      const entryValue = position.entry_value || (entryPrice * position.amount);
+      const pnlValue = entryValue * (result.profitLossPercent / 100);
       
       addBotLog({
         level: result.action === 'take_profit' ? 'success' : 'warning',
         category: 'exit',
         message: `✅ SELL FILLED: ${result.symbol}`,
         tokenSymbol: result.symbol,
-        details: `Exit: $${result.currentPrice.toFixed(8)} | P&L: ${pnlText} | Reason: ${result.action.replace('_', ' ')} | TX: ${signResult.signature.slice(0, 12)}...`,
+        details: `📊 Entry: $${entryPrice.toFixed(8)} → Exit: $${result.currentPrice.toFixed(8)}\nP&L: ${pnlText} ($${pnlValue >= 0 ? '+' : ''}${pnlValue.toFixed(4)}) | Reason: ${result.action.replace('_', ' ')}\nTokens Sold: ${position.amount.toLocaleString()} | Exit Value: $${exitValue.toFixed(4)}\n🔗 TX: ${signResult.signature}`,
       });
 
       toast({
@@ -224,7 +228,7 @@ export function useAutoExit() {
         category: 'exit',
         message: `❌ SELL FAILED: ${result.symbol}`,
         tokenSymbol: result.symbol,
-        details: `Reason: ${error.message || 'Unknown error'} | Price at failure: $${result.currentPrice.toFixed(8)}`,
+        details: `Reason: ${error.message || 'Unknown error'}\nPrice at failure: $${result.currentPrice.toFixed(8)} | P&L: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}%\nAttempted: ${result.action.replace('_', ' ')} exit`,
       });
 
       toast({

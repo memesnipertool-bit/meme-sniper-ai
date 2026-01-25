@@ -117,13 +117,18 @@ export function useLiveTradingOrchestrator() {
       return { success: false, error: 'No wallet address' };
     }
 
+    // Prepare trade context for logging
+    const buyerPosText = token.buyerPosition ? `#${token.buyerPosition}` : 'N/A';
+    const safetyScoreText = token.riskScore != null ? `${100 - token.riskScore}/100` : 'N/A';
+    const liquidityText = token.liquidity ? `$${token.liquidity.toLocaleString()}` : 'N/A';
+
     addBotLog({
       level: 'info',
       category: 'trade',
       message: `🚀 Executing BUY: ${token.symbol}`,
       tokenSymbol: token.symbol,
       tokenAddress: token.address,
-      details: `Amount: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority} | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%`,
+      details: `💧 Liquidity: ${liquidityText} | 👤 Buyer Pos: ${buyerPosText} | 🛡️ Safety: ${safetyScoreText}\nAmount: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority} | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%`,
     });
 
     try {
@@ -199,15 +204,20 @@ export function useLiveTradingOrchestrator() {
             settings.stop_loss_percentage
           );
 
-          // Log comprehensive trade details
+          // Log comprehensive trade details with liquidity, safety, position info
           const entryValueUsd = position.entryPrice * position.tokenAmount;
+          const buyerPosTextSuccess = token.buyerPosition ? `#${token.buyerPosition}` : 'N/A';
+          const safetyScoreTextSuccess = token.riskScore != null ? `${100 - token.riskScore}/100` : 'N/A';
+          const liquidityTextSuccess = token.liquidity ? `$${token.liquidity.toLocaleString()}` : 'N/A';
+          const txHashFull = position.entryTxHash || '';
+          
           addBotLog({
             level: 'success',
             category: 'trade',
             message: `✅ BUY FILLED: ${finalSymbol}`,
             tokenSymbol: finalSymbol,
             tokenAddress: token.address,
-            details: `Entry: $${position.entryPrice.toFixed(8)} | Tokens: ${position.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} | Value: $${entryValueUsd.toFixed(4)} | SOL: ${position.solSpent.toFixed(4)} | TX: ${position.entryTxHash?.slice(0, 12)}...`,
+            details: `💧 Liquidity: ${liquidityTextSuccess} | 👤 Buyer Pos: ${buyerPosTextSuccess} | 🛡️ Safety: ${safetyScoreTextSuccess}\nEntry: $${position.entryPrice.toFixed(8)} | Tokens: ${position.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} | Value: $${entryValueUsd.toFixed(4)} | SOL: ${position.solSpent.toFixed(4)}\n🔗 TX: ${txHashFull}`,
           });
 
           return {
@@ -238,13 +248,17 @@ export function useLiveTradingOrchestrator() {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const buyerPosFail = token.buyerPosition ? `#${token.buyerPosition}` : 'N/A';
+      const safetyFail = token.riskScore != null ? `${100 - token.riskScore}/100` : 'N/A';
+      const liqFail = token.liquidity ? `$${token.liquidity.toLocaleString()}` : 'N/A';
+      
       addBotLog({
         level: 'error',
         category: 'trade',
         message: `❌ BUY FAILED: ${token.symbol}`,
         tokenSymbol: token.symbol,
         tokenAddress: token.address,
-        details: `Reason: ${errorMessage} | Attempted: ${settings.trade_amount} SOL`,
+        details: `💧 Liquidity: ${liqFail} | 👤 Buyer Pos: ${buyerPosFail} | 🛡️ Safety: ${safetyFail}\nReason: ${errorMessage} | Attempted: ${settings.trade_amount} SOL\n📍 Token: ${token.address}`,
       });
 
       return { success: false, error: errorMessage, source: 'trading-engine' };
