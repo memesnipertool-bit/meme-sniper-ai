@@ -24,6 +24,7 @@ interface Position {
   token_name: string;
   chain: string;
   entry_price: number;
+  entry_price_usd: number | null; // USD entry price for accurate P&L
   current_price: number;
   amount: number;
   entry_value: number;
@@ -325,11 +326,16 @@ async function executeSellViaApi(
 }
 
 // Check if position should exit
+// CRITICAL: Use entry_price_usd for USD-based price comparisons
 function checkExitConditions(
   position: Position,
   currentPrice: number
 ): { shouldExit: boolean; reason: 'take_profit' | 'stop_loss' | null; profitLossPercent: number } {
-  const profitLossPercent = ((currentPrice - position.entry_price) / position.entry_price) * 100;
+  // Use USD entry price if available for accurate P&L
+  // This ensures we compare USD to USD (currentPrice from DexScreener is in USD)
+  const entryPriceForCalc = position.entry_price_usd ?? position.entry_price;
+  
+  const profitLossPercent = ((currentPrice - entryPriceForCalc) / entryPriceForCalc) * 100;
   
   // Check take profit
   if (profitLossPercent >= position.profit_take_percent) {
@@ -492,9 +498,11 @@ serve(async (req) => {
       // Check exit conditions
       const { shouldExit, reason, profitLossPercent } = checkExitConditions(position, currentPrice);
       
-      // Calculate P&L
+      // Calculate P&L using entry_price_usd for accurate USD-based calculations
+      const entryPriceForCalc = position.entry_price_usd ?? position.entry_price;
       const currentValue = position.amount * currentPrice;
-      const profitLossValue = currentValue - position.entry_value;
+      const entryValueForCalc = position.amount * entryPriceForCalc;
+      const profitLossValue = currentValue - entryValueForCalc;
 
       // Update position with current price data
       positionUpdates.push({

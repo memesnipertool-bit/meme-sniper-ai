@@ -224,6 +224,7 @@ export type Database = {
           current_price: number | null
           current_value: number | null
           entry_price: number
+          entry_price_usd: number | null
           entry_value: number | null
           exit_price: number | null
           exit_reason: string | null
@@ -249,6 +250,7 @@ export type Database = {
           current_price?: number | null
           current_value?: number | null
           entry_price: number
+          entry_price_usd?: number | null
           entry_value?: number | null
           exit_price?: number | null
           exit_reason?: string | null
@@ -274,6 +276,7 @@ export type Database = {
           current_price?: number | null
           current_value?: number | null
           entry_price?: number
+          entry_price_usd?: number | null
           entry_value?: number | null
           exit_price?: number | null
           exit_reason?: string | null
