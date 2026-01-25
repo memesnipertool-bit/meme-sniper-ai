@@ -356,6 +356,7 @@ export function usePositions() {
 
   // Fetch real-time prices for open positions and update UI state
   // CRITICAL: Use entry_price_usd for P&L calculations to ensure unit consistency
+  // Uses deep comparison to only update positions whose prices have actually changed
   const updatePricesFromDexScreener = useCallback(async () => {
     const openPositions = positions
       .filter((p) => p.status === 'open' || p.status === 'pending');
@@ -371,14 +372,28 @@ export function usePositions() {
       
       if (priceMap.size === 0) return;
 
-      setPositions((prev) =>
-        prev.map((p) => {
+      // Use functional update with deep comparison to prevent unnecessary re-renders
+      setPositions((prev) => {
+        let hasChanges = false;
+        
+        const updated = prev.map((p) => {
           if (p.status !== 'open' && p.status !== 'pending') return p;
           
           const priceData = priceMap.get(p.token_address);
           if (!priceData || priceData.priceUsd <= 0) return p;
 
           const currentPriceUsd = priceData.priceUsd;
+          
+          // DEEP COMPARISON: Only update if price changed by more than 0.01%
+          const oldPrice = p.current_price ?? 0;
+          const priceChangePercent = oldPrice > 0 
+            ? Math.abs((currentPriceUsd - oldPrice) / oldPrice) * 100 
+            : 100;
+          
+          if (priceChangePercent < 0.01) return p; // No meaningful change
+          
+          hasChanges = true;
+          
           const currentValue = p.amount * currentPriceUsd;
           
           // CRITICAL: Use entry_price_usd for P&L if available, otherwise use entry_price
@@ -405,12 +420,15 @@ export function usePositions() {
             // (entry was in SOL but current is in USD)
             entry_price_usd: needsBackfill ? null : (p.entry_price_usd ?? entryPriceForCalc),
           };
-        })
-      );
+        });
+        
+        // Return same reference if no changes to prevent re-render
+        return hasChanges ? updated : prev;
+      });
 
       setLastPriceUpdate(new Date().toISOString());
     } catch (err) {
-      console.log('Price update failed (non-critical):', err);
+      // Silent failure - don't log to avoid console spam during background updates
     }
   }, [positions]);
 

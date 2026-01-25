@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAppMode } from '@/contexts/AppModeContext';
+import { fetchDexScreenerPrices, isLikelyRealSolanaMint } from '@/lib/dexscreener';
 
 // Token lifecycle stages (Raydium-only - no bonding curve tokens)
 export type TokenStage = 'LP_LIVE' | 'INDEXING' | 'LISTED';
@@ -188,11 +189,15 @@ export function useTokenScanner() {
   
   // Ref to track if a scan is in progress
   const scanInProgress = useRef(false);
+  // Ref to track if a background price update is in progress
+  const priceUpdateInProgress = useRef(false);
   // Ref to store interval for tick-by-tick loading
-  const tickIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Ref for background price update interval
+  const priceUpdateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Rate limiting
   const scanTimestampsRef = useRef<number[]>([]);
-  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Update countdown every second when rate limited
   useEffect(() => {
@@ -477,6 +482,90 @@ export function useTokenScanner() {
     return tokens.filter(t => t.riskScore <= maxRisk);
   }, [tokens]);
 
+  /**
+   * Silent background price update for all tokens.
+   * Uses deep comparison to only update tokens whose prices actually changed.
+   * This prevents UI flickering by avoiding unnecessary state updates.
+   */
+  const updateTokenPrices = useCallback(async () => {
+    // Skip if already updating or no tokens
+    if (priceUpdateInProgress.current || tokens.length === 0) return;
+    
+    const addresses = tokens
+      .map(t => t.address)
+      .filter(addr => isLikelyRealSolanaMint(addr));
+    
+    if (addresses.length === 0) return;
+    
+    priceUpdateInProgress.current = true;
+    
+    try {
+      const priceMap = await fetchDexScreenerPrices(addresses, {
+        timeoutMs: 5000,
+        chunkSize: 30,
+      });
+      
+      if (priceMap.size === 0) {
+        priceUpdateInProgress.current = false;
+        return;
+      }
+      
+      // Use functional update with deep comparison
+      setTokens(prev => {
+        let hasChanges = false;
+        
+        const updated = prev.map(token => {
+          const priceData = priceMap.get(token.address);
+          if (!priceData || priceData.priceUsd <= 0) return token;
+          
+          // DEEP COMPARISON: Only update if price changed by more than 0.05%
+          const oldPrice = token.priceUsd || 0;
+          const priceChangePercent = oldPrice > 0 
+            ? Math.abs((priceData.priceUsd - oldPrice) / oldPrice) * 100 
+            : 100;
+          
+          if (priceChangePercent < 0.05) return token; // No meaningful change
+          
+          hasChanges = true;
+          
+          return {
+            ...token,
+            priceUsd: priceData.priceUsd,
+            priceChange24h: priceData.priceChange24h,
+            volume24h: priceData.volume24h,
+            liquidity: priceData.liquidity,
+          };
+        });
+        
+        // Return same reference if no changes to prevent re-render
+        return hasChanges ? updated : prev;
+      });
+    } catch (err) {
+      // Silent failure - don't log to avoid console spam
+    } finally {
+      priceUpdateInProgress.current = false;
+    }
+  }, [tokens]);
+
+  // Set up background price updates (every 10 seconds)
+  useEffect(() => {
+    // Only start background updates if we have tokens
+    if (tokens.length === 0) return;
+    
+    // Initial update after 2 seconds
+    const initialTimeout = setTimeout(updateTokenPrices, 2000);
+    
+    // Regular interval every 10 seconds
+    priceUpdateIntervalRef.current = setInterval(updateTokenPrices, 10000);
+    
+    return () => {
+      clearTimeout(initialTimeout);
+      if (priceUpdateIntervalRef.current) {
+        clearInterval(priceUpdateIntervalRef.current);
+      }
+    };
+  }, [tokens.length > 0, updateTokenPrices]);
+
   // Cleanup on unmount
   const cleanup = useCallback(() => {
     if (tickIntervalRef.current) {
@@ -484,6 +573,9 @@ export function useTokenScanner() {
     }
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
+    }
+    if (priceUpdateIntervalRef.current) {
+      clearInterval(priceUpdateIntervalRef.current);
     }
   }, []);
 
@@ -503,5 +595,6 @@ export function useTokenScanner() {
     isDemo,
     isLive,
     cleanup,
+    updateTokenPrices,
   };
 }
