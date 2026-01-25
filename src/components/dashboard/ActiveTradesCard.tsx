@@ -63,7 +63,7 @@ export default function ActiveTradesCard({ positions, loading, onStartSnipping }
       </CardHeader>
       
       <CardContent className="relative pt-2">
-        {loading ? (
+        {loading && positions.length === 0 ? (
           <div className="flex items-center justify-center py-12">
             <div className="relative">
               <div className="absolute inset-0 bg-primary/20 rounded-full blur-xl animate-pulse" />
