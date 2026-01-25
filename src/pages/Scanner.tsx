@@ -202,15 +202,25 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         ? currentPrice
         : (position.current_price ?? position.entry_price);
 
-      await markPositionClosed(positionId, safeExitPrice);
+      const closed = await markPositionClosed(positionId, safeExitPrice);
 
-      addBotLog({
-        level: 'success',
-        category: 'trade',
-        message: 'Position closed successfully',
-        tokenSymbol: position.token_symbol,
-        details: `Received ${result.solReceived?.toFixed(4)} SOL`,
-      });
+      if (closed) {
+        addBotLog({
+          level: 'success',
+          category: 'trade',
+          message: 'Position closed successfully',
+          tokenSymbol: position.token_symbol,
+          details: `Received ${result.solReceived?.toFixed(4)} SOL`,
+        });
+      } else {
+        addBotLog({
+          level: 'warning',
+          category: 'trade',
+          message: 'Swap succeeded but failed to update position',
+          tokenSymbol: position.token_symbol,
+          details: 'Try clicking Exit again or use Force Close',
+        });
+      }
 
       // Force refresh to reconcile any background polling / realtime ordering
       await fetchPositions(true);
@@ -229,14 +239,16 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
               variant="outline"
               size="sm"
               onClick={async () => {
-                await markPositionClosed(positionId, currentPrice);
-                toast({
-                  title: "Position Marked Closed",
-                  description: `${position.token_symbol} removed from active positions`,
-                });
+                const closed = await markPositionClosed(positionId, currentPrice);
+                if (closed) {
+                  toast({
+                    title: "Position Marked Closed",
+                    description: `${position.token_symbol} removed from active positions`,
+                  });
+                }
               }}
             >
-              Mark Closed
+              Force Close
             </Button>
           ),
         });
