@@ -231,16 +231,41 @@ export function useTokenScanner() {
     };
   }, [rateLimit.isLimited, rateLimit.resetTime]);
 
-  // Merge new tokens seamlessly - no delay, instant update
+  // Track seen token addresses to prevent duplicates across scans
+  const seenAddressesRef = useRef<Set<string>>(new Set());
+  
+  // Clear seen addresses periodically to allow re-discovery
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Only keep addresses from current tokens list
+      const currentAddresses = new Set(tokens.map(t => t.address));
+      seenAddressesRef.current = currentAddresses;
+    }, 120000); // Clear every 2 minutes
+    
+    return () => clearInterval(interval);
+  }, [tokens]);
+
+  // Merge new tokens seamlessly - with strict deduplication
   const mergeTokens = useCallback((newTokens: ScannedToken[], onComplete?: () => void) => {
     setTokens(prev => {
       const tokenMap = new Map<string, ScannedToken>();
+      const processedAddresses = new Set<string>();
       
-      // Add existing tokens to map
-      prev.forEach(t => tokenMap.set(t.address, t));
+      // Add existing tokens to map (dedupe by address)
+      prev.forEach(t => {
+        if (!processedAddresses.has(t.address)) {
+          tokenMap.set(t.address, t);
+          processedAddresses.add(t.address);
+        }
+      });
       
-      // Merge new tokens - update existing or add new
+      // Merge new tokens - update existing or add new (dedupe by address)
       newTokens.forEach(newToken => {
+        // Skip if we've already processed this address in THIS batch
+        if (processedAddresses.has(newToken.address) && !tokenMap.has(newToken.address)) {
+          return;
+        }
+        
         const existing = tokenMap.get(newToken.address);
         if (existing) {
           // Update existing token's price data only (keep position stable)
@@ -257,27 +282,37 @@ export function useTokenScanner() {
         } else {
           // New token - add to map (will be placed at top)
           tokenMap.set(newToken.address, newToken);
+          processedAddresses.add(newToken.address);
         }
       });
       
       // Convert back to array, new tokens first
-      const newAddresses = new Set(newTokens.map(t => t.address));
       const existingAddresses = prev.map(t => t.address);
       
       // Build ordered array: new tokens first, then existing in their order
       const orderedTokens: ScannedToken[] = [];
+      const addedAddresses = new Set<string>();
       
       // Add genuinely new tokens at top
       newTokens.forEach(t => {
-        if (!existingAddresses.includes(t.address)) {
-          orderedTokens.push(tokenMap.get(t.address)!);
+        if (!existingAddresses.includes(t.address) && !addedAddresses.has(t.address)) {
+          const token = tokenMap.get(t.address);
+          if (token) {
+            orderedTokens.push(token);
+            addedAddresses.add(t.address);
+          }
         }
       });
       
       // Add existing tokens (updated) in their original order
       existingAddresses.forEach(addr => {
-        const token = tokenMap.get(addr);
-        if (token) orderedTokens.push(token);
+        if (!addedAddresses.has(addr)) {
+          const token = tokenMap.get(addr);
+          if (token) {
+            orderedTokens.push(token);
+            addedAddresses.add(addr);
+          }
+        }
       });
       
       return orderedTokens.slice(0, 100); // Keep max 100 tokens

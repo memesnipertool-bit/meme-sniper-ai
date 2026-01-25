@@ -327,15 +327,40 @@ async function executeSellViaApi(
 
 // Check if position should exit
 // CRITICAL: Use entry_price_usd for USD-based price comparisons
+// SANITY CHECK: Clamp P&L to reasonable bounds to prevent numeric overflow
 function checkExitConditions(
   position: Position,
   currentPrice: number
 ): { shouldExit: boolean; reason: 'take_profit' | 'stop_loss' | null; profitLossPercent: number } {
+  // CRITICAL: Validate input prices to prevent overflow
+  if (!currentPrice || currentPrice <= 0 || !Number.isFinite(currentPrice)) {
+    console.log(`[AutoExit] Invalid current price for ${position.token_symbol}: ${currentPrice}`);
+    return { shouldExit: false, reason: null, profitLossPercent: 0 };
+  }
+  
   // Use USD entry price if available for accurate P&L
   // This ensures we compare USD to USD (currentPrice from DexScreener is in USD)
   const entryPriceForCalc = position.entry_price_usd ?? position.entry_price;
   
-  const profitLossPercent = ((currentPrice - entryPriceForCalc) / entryPriceForCalc) * 100;
+  // SANITY CHECK: Entry price must be valid
+  if (!entryPriceForCalc || entryPriceForCalc <= 0 || !Number.isFinite(entryPriceForCalc)) {
+    console.log(`[AutoExit] Invalid entry price for ${position.token_symbol}: entry_price_usd=${position.entry_price_usd}, entry_price=${position.entry_price}`);
+    return { shouldExit: false, reason: null, profitLossPercent: 0 };
+  }
+  
+  // Calculate raw P&L
+  let profitLossPercent = ((currentPrice - entryPriceForCalc) / entryPriceForCalc) * 100;
+  
+  // SANITY CHECK: Clamp P&L to reasonable bounds (-100% to +10000%)
+  // Anything beyond this indicates a data error (unit mismatch, stale prices, etc.)
+  const MAX_REASONABLE_GAIN = 10000; // 100x = +10000%
+  const MAX_REASONABLE_LOSS = -99.99; // Can't lose more than 100%
+  
+  if (profitLossPercent > MAX_REASONABLE_GAIN || profitLossPercent < MAX_REASONABLE_LOSS) {
+    console.log(`[AutoExit] Suspicious P&L for ${position.token_symbol}: ${profitLossPercent.toFixed(2)}% - entry: $${entryPriceForCalc}, current: $${currentPrice}`);
+    // If P&L is suspiciously high/low, clamp it but allow exit if threshold met
+    profitLossPercent = Math.max(MAX_REASONABLE_LOSS, Math.min(MAX_REASONABLE_GAIN, profitLossPercent));
+  }
   
   // Check take profit
   if (profitLossPercent >= position.profit_take_percent) {

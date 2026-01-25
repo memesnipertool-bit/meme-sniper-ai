@@ -299,12 +299,43 @@ export function useAutoExit() {
         r => r.action !== 'hold' && !r.executed && r.error?.includes('PENDING_SIGNATURE')
       );
 
+      // Also handle exits that were force-closed (no_route) to show proper notifications
+      const forceClosedExits = exitResults.filter(
+        r => r.executed && (r.txId === 'force_closed_no_route' || r.error?.includes('force_closed'))
+      );
+      
+      // Log force-closed positions to activity
+      forceClosedExits.forEach((result) => {
+        const actionLabel = result.action === 'take_profit' ? '💰 TAKE PROFIT' : '🛑 STOP LOSS';
+        addBotLog({
+          level: 'warning',
+          category: 'exit',
+          message: `⚠️ ${actionLabel} (Force Closed): ${result.symbol}`,
+          tokenSymbol: result.symbol,
+          details: `Position closed without swap - token has no Jupiter route (illiquid)\nP&L at close: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}% | Price: $${result.currentPrice.toFixed(8)}`,
+        });
+        
+        toast({
+          title: `⚠️ Position Force-Closed`,
+          description: `${result.symbol} removed from active trades - no swap route available`,
+          variant: 'destructive',
+        });
+      });
+
       if (pendingSignatureExits.length > 0 && executeExits && wallet.isConnected) {
         console.log(`[AutoExit] ${pendingSignatureExits.length} exits need wallet signature`);
         setPendingExits(pendingSignatureExits);
 
         // Auto-execute pending exits if wallet is connected
         for (const exitResult of pendingSignatureExits) {
+          addBotLog({
+            level: 'info',
+            category: 'exit',
+            message: `🔐 Requesting wallet signature: ${exitResult.symbol}`,
+            tokenSymbol: exitResult.symbol,
+            details: `${exitResult.action === 'take_profit' ? 'Take Profit' : 'Stop Loss'} triggered - awaiting user confirmation\nP&L: ${exitResult.profitLossPercent >= 0 ? '+' : ''}${exitResult.profitLossPercent.toFixed(2)}%`,
+          });
+          
           const success = await executePendingExit(exitResult);
           if (success) {
             summary.executed = (summary.executed || 0) + 1;
@@ -313,9 +344,12 @@ export function useAutoExit() {
         setPendingExits([]);
       }
 
-      // Notify on exits
+      // Notify on exits (only for non-force-closed)
       if ((summary.takeProfitTriggered || 0) > 0 || (summary.stopLossTriggered || 0) > 0) {
         exitResults.forEach((result) => {
+          // Skip force-closed - already handled above
+          if (result.txId === 'force_closed_no_route') return;
+          
           if (result.executed && result.action === 'take_profit') {
             toast({
               title: '💰 Take Profit Hit!',
