@@ -1,14 +1,13 @@
-import { useState, useMemo, memo, useCallback } from "react";
+import { useState, useMemo, memo, useCallback, useEffect, useRef, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScannedToken } from "@/hooks/useTokenScanner";
-import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Loader2, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye } from "lucide-react";
+import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-
 interface ActiveTradePosition {
   id: string;
   token_address: string;
@@ -448,13 +447,13 @@ const PoolSkeleton = memo(() => (
 
 PoolSkeleton.displayName = 'PoolSkeleton';
 
-export default function LiquidityMonitor({ 
+const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(function LiquidityMonitor({ 
   pools, 
   activeTrades, 
   loading,
   apiStatus = 'waiting',
   onExitTrade
-}: LiquidityMonitorProps) {
+}, ref) {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("pools");
   const [searchTerm, setSearchTerm] = useState("");
@@ -467,11 +466,20 @@ export default function LiquidityMonitor({
     navigate(`/token/${pool.address}?data=${tokenDataParam}`);
   }, [navigate]);
   
-  // Track new tokens (added in last 5 seconds)
+  // Track new tokens (added in last 5 seconds) - using refs to avoid re-renders
   const [newTokenIds, setNewTokenIds] = useState<Set<string>>(new Set());
+  const prevPoolsLengthRef = useRef(pools.length);
+  const clearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
-  // Update new token tracking
-  useMemo(() => {
+  // Update new token tracking with useEffect (proper side effect handling)
+  useEffect(() => {
+    // Only process when pools length increases (new tokens added)
+    if (pools.length <= prevPoolsLengthRef.current) {
+      prevPoolsLengthRef.current = pools.length;
+      return;
+    }
+    prevPoolsLengthRef.current = pools.length;
+    
     const now = Date.now();
     const fiveSecondsAgo = now - 5000;
     const newIds = new Set<string>();
@@ -485,10 +493,20 @@ export default function LiquidityMonitor({
     
     if (newIds.size > 0) {
       setNewTokenIds(newIds);
+      // Clear previous timeout
+      if (clearTimeoutRef.current) {
+        clearTimeout(clearTimeoutRef.current);
+      }
       // Clear after 5 seconds
-      setTimeout(() => setNewTokenIds(new Set()), 5000);
+      clearTimeoutRef.current = setTimeout(() => setNewTokenIds(new Set()), 5000);
     }
-  }, [pools.length]);
+    
+    return () => {
+      if (clearTimeoutRef.current) {
+        clearTimeout(clearTimeoutRef.current);
+      }
+    };
+  }, [pools]);
   
   // Memoize filtered pools
   const filteredPools = useMemo(() => 
@@ -546,7 +564,7 @@ export default function LiquidityMonitor({
   };
 
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+    <Card ref={ref} className="bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="pb-2 px-4 pt-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -704,4 +722,8 @@ export default function LiquidityMonitor({
       )}
     </Card>
   );
-}
+});
+
+LiquidityMonitor.displayName = 'LiquidityMonitor';
+
+export default LiquidityMonitor;
