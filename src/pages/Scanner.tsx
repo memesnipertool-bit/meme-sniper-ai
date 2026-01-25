@@ -493,8 +493,15 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   }, [isBotActive, isPaused]);
   
   // Main evaluation function - extracted for reuse
+  // Bot can run if active and not paused - autoEntryEnabled only controls NEW trade entries
   const runBotEvaluation = useCallback(async () => {
-    if (!isBotActive || !autoEntryEnabled || tokens.length === 0 || !settings) {
+    // Bot must be active to run evaluations, but autoEntry only gates new trades
+    if (!isBotActive || tokens.length === 0 || !settings) {
+      return;
+    }
+    
+    // If autoEntry is disabled, skip new trade evaluations (but bot can still run for other features)
+    if (!autoEntryEnabled) {
       return;
     }
     
