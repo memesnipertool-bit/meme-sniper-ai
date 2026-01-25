@@ -542,22 +542,29 @@ serve(async (req) => {
               error = 'PENDING_SIGNATURE: Jupiter quote ready, requires wallet signature';
               console.log(`[AutoExit] Jupiter quote ready for ${position.token_symbol} - requires frontend signature`);
             } else {
-              // Jupiter failed - check if this is a "dead" position that should be force-closed
-              // Lowered threshold to -80% to catch more dead tokens that can't be sold
-              const isDeadToken = profitLossPercent <= -80;
+              // Jupiter failed - check if this is a position that should be force-closed
               const noRoute = jupiterResult.error?.includes('No Jupiter route') || 
                               jupiterResult.error?.includes('No route available') ||
-                              jupiterResult.error?.includes('404');
+                              jupiterResult.error?.includes('404') ||
+                              jupiterResult.error?.includes('Route not found');
               
-              if (isDeadToken && noRoute) {
-                console.log(`[AutoExit] Force-closing dead position ${position.token_symbol} at ${profitLossPercent.toFixed(2)}%`);
+              // Force-close if: no route AND (stop loss hit OR take profit hit OR severe loss)
+              // This ensures users don't get stuck with untradeable positions
+              const shouldForceClose = noRoute && (
+                reason === 'stop_loss' ||  // Always force-close stop losses with no route
+                reason === 'take_profit' || // Force-close take profits with no route (user wants out)
+                profitLossPercent <= -50    // Force-close severe losses even without exact SL hit
+              );
+              
+              if (shouldForceClose) {
+                console.log(`[AutoExit] Force-closing position ${position.token_symbol} - ${reason} triggered but no Jupiter route (${profitLossPercent.toFixed(2)}%)`);
                 
                 // Force close the position - mark as closed with no tx
                 await supabase
                   .from('positions')
                   .update({
                     status: 'closed',
-                    exit_reason: 'force_closed_dead_token',
+                    exit_reason: `${reason}_no_route`,
                     exit_price: currentPrice,
                     exit_tx_id: null,
                     closed_at: new Date().toISOString(),
@@ -571,26 +578,27 @@ serve(async (req) => {
                 // Log the force close
                 await supabase.from('system_logs').insert({
                   user_id: user.id,
-                  event_type: 'force_close_dead_token',
+                  event_type: 'force_close_no_route',
                   event_category: 'trading',
-                  message: `Force-closed dead token: ${position.token_symbol} at ${profitLossPercent.toFixed(2)}%`,
+                  message: `Force-closed (no route): ${position.token_symbol} - ${reason} at ${profitLossPercent.toFixed(2)}%`,
                   metadata: {
                     position_id: position.id,
                     token_symbol: position.token_symbol,
                     entry_price: position.entry_price,
                     exit_price: currentPrice,
                     profit_loss_percent: profitLossPercent,
-                    reason: 'No Jupiter route available - token likely rugged or dead',
+                    reason: `${reason} triggered but Jupiter has no route - token may be illiquid`,
+                    original_error: jupiterResult.error,
                   },
                   severity: 'warning',
                 });
                 
                 executed = true;
-                txId = 'force_closed';
+                txId = 'force_closed_no_route';
                 error = undefined;
               } else {
                 executed = false;
-                error = jupiterResult.error || 'Jupiter sell failed';
+                error = jupiterResult.error || 'Jupiter sell failed - waiting for route availability';
               }
             }
           }
