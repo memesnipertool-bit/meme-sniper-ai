@@ -524,9 +524,10 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
 
   const hasMore = filteredPools.length > displayCount;
 
-  // Memoize open trades
+  // Memoize open trades - CRITICAL: Include both 'open' and 'pending', exclude 'closed'
+  // This ensures the Active Trades list never shows closed positions
   const openTrades = useMemo(() => 
-    activeTrades.filter(t => t.status === 'open'), 
+    activeTrades.filter(t => t.status === 'open' || t.status === 'pending'), 
     [activeTrades]
   );
 

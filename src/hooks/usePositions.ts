@@ -333,13 +333,14 @@ export function usePositions() {
         throw error;
       }
 
-      // Update the signature cache to include the closed status
+      // Update the signature cache to reflect the closed status immediately
       // This prevents fetchPositions from overwriting our optimistic update
-      lastServerSignatureRef.current = positions
-        .map(p => p.id === positionId 
-          ? `${p.id}:${new Date().toISOString()}:closed` 
-          : `${p.id}:${p.updated_at}:${p.status}`
-        )
+      // CRITICAL: Use the updated positions state (with closed status) for signature
+      const updatedPositions = positions.map(p => 
+        p.id === positionId ? { ...p, status: 'closed' as const } : p
+      );
+      lastServerSignatureRef.current = updatedPositions
+        .map(p => `${p.id}:${p.id === positionId ? new Date().toISOString() : p.updated_at}:${p.status}`)
         .join('|');
 
       // Log activity
@@ -506,7 +507,9 @@ export function usePositions() {
     };
   }, [updatePricesFromDexScreener]);
 
-  const openPositions = positions.filter(p => p.status === 'open');
+  // CRITICAL: Include both 'open' and 'pending' statuses for active trades display
+  // This ensures newly opened positions (pending) and active positions (open) show correctly
+  const openPositions = positions.filter(p => p.status === 'open' || p.status === 'pending');
   const closedPositions = positions.filter(p => p.status === 'closed');
   const pendingPositions = positions.filter(p => p.status === 'pending');
 
