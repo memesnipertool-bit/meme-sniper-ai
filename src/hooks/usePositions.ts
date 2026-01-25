@@ -327,8 +327,10 @@ export function usePositions() {
 
       const currentValue = position.amount * safeExitPrice;
       const entryValue = position.entry_value || (position.amount * position.entry_price);
-      const profitLossValue = currentValue - entryValue;
-      const profitLossPercent = ((safeExitPrice - position.entry_price) / position.entry_price) * 100;
+      const entryPriceForCalc = position.entry_price_usd ?? position.entry_price;
+      const profitLossPercent = ((safeExitPrice - entryPriceForCalc) / entryPriceForCalc) * 100;
+      // Use entry_value for accurate P&L $ calculation
+      const profitLossValue = entryValue * (profitLossPercent / 100);
 
       const { data: updatedRows, error } = await supabase
         .from('positions')
@@ -451,16 +453,24 @@ export function usePositions() {
           // CRITICAL: Use entry_price_usd for P&L if available, otherwise use entry_price
           // This ensures unit consistency (USD vs USD)
           const entryPriceForCalc = p.entry_price_usd ?? p.entry_price;
-          const entryValueForCalc = p.amount * entryPriceForCalc;
+          
+          // Use entry_value (actual SOL invested) for P&L dollar value calculation
+          // This is more accurate than amount * entry_price for tiny token amounts
+          const entryValueForCalc = p.entry_value ?? (p.amount * entryPriceForCalc);
           
           // If we didn't have entry_price_usd, try to backfill it from current price structure
           // This handles legacy positions that were stored with SOL entry prices
           const needsBackfill = p.entry_price_usd === null && p.entry_price < 0.0001;
           
-          const profitLossValue = currentValue - entryValueForCalc;
+          // P&L % is based on price change
           const profitLossPercent = entryPriceForCalc > 0 
             ? ((currentPriceUsd - entryPriceForCalc) / entryPriceForCalc) * 100 
             : 0;
+          
+          // P&L $ value uses entry_value (SOL invested) as baseline for accuracy
+          // Formula: entryValue * (1 + profitLossPercent/100) - entryValue
+          // Which simplifies to: entryValue * profitLossPercent/100
+          const profitLossValue = entryValueForCalc * (profitLossPercent / 100);
 
           return {
             ...p,

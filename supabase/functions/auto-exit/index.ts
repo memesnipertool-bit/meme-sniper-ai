@@ -500,9 +500,10 @@ serve(async (req) => {
       
       // Calculate P&L using entry_price_usd for accurate USD-based calculations
       const entryPriceForCalc = position.entry_price_usd ?? position.entry_price;
+      const entryValueForCalc = position.entry_value ?? (position.amount * entryPriceForCalc);
       const currentValue = position.amount * currentPrice;
-      const entryValueForCalc = position.amount * entryPriceForCalc;
-      const profitLossValue = currentValue - entryValueForCalc;
+      // Use entry_value for accurate P&L $ calculation
+      const profitLossValue = entryValueForCalc * (profitLossPercent / 100);
 
       // Update position with current price data
       positionUpdates.push({

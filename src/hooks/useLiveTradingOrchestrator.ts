@@ -120,10 +120,10 @@ export function useLiveTradingOrchestrator() {
     addBotLog({
       level: 'info',
       category: 'trade',
-      message: `Executing live trade: ${token.symbol}`,
+      message: `🚀 Executing BUY: ${token.symbol}`,
       tokenSymbol: token.symbol,
       tokenAddress: token.address,
-      details: `Amount: ${settings.trade_amount} SOL | Slippage: 15%`,
+      details: `Amount: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority} | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%`,
     });
 
     try {
@@ -199,12 +199,15 @@ export function useLiveTradingOrchestrator() {
             settings.stop_loss_percentage
           );
 
+          // Log comprehensive trade details
+          const entryValueUsd = position.entryPrice * position.tokenAmount;
           addBotLog({
             level: 'success',
             category: 'trade',
-            message: `Position created: ${token.symbol}`,
-            tokenSymbol: token.symbol,
-            details: `Entry: $${position.entryPrice.toFixed(8)} | Amount: ${position.tokenAmount.toFixed(2)}`,
+            message: `✅ BUY FILLED: ${finalSymbol}`,
+            tokenSymbol: finalSymbol,
+            tokenAddress: token.address,
+            details: `Entry: $${position.entryPrice.toFixed(8)} | Tokens: ${position.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} | Value: $${entryValueUsd.toFixed(4)} | SOL: ${position.solSpent.toFixed(4)} | TX: ${position.entryTxHash?.slice(0, 12)}...`,
           });
 
           return {
@@ -238,9 +241,10 @@ export function useLiveTradingOrchestrator() {
       addBotLog({
         level: 'error',
         category: 'trade',
-        message: `Trade failed: ${token.symbol}`,
+        message: `❌ BUY FAILED: ${token.symbol}`,
         tokenSymbol: token.symbol,
-        details: errorMessage,
+        tokenAddress: token.address,
+        details: `Reason: ${errorMessage} | Attempted: ${settings.trade_amount} SOL`,
       });
 
       return { success: false, error: errorMessage, source: 'trading-engine' };
