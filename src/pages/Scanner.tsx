@@ -32,6 +32,7 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useDemoPortfolio } from "@/contexts/DemoPortfolioContext";
 import { useBotContext } from "@/contexts/BotContext";
 import { useSolPrice } from "@/hooks/useSolPrice";
+import { reconcilePositionsWithPools } from "@/lib/positionMetadataReconciler";
 import { Wallet, TrendingUp, Zap, Activity, AlertTriangle, X, FlaskConical, Coins, RotateCcw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -118,7 +119,18 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   const liveTradeInFlightRef = useRef(false);
 
   // Use demo or real positions based on mode
-  const openPositions = isDemo ? openDemoPositions : realOpenPositions;
+  // CRITICAL: Reconcile position metadata with pool data to ensure token names match
+  const rawOpenPositions = isDemo ? openDemoPositions : realOpenPositions;
+  const openPositions = useMemo(() => {
+    // Convert tokens to pool data format for reconciliation
+    const poolData = tokens.map(t => ({
+      address: t.address,
+      symbol: t.symbol,
+      name: t.name,
+    }));
+    return reconcilePositionsWithPools(rawOpenPositions, poolData);
+  }, [rawOpenPositions, tokens]);
+  
   const closedPositions = isDemo ? closedDemoPositions : realClosedPositions;
 
   const fallbackSolPrice = Number.isFinite(solPrice) && solPrice > 0 ? solPrice : 150;

@@ -258,8 +258,28 @@ export function useTradingEngine() {
             const entryValue = position.solSpent;
             
             // Save position with user's TP/SL settings from config
-            const profitTakePercent = config?.profitTakePercent ?? 100; // Default to 100% if not provided
-            const stopLossPercent = config?.stopLossPercent ?? 20; // Default to 20% if not provided
+            const profitTakePercent = config?.profitTakePercent ?? 100;
+            const stopLossPercent = config?.stopLossPercent ?? 20;
+            
+            // CRITICAL: Fetch USD price at entry time for accurate P&L calculations
+            // The position.entryPrice is in SOL per token, we need USD for consistent calculations
+            let entryPriceUsd: number | null = null;
+            try {
+              const dexRes = await fetch(
+                `https://api.dexscreener.com/latest/dex/tokens/${position.tokenAddress}`,
+                { signal: AbortSignal.timeout(5000) }
+              );
+              if (dexRes.ok) {
+                const dexData = await dexRes.json();
+                const solanaPair = dexData.pairs?.find((p: { chainId: string }) => p.chainId === 'solana');
+                if (solanaPair?.priceUsd) {
+                  entryPriceUsd = parseFloat(solanaPair.priceUsd);
+                  console.log(`[TradingEngine] Got USD entry price: $${entryPriceUsd}`);
+                }
+              }
+            } catch (priceErr) {
+              console.log('[TradingEngine] Could not fetch USD price, will use DexScreener later');
+            }
             
             console.log(`[TradingEngine] Saving position with TP: ${profitTakePercent}%, SL: ${stopLossPercent}%`);
             
@@ -271,11 +291,13 @@ export function useTradingEngine() {
                 token_symbol: position.tokenSymbol,
                 token_name: position.tokenName || position.tokenSymbol,
                 chain: 'solana',
-                entry_price: position.entryPrice,
-                current_price: position.entryPrice,
+                // Store both SOL and USD entry prices for flexibility
+                entry_price: entryPriceUsd ?? position.entryPrice, // Use USD if available
+                entry_price_usd: entryPriceUsd, // Explicit USD column
+                current_price: entryPriceUsd ?? position.entryPrice,
                 amount: position.tokenAmount,
                 entry_value: entryValue,
-                current_value: entryValue,
+                current_value: entryPriceUsd ? position.tokenAmount * entryPriceUsd : entryValue,
                 profit_take_percent: profitTakePercent,
                 stop_loss_percent: stopLossPercent,
                 status: 'open',
@@ -300,7 +322,7 @@ export function useTradingEngine() {
                 trade_type: 'buy',
                 amount: position.tokenAmount,
                 price_sol: position.entryPrice,
-                price_usd: null, // Could add USD conversion later
+                price_usd: entryPriceUsd,
                 status: 'completed',
                 tx_hash: position.entryTxHash,
               });

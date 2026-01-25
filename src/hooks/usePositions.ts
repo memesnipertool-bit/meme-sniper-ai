@@ -11,6 +11,7 @@ export interface Position {
   token_name: string | null;
   chain: string;
   entry_price: number;
+  entry_price_usd: number | null; // USD entry price for accurate P&L
   current_price: number | null;
   amount: number;
   entry_value: number | null;
@@ -319,9 +320,12 @@ export function usePositions() {
   }, [positions, toast, fetchPositions]);
 
   // Fetch real-time prices for open positions and update UI state
+  // CRITICAL: Use entry_price_usd for P&L calculations to ensure unit consistency
   const updatePricesFromDexScreener = useCallback(async () => {
-    const openAddresses = positions
-      .filter((p) => p.status === 'open' || p.status === 'pending')
+    const openPositions = positions
+      .filter((p) => p.status === 'open' || p.status === 'pending');
+    
+    const openAddresses = openPositions
       .map((p) => p.token_address)
       .filter((addr) => isLikelyRealSolanaMint(addr));
 
@@ -339,19 +343,32 @@ export function usePositions() {
           const priceData = priceMap.get(p.token_address);
           if (!priceData || priceData.priceUsd <= 0) return p;
 
-          const currentValue = p.amount * priceData.priceUsd;
-          const entryValue = p.entry_value || p.amount * p.entry_price;
-          const profitLossValue = currentValue - entryValue;
-          const profitLossPercent = p.entry_price > 0 
-            ? ((priceData.priceUsd - p.entry_price) / p.entry_price) * 100 
+          const currentPriceUsd = priceData.priceUsd;
+          const currentValue = p.amount * currentPriceUsd;
+          
+          // CRITICAL: Use entry_price_usd for P&L if available, otherwise use entry_price
+          // This ensures unit consistency (USD vs USD)
+          const entryPriceForCalc = p.entry_price_usd ?? p.entry_price;
+          const entryValueForCalc = p.amount * entryPriceForCalc;
+          
+          // If we didn't have entry_price_usd, try to backfill it from current price structure
+          // This handles legacy positions that were stored with SOL entry prices
+          const needsBackfill = p.entry_price_usd === null && p.entry_price < 0.0001;
+          
+          const profitLossValue = currentValue - entryValueForCalc;
+          const profitLossPercent = entryPriceForCalc > 0 
+            ? ((currentPriceUsd - entryPriceForCalc) / entryPriceForCalc) * 100 
             : 0;
 
           return {
             ...p,
-            current_price: priceData.priceUsd,
+            current_price: currentPriceUsd,
             current_value: currentValue,
             profit_loss_value: profitLossValue,
             profit_loss_percent: profitLossPercent,
+            // Backfill entry_price_usd if we detected a unit mismatch
+            // (entry was in SOL but current is in USD)
+            entry_price_usd: needsBackfill ? null : (p.entry_price_usd ?? entryPriceForCalc),
           };
         })
       );
