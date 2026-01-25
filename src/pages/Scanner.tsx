@@ -109,6 +109,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showBotActivateConfirm, setShowBotActivateConfirm] = useState(false);
   const [showSwitchToLiveConfirm, setShowSwitchToLiveConfirm] = useState(false);
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
+  const [cleaningUpPositions, setCleaningUpPositions] = useState(false);
   const [pendingBotAction, setPendingBotAction] = useState<boolean | null>(null);
   
   // Get setMode from AppModeContext
@@ -966,6 +968,76 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     toast({ title: 'Cache Cleared', description: `Cleared ${count} tokens from processed cache` });
   }, [toast]);
 
+  // Cleanup stuck positions (no route, zero balance, stablecoins that can't be sold)
+  const handleCleanupStuckPositions = useCallback(async () => {
+    if (isDemo) {
+      toast({ title: 'Not Available', description: 'Cleanup is only available in Live mode', variant: 'destructive' });
+      return;
+    }
+
+    const stuckPositions = realOpenPositions.filter(p => 
+      p.status === 'open' || p.status === 'pending'
+    );
+
+    if (stuckPositions.length === 0) {
+      toast({ title: 'No Stuck Positions', description: 'All positions are already closed.' });
+      return;
+    }
+
+    setShowCleanupConfirm(true);
+  }, [isDemo, realOpenPositions, toast]);
+
+  const confirmCleanupPositions = useCallback(async () => {
+    setShowCleanupConfirm(false);
+    setCleaningUpPositions(true);
+
+    const stuckPositions = realOpenPositions.filter(p => 
+      p.status === 'open' || p.status === 'pending'
+    );
+
+    let closedCount = 0;
+    let failedCount = 0;
+
+    for (const position of stuckPositions) {
+      try {
+        const exitPrice = position.current_price ?? position.entry_price;
+        const closed = await markPositionClosed(position.id, exitPrice);
+        if (closed) {
+          closedCount++;
+          addBotLog({
+            level: 'success',
+            category: 'trade',
+            message: `Force closed: ${position.token_symbol}`,
+            tokenAddress: position.token_address,
+          });
+        } else {
+          failedCount++;
+        }
+      } catch (err) {
+        failedCount++;
+        console.error('Failed to close position:', position.id, err);
+      }
+    }
+
+    setCleaningUpPositions(false);
+
+    // Force refresh to sync UI
+    await fetchPositions(true);
+
+    if (closedCount > 0) {
+      toast({
+        title: 'Positions Cleaned Up',
+        description: `Successfully closed ${closedCount} position${closedCount > 1 ? 's' : ''}${failedCount > 0 ? `. ${failedCount} failed.` : '.'}`,
+      });
+    } else if (failedCount > 0) {
+      toast({
+        title: 'Cleanup Failed',
+        description: `Failed to close ${failedCount} position${failedCount > 1 ? 's' : ''}. Try again or contact support.`,
+        variant: 'destructive',
+      });
+    }
+  }, [realOpenPositions, markPositionClosed, fetchPositions, toast]);
+
   const handleResetBot = useCallback(() => {
     stopBot();
     processedTokensRef.current.clear();
@@ -1018,6 +1090,17 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         variant="default"
         onConfirm={handleSwitchToLiveAndActivate}
         onCancel={handleContinueDemo}
+      />
+      
+      {/* Cleanup Stuck Positions Dialog */}
+      <ConfirmDialog
+        open={showCleanupConfirm}
+        onOpenChange={setShowCleanupConfirm}
+        title="Cleanup Stuck Positions?"
+        description={`This will force-close ${realOpenPositions.filter(p => p.status === 'open' || p.status === 'pending').length} open position(s) that may be stuck due to no swap route, zero balance, or failed exits. These positions will be marked as 'force_closed_manual' in your history.`}
+        confirmLabel={cleaningUpPositions ? "Closing..." : "Force Close All"}
+        variant="destructive"
+        onConfirm={confirmCleanupPositions}
       />
       <AppLayout>
         <div className="container mx-auto px-3 md:px-4 space-y-4 md:space-y-6">
@@ -1204,9 +1287,12 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                   onForceEvaluate={handleForceEvaluate}
                   onClearProcessed={handleClearProcessed}
                   onResetBot={handleResetBot}
+                  onCleanupStuck={handleCleanupStuckPositions}
                   scanning={loading}
                   evaluating={sniperLoading}
+                  cleaningUp={cleaningUpPositions}
                   processedCount={processedTokensRef.current.size}
+                  stuckPositionsCount={realOpenPositions.filter(p => p.status === 'open' || p.status === 'pending').length}
                   botActive={isBotActive}
                 />
               )}
