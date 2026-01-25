@@ -49,6 +49,9 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
   const openPositions = isDemo ? openDemoPositions : realOpenPositions;
   const closedPositions = isDemo ? closedDemoPositions : realClosedPositions;
 
+  // Prevent UI flicker: only show Active Trades "loading" state on the very first load in live mode.
+  const activeTradesLoading = !isDemo && positionsLoading && realOpenPositions.length === 0;
+
   // Calculate win count from closed positions
   const winCount = useMemo(() => {
     return closedPositions.filter(p => {
@@ -278,7 +281,7 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
             <div className="grid gap-4 md:gap-6 md:grid-cols-2">
               <ActiveTradesCard 
                 positions={openPositions} 
-                loading={positionsLoading}
+                loading={activeTradesLoading}
               />
               <MarketOverview />
             </div>

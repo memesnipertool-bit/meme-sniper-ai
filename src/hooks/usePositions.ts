@@ -55,6 +55,8 @@ const PRICE_UPDATE_INTERVAL_MS = 15000;
 export function usePositions() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
+  // Background refresh indicator (does NOT blank UI like `loading`)
+  const [refreshing, setRefreshing] = useState(false);
   const [checkingExits, setCheckingExits] = useState(false);
   const [lastExitCheck, setLastExitCheck] = useState<string | null>(null);
   const [exitResults, setExitResults] = useState<ExitResult[]>([]);
@@ -64,10 +66,19 @@ export function usePositions() {
   // Cache DexScreener metadata by token address to avoid repeated external calls
   const tokenMetaCacheRef = useRef(new Map<string, { name: string; symbol: string }>());
 
+  // Prevent UI flicker: only use `loading` for the very first fetch,
+  // and avoid overwriting state if the server payload hasn't changed.
+  const hasLoadedOnceRef = useRef(false);
+  const lastServerSignatureRef = useRef<string>('');
+
+
   // Fetch positions
   const fetchPositions = useCallback(async () => {
+    const isInitialLoad = !hasLoadedOnceRef.current;
     try {
-      setLoading(true);
+      if (isInitialLoad) setLoading(true);
+      else setRefreshing(true);
+
       const { data, error } = await supabase
         .from('positions')
         .select('*')
@@ -76,7 +87,17 @@ export function usePositions() {
       if (error) throw error;
 
       const rawPositions = ((data as unknown as Position[]) || []).map((p) => ({ ...p }));
-      setPositions(rawPositions);
+
+      // Only replace positions when the server data actually changed.
+      // This keeps the dashboard stable (no list reset / spinner flicker)
+      // while still allowing local real-time price updates to run smoothly.
+      const nextSig = rawPositions.map((p) => `${p.id}:${p.updated_at}:${p.status}`).join('|');
+      if (nextSig !== lastServerSignatureRef.current) {
+        lastServerSignatureRef.current = nextSig;
+        setPositions(rawPositions);
+      }
+
+      hasLoadedOnceRef.current = true;
 
       // Enrich missing/placeholder token metadata (prevents the UI from showing UNKNOWN everywhere)
       const addressesToFetch = Array.from(
@@ -120,6 +141,7 @@ export function usePositions() {
       });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [toast]);
 
@@ -425,6 +447,7 @@ export function usePositions() {
     closedPositions,
     pendingPositions,
     loading,
+    refreshing,
     checkingExits,
     lastExitCheck,
     exitResults,
