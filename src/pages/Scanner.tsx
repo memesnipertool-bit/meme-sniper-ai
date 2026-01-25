@@ -174,7 +174,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         title: "Position not found",
         description: "This position is no longer active. Refreshing…",
       });
-      fetchPositions();
+      fetchPositions(true);
       return;
     }
 
@@ -203,7 +203,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         tokenSymbol: position.token_symbol,
         details: `Received ${result.solReceived?.toFixed(4)} SOL`,
       });
-      await fetchPositions();
+      await fetchPositions(true); // Force update to remove closed position from UI
       refreshBalance();
       setTimeout(() => refreshBalance(), 8000);
     } else if (result.error) {
