@@ -463,9 +463,15 @@ export function usePositions() {
           const needsBackfill = p.entry_price_usd === null && p.entry_price < 0.0001;
           
           // P&L % is based on price change
-          const profitLossPercent = entryPriceForCalc > 0 
+          let profitLossPercent = entryPriceForCalc > 0 
             ? ((currentPriceUsd - entryPriceForCalc) / entryPriceForCalc) * 100 
             : 0;
+          
+          // SANITY CHECK: Clamp P&L to reasonable bounds (-100% to +10000%)
+          // Prevents UI from showing absurd values due to data errors
+          const MAX_REASONABLE_GAIN = 10000; // 100x = +10000%
+          const MAX_REASONABLE_LOSS = -99.99;
+          profitLossPercent = Math.max(MAX_REASONABLE_LOSS, Math.min(MAX_REASONABLE_GAIN, profitLossPercent));
           
           // P&L $ value uses entry_value (SOL invested) as baseline for accuracy
           // Formula: entryValue * (1 + profitLossPercent/100) - entryValue

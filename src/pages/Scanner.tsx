@@ -422,15 +422,17 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     
     // Build stage summary (Raydium-only pipeline - no bonding stage)
     const stageParts: string[] = [];
-    if (stages.lpLive > 0) stageParts.push(`🏊${stages.lpLive} live`);
-    if (stages.indexing > 0) stageParts.push(`⏳${stages.indexing} indexing`);
-    if (stages.listed > 0) stageParts.push(`✅${stages.listed} listed`);
+    if (stages.lpLive > 0) stageParts.push(`🏊 ${stages.lpLive} LP Live`);
+    if (stages.indexing > 0) stageParts.push(`⏳ ${stages.indexing} Indexing`);
+    if (stages.listed > 0) stageParts.push(`✅ ${stages.listed} Listed`);
     
     addBotLog({
       level: tradeable > 0 ? 'success' : 'info',
       category: 'scan',
-      message: `${tradeable} tradeable out of ${total} tokens`,
-      details: stageParts.length > 0 ? stageParts.join(' | ') : undefined,
+      message: `🔍 Pool Discovery: ${tradeable}/${total} tradeable`,
+      details: stageParts.length > 0 
+        ? `Pool Status: ${stageParts.join(' | ')}\nSources: GeckoTerminal, Birdeye, DexScreener` 
+        : 'Sources: GeckoTerminal, Birdeye, DexScreener',
     });
   }, [lastScanStats, isBotActive]);
 
