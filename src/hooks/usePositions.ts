@@ -66,6 +66,13 @@ export function usePositions() {
   // Cache DexScreener metadata by token address to avoid repeated external calls
   const tokenMetaCacheRef = useRef(new Map<string, { name: string; symbol: string }>());
 
+  // Keep a ref to the latest positions so our background polling callbacks can be stable
+  // (prevents resubscribing realtime on every price tick, which can miss updates).
+  const positionsRef = useRef<Position[]>([]);
+  useEffect(() => {
+    positionsRef.current = positions;
+  }, [positions]);
+
   // Prevent UI flicker: only use `loading` for the very first fetch,
   // and avoid overwriting state if the server payload hasn't changed.
   const hasLoadedOnceRef = useRef(false);
@@ -382,12 +389,10 @@ export function usePositions() {
   // CRITICAL: Use entry_price_usd for P&L calculations to ensure unit consistency
   // Uses deep comparison to only update positions whose prices have actually changed
   const updatePricesFromDexScreener = useCallback(async () => {
-    const openPositions = positions
-      .filter((p) => p.status === 'open' || p.status === 'pending');
+    const snapshot = positionsRef.current;
+    const openPositions = snapshot.filter((p) => p.status === 'open' || p.status === 'pending');
     
-    const openAddresses = openPositions
-      .map((p) => p.token_address)
-      .filter((addr) => isLikelyRealSolanaMint(addr));
+    const openAddresses = openPositions.map((p) => p.token_address).filter((addr) => isLikelyRealSolanaMint(addr));
 
     if (openAddresses.length === 0) return;
 
@@ -454,9 +459,9 @@ export function usePositions() {
     } catch (err) {
       // Silent failure - don't log to avoid console spam during background updates
     }
-  }, [positions]);
+  }, []);
 
-  // Subscribe to realtime updates + periodic price refresh
+  // Subscribe to realtime updates (keep this effect stable so we don't miss events)
   useEffect(() => {
     fetchPositions();
 
@@ -472,32 +477,34 @@ export function usePositions() {
         () => {
           // Skip realtime updates during optimistic update window
           // This prevents stale data from overwriting our immediate UI update
-          if (Date.now() < blockRealtimeUntilRef.current) {
-            return;
-          }
-          // Force update on realtime changes (position closed, updated, etc.)
+          if (Date.now() < blockRealtimeUntilRef.current) return;
+
           forceNextFetchRef.current = true;
           fetchPositions(true);
         }
       )
       .subscribe();
 
-    // Real-time price updates every 15 seconds
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchPositions]);
+
+  // Periodic price refresh (separate effect so it can't interfere with realtime subscriptions)
+  useEffect(() => {
     const priceInterval = setInterval(() => {
       updatePricesFromDexScreener();
     }, PRICE_UPDATE_INTERVAL_MS);
 
-    // Initial price fetch after 2 seconds
     const initialPriceTimeout = setTimeout(() => {
       updatePricesFromDexScreener();
     }, 2000);
 
     return () => {
-      supabase.removeChannel(channel);
       clearInterval(priceInterval);
       clearTimeout(initialPriceTimeout);
     };
-  }, [fetchPositions, updatePricesFromDexScreener]);
+  }, [updatePricesFromDexScreener]);
 
   const openPositions = positions.filter(p => p.status === 'open');
   const closedPositions = positions.filter(p => p.status === 'closed');
