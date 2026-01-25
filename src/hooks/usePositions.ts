@@ -292,58 +292,75 @@ export function usePositions() {
   }, [toast, fetchPositions]);
 
   // Close a position manually
-  const closePosition = useCallback(async (positionId: string, exitPrice: number) => {
-    try {
-      const position = positions.find(p => p.id === positionId);
-      if (!position) throw new Error('Position not found');
+  const closePosition = useCallback(async (positionId: string, exitPrice: number): Promise<boolean> => {
+    // IMPORTANT: do not rely on `positions` from the closure here.
+    // Use the ref so we always act on the latest list (prevents "Position not found" / stale updates).
+    const snapshot = positionsRef.current;
+    const position = snapshot.find(p => p.id === positionId);
 
-      // OPTIMISTIC UPDATE: Immediately set status to 'closed' so filtering removes it from UI
-      // Store the position data before update in case we need to rollback
-      const previousPositions = [...positions];
-      
+    if (!position) {
+      toast({
+        title: 'Position not found',
+        description: 'This position is no longer active. Try refreshing.',
+        variant: 'destructive',
+      });
+      forceNextFetchRef.current = true;
+      fetchPositions(true);
+      return false;
+    }
+
+    // Ensure we always persist a valid exit price
+    const safeExitPrice = Number.isFinite(exitPrice) && exitPrice > 0
+      ? exitPrice
+      : (position.current_price ?? position.entry_price);
+
+    // OPTIMISTIC UPDATE: immediately hide from UI
+    const previousPositions = [...snapshot];
+
+    try {
       // Block realtime updates for 2 seconds to prevent stale data from overwriting
       blockRealtimeUntilRef.current = Date.now() + 2000;
-      
-      setPositions(prev => prev.map(p => 
+
+      setPositions(prev => prev.map(p =>
         p.id === positionId ? { ...p, status: 'closed' as const } : p
       ));
 
-      const currentValue = position.amount * exitPrice;
+      const currentValue = position.amount * safeExitPrice;
       const entryValue = position.entry_value || (position.amount * position.entry_price);
       const profitLossValue = currentValue - entryValue;
-      const profitLossPercent = ((exitPrice - position.entry_price) / position.entry_price) * 100;
+      const profitLossPercent = ((safeExitPrice - position.entry_price) / position.entry_price) * 100;
 
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from('positions')
         .update({
           status: 'closed',
           exit_reason: 'manual',
-          exit_price: exitPrice,
-          current_price: exitPrice,
+          exit_price: safeExitPrice,
+          current_price: safeExitPrice,
           current_value: currentValue,
           profit_loss_percent: profitLossPercent,
           profit_loss_value: profitLossValue,
           closed_at: new Date().toISOString(),
         })
-        .eq('id', positionId);
+        .eq('id', positionId)
+        .select('id, updated_at, status');
 
-      if (error) {
-        // Rollback optimistic update on error
-        setPositions(previousPositions);
-        throw error;
+      if (error) throw error;
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error('Close failed: no rows updated');
       }
 
-      // Update the signature cache to reflect the closed status immediately
-      // This prevents fetchPositions from overwriting our optimistic update
-      // CRITICAL: Use the updated positions state (with closed status) for signature
-      const updatedPositions = positions.map(p => 
-        p.id === positionId ? { ...p, status: 'closed' as const } : p
-      );
-      lastServerSignatureRef.current = updatedPositions
-        .map(p => `${p.id}:${p.id === positionId ? new Date().toISOString() : p.updated_at}:${p.status}`)
+      const updatedAt = updatedRows[0]?.updated_at ?? new Date().toISOString();
+
+      // Update signature cache so the next fetch can't re-introduce this as open
+      lastServerSignatureRef.current = previousPositions
+        .map(p => {
+          if (p.id !== positionId) return `${p.id}:${p.updated_at}:${p.status}`;
+          return `${p.id}:${updatedAt}:closed`;
+        })
         .join('|');
 
-      // Log activity
+      // Log activity (fire-and-forget)
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         supabase.from('user_activity_logs' as never).insert({
@@ -355,7 +372,7 @@ export function usePositions() {
             position_id: positionId,
             token_symbol: position.token_symbol,
             entry_price: position.entry_price,
-            exit_price: exitPrice,
+            exit_price: safeExitPrice,
             profit_loss_percent: profitLossPercent,
             profit_loss_value: profitLossValue,
             exit_reason: 'manual',
@@ -365,26 +382,31 @@ export function usePositions() {
         });
       }
 
-      // Delay the server refresh to give DB time to propagate the update
-      // Use forceUpdate to ensure we get fresh data
+      // Small delay to let DB settle, then reconcile
       setTimeout(() => {
         forceNextFetchRef.current = true;
         fetchPositions(true);
       }, 500);
-      
+
       toast({
         title: 'Position Closed',
         description: `${position.token_symbol} closed with ${profitLossPercent >= 0 ? '+' : ''}${profitLossPercent.toFixed(2)}%`,
       });
+
+      return true;
     } catch (error: unknown) {
+      // Rollback optimistic update on error
+      setPositions(previousPositions);
+
       const err = error as Error;
       toast({
         title: 'Error closing position',
         description: err.message,
         variant: 'destructive',
       });
+      return false;
     }
-  }, [positions, toast, fetchPositions]);
+  }, [toast, fetchPositions]);
 
   // Fetch real-time prices for open positions and update UI state
   // CRITICAL: Use entry_price_usd for P&L calculations to ensure unit consistency
