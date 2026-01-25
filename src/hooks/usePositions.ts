@@ -72,6 +72,8 @@ export function usePositions() {
   const lastServerSignatureRef = useRef<string>('');
   // Force next fetch to always update state (used after close/create operations)
   const forceNextFetchRef = useRef(false);
+  // Flag to temporarily block realtime updates during optimistic operations
+  const blockRealtimeUntilRef = useRef<number>(0);
 
 
   // Fetch positions (forceUpdate bypasses signature check for explicit refreshes)
@@ -288,7 +290,13 @@ export function usePositions() {
       const position = positions.find(p => p.id === positionId);
       if (!position) throw new Error('Position not found');
 
-      // OPTIMISTIC UPDATE: Immediately remove from UI to prevent flicker
+      // OPTIMISTIC UPDATE: Immediately set status to 'closed' so filtering removes it from UI
+      // Store the position data before update in case we need to rollback
+      const previousPositions = [...positions];
+      
+      // Block realtime updates for 2 seconds to prevent stale data from overwriting
+      blockRealtimeUntilRef.current = Date.now() + 2000;
+      
       setPositions(prev => prev.map(p => 
         p.id === positionId ? { ...p, status: 'closed' as const } : p
       ));
@@ -312,7 +320,20 @@ export function usePositions() {
         })
         .eq('id', positionId);
 
-      if (error) throw error;
+      if (error) {
+        // Rollback optimistic update on error
+        setPositions(previousPositions);
+        throw error;
+      }
+
+      // Update the signature cache to include the closed status
+      // This prevents fetchPositions from overwriting our optimistic update
+      lastServerSignatureRef.current = positions
+        .map(p => p.id === positionId 
+          ? `${p.id}:${new Date().toISOString()}:closed` 
+          : `${p.id}:${p.updated_at}:${p.status}`
+        )
+        .join('|');
 
       // Log activity
       const { data: { user } } = await supabase.auth.getUser();
@@ -336,9 +357,12 @@ export function usePositions() {
         });
       }
 
-      // Force refresh to get authoritative data from server
-      forceNextFetchRef.current = true;
-      await fetchPositions(true);
+      // Delay the server refresh to give DB time to propagate the update
+      // Use forceUpdate to ensure we get fresh data
+      setTimeout(() => {
+        forceNextFetchRef.current = true;
+        fetchPositions(true);
+      }, 500);
       
       toast({
         title: 'Position Closed',
@@ -446,6 +470,11 @@ export function usePositions() {
           table: 'positions',
         },
         () => {
+          // Skip realtime updates during optimistic update window
+          // This prevents stale data from overwriting our immediate UI update
+          if (Date.now() < blockRealtimeUntilRef.current) {
+            return;
+          }
           // Force update on realtime changes (position closed, updated, etc.)
           forceNextFetchRef.current = true;
           fetchPositions(true);
