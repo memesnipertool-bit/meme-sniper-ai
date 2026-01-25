@@ -231,10 +231,13 @@ export function useAutoExit() {
         return null;
       }
 
-      console.log('[AutoExit] Running check, executeExits:', executeExits, 'wallet:', wallet.isConnected);
+      console.log('[AutoExit] Running check, executeExits:', executeExits, 'wallet:', wallet.isConnected, 'address:', wallet.address);
 
       const { data, error } = await supabase.functions.invoke('auto-exit', {
-        body: { executeExits },
+        body: { 
+          executeExits,
+          walletAddress: wallet.address, // Pass wallet address for on-chain balance check
+        },
       });
 
       if (error) {

@@ -83,27 +83,85 @@ function getApiKey(apiType: string, dbApiKey: string | null): string | null {
   return null;
 }
 
+// Check on-chain token balance to detect externally sold positions
+async function checkOnChainBalance(
+  tokenAddress: string,
+  walletAddress: string
+): Promise<{ hasBalance: boolean; balance: number }> {
+  try {
+    // Use Helius or Solana RPC to check token balance
+    const rpcUrl = Deno.env.get('HELIUS_RPC_URL') || Deno.env.get('SOLANA_RPC_URL') || 'https://api.mainnet-beta.solana.com';
+    
+    // Get token accounts for this mint
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTokenAccountsByOwner',
+        params: [
+          walletAddress,
+          { mint: tokenAddress },
+          { encoding: 'jsonParsed' }
+        ],
+      }),
+    });
+    
+    if (!response.ok) {
+      console.log(`[AutoExit] RPC balance check failed: ${response.status}`);
+      return { hasBalance: true, balance: 0 }; // Assume has balance if check fails
+    }
+    
+    const data = await response.json();
+    const accounts = data?.result?.value || [];
+    
+    if (accounts.length === 0) {
+      console.log(`[AutoExit] No token account found for ${shortAddress(tokenAddress)} - likely sold externally`);
+      return { hasBalance: false, balance: 0 };
+    }
+    
+    // Sum up balance from all token accounts for this mint
+    let totalBalance = 0;
+    for (const account of accounts) {
+      const amount = account?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+      totalBalance += amount;
+    }
+    
+    console.log(`[AutoExit] On-chain balance for ${shortAddress(tokenAddress)}: ${totalBalance}`);
+    return { hasBalance: totalBalance > 0, balance: totalBalance };
+  } catch (error) {
+    console.error('[AutoExit] Balance check error:', error);
+    return { hasBalance: true, balance: 0 }; // Assume has balance on error
+  }
+}
+
 // Fetch current price from external APIs
 async function fetchCurrentPrice(
   tokenAddress: string,
   chain: string,
   apiConfigs: ApiConfig[]
 ): Promise<number | null> {
-  // Try DexScreener first
-  const dexScreenerConfig = apiConfigs.find(c => c.api_type === 'dexscreener' && c.is_enabled);
-  if (dexScreenerConfig) {
-    try {
-      const response = await fetch(`${dexScreenerConfig.base_url}/latest/dex/tokens/${tokenAddress}`);
-      if (response.ok) {
-        const data = await response.json();
-        const pair = data.pairs?.[0];
-        if (pair?.priceUsd) {
-          return parseFloat(pair.priceUsd);
+  // Try DexScreener first (no API key required, most reliable)
+  try {
+    const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      // Get best pair by liquidity
+      const pairs = data.pairs?.filter((p: any) => p.chainId === 'solana') || [];
+      if (pairs.length > 0) {
+        const bestPair = pairs.reduce((best: any, curr: any) => 
+          (curr?.liquidity?.usd || 0) > (best?.liquidity?.usd || 0) ? curr : best
+        );
+        if (bestPair?.priceUsd) {
+          return parseFloat(bestPair.priceUsd);
         }
       }
-    } catch (e) {
-      console.error('DexScreener price fetch error:', e);
     }
+  } catch (e) {
+    console.error('DexScreener price fetch error:', e);
   }
 
   // Try GeckoTerminal
@@ -111,7 +169,9 @@ async function fetchCurrentPrice(
   if (geckoConfig) {
     try {
       const networkId = chain === 'solana' ? 'solana' : chain === 'bsc' ? 'bsc' : 'eth';
-      const response = await fetch(`${geckoConfig.base_url}/api/v2/networks/${networkId}/tokens/${tokenAddress}`);
+      const response = await fetch(`${geckoConfig.base_url}/api/v2/networks/${networkId}/tokens/${tokenAddress}`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (response.ok) {
         const data = await response.json();
         if (data.data?.attributes?.price_usd) {
@@ -131,6 +191,7 @@ async function fetchCurrentPrice(
       try {
         const response = await fetch(`${birdeyeConfig.base_url}/defi/price?address=${tokenAddress}`, {
           headers: { 'X-API-KEY': apiKey },
+          signal: AbortSignal.timeout(5000),
         });
         if (response.ok) {
           const data = await response.json();
@@ -323,7 +384,7 @@ serve(async (req) => {
       });
     }
     
-    const { positionIds, executeExits } = validationResult.data!;
+    const { positionIds, executeExits, walletAddress } = validationResult.data!;
 
     // Fetch API configurations
     const { data: apiConfigs } = await supabase
@@ -369,18 +430,63 @@ serve(async (req) => {
 
     // Process each position
     for (const position of positions as Position[]) {
-      // Fetch current price (use existing price if no API configs)
-      let currentPrice: number | null = null;
-      if (hasApiConfigs) {
-        currentPrice = await fetchCurrentPrice(position.token_address, position.chain, apiConfigs);
+      // Check on-chain balance if wallet address provided (detects externally sold tokens)
+      if (walletAddress) {
+        const { hasBalance, balance } = await checkOnChainBalance(position.token_address, walletAddress);
+        
+        if (!hasBalance || balance < position.amount * 0.01) {
+          // Token was sold externally (Phantom wallet or elsewhere)
+          console.log(`[AutoExit] Position ${position.token_symbol} sold externally - closing stale position`);
+          
+          await supabase
+            .from('positions')
+            .update({
+              status: 'closed',
+              exit_reason: 'sold_externally',
+              exit_price: position.current_price || position.entry_price,
+              exit_tx_id: null,
+              closed_at: new Date().toISOString(),
+              profit_loss_percent: position.profit_loss_percent,
+              profit_loss_value: position.profit_loss_value,
+            })
+            .eq('id', position.id);
+          
+          // Log the external sale detection
+          await supabase.from('system_logs').insert({
+            user_id: user.id,
+            event_type: 'position_sold_externally',
+            event_category: 'trading',
+            message: `Detected external sale: ${position.token_symbol} - position closed`,
+            metadata: {
+              position_id: position.id,
+              token_symbol: position.token_symbol,
+              on_chain_balance: balance,
+              expected_balance: position.amount,
+            },
+            severity: 'info',
+          });
+          
+          results.push({
+            positionId: position.id,
+            symbol: safeTokenSymbol(position.token_symbol, position.token_address),
+            action: 'hold',
+            currentPrice: position.current_price || position.entry_price,
+            profitLossPercent: position.profit_loss_percent || 0,
+            executed: true,
+            error: 'Position closed - sold externally via wallet',
+          });
+          
+          continue; // Skip normal processing for this position
+        }
       }
       
-      // If can't fetch price, simulate price movement for demo/testing
+      // Fetch current price (always try DexScreener first, no config needed)
+      let currentPrice: number | null = await fetchCurrentPrice(position.token_address, position.chain, apiConfigs || []);
+      
+      // If can't fetch price, use last known price (don't simulate)
       if (currentPrice === null) {
-        // Apply small random price movement to simulate market activity
-        const priceChange = (Math.random() - 0.4) * 0.1; // -4% to +6% change
-        currentPrice = position.current_price * (1 + priceChange);
-        console.log(`Simulated price for ${position.token_symbol}: ${currentPrice.toFixed(8)} (was ${position.current_price})`);
+        currentPrice = position.current_price || position.entry_price;
+        console.log(`Using last known price for ${position.token_symbol}: ${currentPrice}`);
       }
 
       // Check exit conditions
@@ -429,10 +535,11 @@ serve(async (req) => {
               console.log(`[AutoExit] Jupiter quote ready for ${position.token_symbol} - requires frontend signature`);
             } else {
               // Jupiter failed - check if this is a "dead" position that should be force-closed
-              // If the token has lost >95% of value and has no route, mark it as closed (rugged/dead)
-              const isDeadToken = profitLossPercent <= -95;
+              // Lowered threshold to -80% to catch more dead tokens that can't be sold
+              const isDeadToken = profitLossPercent <= -80;
               const noRoute = jupiterResult.error?.includes('No Jupiter route') || 
-                              jupiterResult.error?.includes('No route available');
+                              jupiterResult.error?.includes('No route available') ||
+                              jupiterResult.error?.includes('404');
               
               if (isDeadToken && noRoute) {
                 console.log(`[AutoExit] Force-closing dead position ${position.token_symbol} at ${profitLossPercent.toFixed(2)}%`);

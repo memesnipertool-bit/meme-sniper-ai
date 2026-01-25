@@ -258,11 +258,12 @@ export function validateAutoSniperInput(body: unknown): ValidationResult<AutoSni
 export interface AutoExitInput {
   positionIds: string[] | undefined;
   executeExits: boolean;
+  walletAddress: string | undefined;
 }
 
 export function validateAutoExitInput(body: unknown): ValidationResult<AutoExitInput> {
   if (typeof body !== 'object' || body === null) {
-    return { success: true, data: { positionIds: undefined, executeExits: false } };
+    return { success: true, data: { positionIds: undefined, executeExits: false, walletAddress: undefined } };
   }
   
   const obj = body as Record<string, unknown>;
@@ -288,7 +289,13 @@ export function validateAutoExitInput(body: unknown): ValidationResult<AutoExitI
   // Validate executeExits
   const executeExits = typeof obj.executeExits === 'boolean' ? obj.executeExits : false;
   
-  return { success: true, data: { positionIds, executeExits } };
+  // Validate walletAddress (optional, for on-chain balance checks)
+  let walletAddress: string | undefined = undefined;
+  if (obj.walletAddress !== undefined && typeof obj.walletAddress === 'string' && obj.walletAddress.length >= 32) {
+    walletAddress = obj.walletAddress;
+  }
+  
+  return { success: true, data: { positionIds, executeExits, walletAddress } };
 }
 
 // =============== Risk Check Validation ===============
