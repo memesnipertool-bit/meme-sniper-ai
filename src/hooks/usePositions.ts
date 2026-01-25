@@ -70,10 +70,16 @@ export function usePositions() {
   // and avoid overwriting state if the server payload hasn't changed.
   const hasLoadedOnceRef = useRef(false);
   const lastServerSignatureRef = useRef<string>('');
+  // Force next fetch to always update state (used after close/create operations)
+  const forceNextFetchRef = useRef(false);
 
 
-  // Fetch positions
-  const fetchPositions = useCallback(async () => {
+  // Fetch positions (forceUpdate bypasses signature check for explicit refreshes)
+  const fetchPositions = useCallback(async (forceUpdate: boolean = false) => {
+    // Check if we should force this update
+    const shouldForce = forceUpdate || forceNextFetchRef.current;
+    forceNextFetchRef.current = false; // Reset the flag
+    
     const isInitialLoad = !hasLoadedOnceRef.current;
     try {
       if (isInitialLoad) setLoading(true);
@@ -88,11 +94,10 @@ export function usePositions() {
 
       const rawPositions = ((data as unknown as Position[]) || []).map((p) => ({ ...p }));
 
-      // Only replace positions when the server data actually changed.
-      // This keeps the dashboard stable (no list reset / spinner flicker)
-      // while still allowing local real-time price updates to run smoothly.
+      // Only replace positions when the server data actually changed,
+      // OR when explicitly forced (after closing/creating positions).
       const nextSig = rawPositions.map((p) => `${p.id}:${p.updated_at}:${p.status}`).join('|');
-      if (nextSig !== lastServerSignatureRef.current) {
+      if (shouldForce || nextSig !== lastServerSignatureRef.current) {
         lastServerSignatureRef.current = nextSig;
         setPositions(rawPositions);
       }
@@ -243,8 +248,9 @@ export function usePositions() {
       setExitResults(data.results || []);
       setLastExitCheck(data.timestamp);
 
-      // Refresh positions after check
-      await fetchPositions();
+      // Force refresh positions after check to ensure closed positions are removed
+      forceNextFetchRef.current = true;
+      await fetchPositions(true);
 
       const summary = data.summary as AutoExitSummary | undefined;
       
@@ -281,6 +287,11 @@ export function usePositions() {
     try {
       const position = positions.find(p => p.id === positionId);
       if (!position) throw new Error('Position not found');
+
+      // OPTIMISTIC UPDATE: Immediately remove from UI to prevent flicker
+      setPositions(prev => prev.map(p => 
+        p.id === positionId ? { ...p, status: 'closed' as const } : p
+      ));
 
       const currentValue = position.amount * exitPrice;
       const entryValue = position.entry_value || (position.amount * position.entry_price);
@@ -325,7 +336,9 @@ export function usePositions() {
         });
       }
 
-      await fetchPositions();
+      // Force refresh to get authoritative data from server
+      forceNextFetchRef.current = true;
+      await fetchPositions(true);
       
       toast({
         title: 'Position Closed',
@@ -415,7 +428,9 @@ export function usePositions() {
           table: 'positions',
         },
         () => {
-          fetchPositions();
+          // Force update on realtime changes (position closed, updated, etc.)
+          forceNextFetchRef.current = true;
+          fetchPositions(true);
         }
       )
       .subscribe();

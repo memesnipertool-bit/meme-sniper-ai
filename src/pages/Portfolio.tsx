@@ -213,7 +213,7 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
             </div>
             <Button
               variant="glow"
-              onClick={fetchPositions}
+              onClick={() => fetchPositions(true)}
               disabled={loading}
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
