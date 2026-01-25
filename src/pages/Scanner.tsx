@@ -196,6 +196,14 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     );
 
     if (result.success) {
+      // IMPORTANT: A successful on-chain sell does NOT automatically update our positions table.
+      // Mark the position closed so it is removed from Active Trades immediately.
+      const safeExitPrice = Number.isFinite(currentPrice) && currentPrice > 0
+        ? currentPrice
+        : (position.current_price ?? position.entry_price);
+
+      await markPositionClosed(positionId, safeExitPrice);
+
       addBotLog({
         level: 'success',
         category: 'trade',
@@ -203,7 +211,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         tokenSymbol: position.token_symbol,
         details: `Received ${result.solReceived?.toFixed(4)} SOL`,
       });
-      await fetchPositions(true); // Force update to remove closed position from UI
+
+      // Force refresh to reconcile any background polling / realtime ordering
+      await fetchPositions(true);
       refreshBalance();
       setTimeout(() => refreshBalance(), 8000);
     } else if (result.error) {
