@@ -36,6 +36,7 @@ import { reconcilePositionsWithPools } from "@/lib/positionMetadataReconciler";
 import { Wallet, TrendingUp, Zap, Activity, AlertTriangle, X, FlaskConical, Coins, RotateCcw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ToastAction } from "@/components/ui/toast";
 
 const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref) {
   const { tokens, loading, scanTokens, errors, apiErrors, isDemo, cleanup, lastScanStats } = useTokenScanner();
@@ -178,6 +179,10 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       return;
     }
 
+    const safeExitPrice = Number.isFinite(currentPrice) && currentPrice > 0
+      ? currentPrice
+      : (position.current_price ?? position.entry_price);
+
     // Use 3-stage engine for Jupiter exit (better routing)
     addBotLog({
       level: 'info',
@@ -187,70 +192,123 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       tokenAddress: position.token_address,
     });
 
-    const result = await exitPosition(
-      position.token_address,
-      position.amount,
-      wallet.address,
-      (tx) => signAndSendTransaction(tx),
-      { slippage: 0.15 } // 15% slippage for exits
-    );
+    const showForceCloseToast = (title: string, description: string) => {
+      toast({
+        title,
+        description,
+        duration: 15000,
+        variant: "destructive",
+        action: (
+          <ToastAction
+            altText="Force close"
+            onClick={async () => {
+              const closed = await markPositionClosed(positionId, safeExitPrice);
+              if (closed) {
+                toast({
+                  title: "Position Marked Closed",
+                  description: `${position.token_symbol} removed from active positions`,
+                });
+                await fetchPositions(true);
+              } else {
+                toast({
+                  title: "Force Close Failed",
+                  description: "Couldn't update the position status. Please try again.",
+                  variant: "destructive",
+                });
+              }
+            }}
+          >
+            Force Close
+          </ToastAction>
+        ),
+      });
+    };
 
-    if (result.success) {
-      // IMPORTANT: A successful on-chain sell does NOT automatically update our positions table.
-      // Mark the position closed so it is removed from Active Trades immediately.
-      const safeExitPrice = Number.isFinite(currentPrice) && currentPrice > 0
-        ? currentPrice
-        : (position.current_price ?? position.entry_price);
+    try {
+      const result = await exitPosition(
+        position.token_address,
+        position.amount,
+        wallet.address,
+        (tx) => signAndSendTransaction(tx),
+        { slippage: 0.15 } // 15% slippage for exits
+      );
 
-      const closed = await markPositionClosed(positionId, safeExitPrice);
+      if (result.success) {
+        // IMPORTANT: A successful on-chain sell does NOT automatically update our positions table.
+        // Mark the position closed so it is removed from Active Trades immediately.
+        const closed = await markPositionClosed(positionId, safeExitPrice);
 
-      if (closed) {
-        addBotLog({
-          level: 'success',
-          category: 'trade',
-          message: 'Position closed successfully',
-          tokenSymbol: position.token_symbol,
-          details: `Received ${result.solReceived?.toFixed(4)} SOL`,
-        });
-      } else {
-        addBotLog({
-          level: 'warning',
-          category: 'trade',
-          message: 'Swap succeeded but failed to update position',
-          tokenSymbol: position.token_symbol,
-          details: 'Try clicking Exit again or use Force Close',
-        });
+        if (closed) {
+          addBotLog({
+            level: 'success',
+            category: 'trade',
+            message: 'Position closed successfully',
+            tokenSymbol: position.token_symbol,
+            details: `Received ${result.solReceived?.toFixed(4)} SOL`,
+          });
+        } else {
+          addBotLog({
+            level: 'warning',
+            category: 'trade',
+            message: 'Swap succeeded but failed to update position',
+            tokenSymbol: position.token_symbol,
+            details: 'Use Force Close to remove it from Active Trades',
+          });
+
+          showForceCloseToast(
+            "Exit completed, but position is still open",
+            "The swap went through, but the app couldn't mark it closed. Force close it?"
+          );
+        }
+
+        // Force refresh to reconcile any background polling / realtime ordering
+        await fetchPositions(true);
+        refreshBalance();
+        setTimeout(() => refreshBalance(), 8000);
+        return;
       }
 
-      // Force refresh to reconcile any background polling / realtime ordering
-      await fetchPositions(true);
-      refreshBalance();
-      setTimeout(() => refreshBalance(), 8000);
-    } else if (result.error) {
-      // Check if this is a "token not in wallet" error - offer to force close
-      const errorMessage = result.error;
-      if (errorMessage.includes("don't have this token") || errorMessage.includes("already been sold") || errorMessage.includes("REQ_INPUT") || errorMessage.includes("NO_ROUTE")) {
+      const errorMessage = result.error || "Exit failed";
+      const shouldOfferForceClose =
+        errorMessage.includes("don't have this token") ||
+        errorMessage.includes("already been sold") ||
+        errorMessage.includes("REQ_INPUT") ||
+        errorMessage.includes("NO_ROUTE") ||
+        errorMessage.toLowerCase().includes("no route") ||
+        errorMessage.toLowerCase().includes("no liquidity");
+
+      if (shouldOfferForceClose) {
+        showForceCloseToast(
+          "Token Not Found or No Route",
+          "This position may have been sold externally or has no liquidity. Mark it as closed?"
+        );
+      } else {
         toast({
-          title: "Token Not Found or No Route",
-          description: "This position may have already been sold or has no liquidity. Mark it as closed?",
-          duration: 10000,
-          action: (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                const closed = await markPositionClosed(positionId, currentPrice);
-                if (closed) {
-                  toast({
-                    title: "Position Marked Closed",
-                    description: `${position.token_symbol} removed from active positions`,
-                  });
-                }
-              }}
-            >
-              Force Close
-            </Button>
-          ),
+          title: "Error closing position",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const shouldOfferForceClose =
+        message.includes("don't have this token") ||
+        message.includes("already been sold") ||
+        message.includes("REQ_INPUT") ||
+        message.includes("NO_ROUTE") ||
+        message.toLowerCase().includes("no route") ||
+        message.toLowerCase().includes("no liquidity");
+
+      if (shouldOfferForceClose) {
+        showForceCloseToast(
+          "Token Not Found or No Route",
+          "This position may have been sold externally or has no liquidity. Mark it as closed?"
+        );
+      } else {
+        toast({
+          title: "Error closing position",
+          description: message,
+          variant: "destructive",
         });
       }
     }
