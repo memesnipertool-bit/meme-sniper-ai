@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useNotifications } from '@/hooks/useNotifications';
-import { useAppMode } from '@/contexts/AppModeContext';
 import { useWallet } from '@/hooks/useWallet';
 
 export interface ExitResult {
@@ -34,11 +33,7 @@ export function useAutoExit() {
   const isRunningRef = useRef(false);
   const { toast } = useToast();
   const { addNotification } = useNotifications();
-  const { mode } = useAppMode();
   const { wallet, signAndSendTransaction, refreshBalance } = useWallet();
-  
-  // Demo mode guard
-  const isDemo = mode === 'demo';
 
   // Execute a single pending exit via Jupiter
   const executePendingExit = useCallback(async (result: ExitResult): Promise<boolean> => {
@@ -68,16 +63,12 @@ export function useAutoExit() {
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
       const amountInSmallestUnit = Math.floor(position.amount * 1e9);
       
-      // Get Jupiter quote - using higher slippage for exits to ensure execution
+      // Get Jupiter quote - using lite-api endpoint (public, no auth required)
       // Exit slippage is intentionally higher (15%) to ensure positions can close
       const EXIT_SLIPPAGE_BPS = '1500'; // 15% - higher for exits to ensure execution
-      const quoteUrl = new URL('https://api.jup.ag/quote/v6');
-      quoteUrl.searchParams.set('inputMint', position.token_address);
-      quoteUrl.searchParams.set('outputMint', SOL_MINT);
-      quoteUrl.searchParams.set('amount', amountInSmallestUnit.toString());
-      quoteUrl.searchParams.set('slippageBps', EXIT_SLIPPAGE_BPS);
+      const quoteUrl = `https://lite-api.jup.ag/v6/quote?inputMint=${position.token_address}&outputMint=${SOL_MINT}&amount=${amountInSmallestUnit}&slippageBps=${EXIT_SLIPPAGE_BPS}`;
 
-      const quoteRes = await fetch(quoteUrl.toString());
+      const quoteRes = await fetch(quoteUrl);
       if (!quoteRes.ok) {
         toast({
           title: 'Exit Failed',
@@ -229,31 +220,33 @@ export function useAutoExit() {
     setChecking(true);
 
     try {
-      // Demo mode guard - don't call real API
-      if (isDemo) {
-        console.log('[Demo Guard] Skipping real auto-exit API call in demo mode');
+      // NOTE: Removed demo guard - let demo mode handle separately in useDemoAutoExit
+      // This hook should only be called in live mode from Scanner.tsx
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.log('No session for auto-exit check');
         isRunningRef.current = false;
         setChecking(false);
         return null;
       }
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        console.log('No session for auto-exit check');
-        return null;
-      }
-
-      console.log('Running auto-exit check, executeExits:', executeExits);
+      console.log('[AutoExit] Running check, executeExits:', executeExits, 'wallet:', wallet.isConnected);
 
       const { data, error } = await supabase.functions.invoke('auto-exit', {
         body: { executeExits },
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[AutoExit] Edge function error:', error);
+        throw error;
+      }
       if (data.error) throw new Error(data.error);
 
+      console.log('[AutoExit] Results:', data.results?.length || 0, 'positions checked');
+      
       setResults(data.results || []);
-      setLastCheck(data.timestamp);
+      setLastCheck(data.timestamp || new Date().toISOString());
 
       const summary = data.summary as AutoExitSummary | undefined;
 
@@ -321,7 +314,7 @@ export function useAutoExit() {
       setChecking(false);
       isRunningRef.current = false;
     }
-  }, [toast, addNotification, isDemo, wallet.isConnected, executePendingExit]);
+  }, [toast, addNotification, wallet.isConnected, executePendingExit]);
 
   // Default monitor interval: 30 seconds - balanced between responsiveness and API load
   const DEFAULT_MONITOR_INTERVAL_MS = 30000;

@@ -161,27 +161,34 @@ async function executeJupiterSell(
     // Convert token amount to integer (assuming 9 decimals for most Solana tokens)
     const amountInSmallestUnit = Math.floor(position.amount * 1e9);
     
-    // 1. Get quote from Jupiter
-    const quoteUrl = new URL('https://api.jup.ag/quote/v6');
-    quoteUrl.searchParams.set('inputMint', position.token_address);
-    quoteUrl.searchParams.set('outputMint', SOL_MINT);
-    quoteUrl.searchParams.set('amount', amountInSmallestUnit.toString());
-    quoteUrl.searchParams.set('slippageBps', '1500'); // 15% slippage for exit
+    // Use lite-api.jup.ag which is the recommended public endpoint
+    // See: https://station.jup.ag/docs/apis/price-api
+    const quoteUrl = `https://lite-api.jup.ag/v6/quote?inputMint=${position.token_address}&outputMint=${SOL_MINT}&amount=${amountInSmallestUnit}&slippageBps=1500`;
     
     console.log(`[AutoExit] Fetching Jupiter quote...`);
-    const quoteResponse = await fetch(quoteUrl.toString());
+    const quoteResponse = await fetch(quoteUrl, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
     
     if (!quoteResponse.ok) {
       const errorText = await quoteResponse.text();
-      console.error(`[AutoExit] Jupiter quote failed:`, errorText);
+      console.error(`[AutoExit] Jupiter quote failed:`, quoteResponse.status, errorText);
+      
+      // If 400/404 = token not indexed or no route
+      if (quoteResponse.status === 400 || quoteResponse.status === 404) {
+        return { success: false, error: 'No Jupiter route available - token may not be indexed or has no liquidity' };
+      }
       return { success: false, error: `Jupiter quote failed: ${quoteResponse.status}` };
     }
     
     const quoteData = await quoteResponse.json();
     
     if (!quoteData || quoteData.error) {
-      console.error(`[AutoExit] Jupiter quote error:`, quoteData.error || 'No route');
-      return { success: false, error: quoteData.error || 'No route available for sell' };
+      console.error(`[AutoExit] Jupiter quote error:`, quoteData?.error || 'No route');
+      return { success: false, error: quoteData?.error || 'No route available for sell' };
     }
     
     console.log(`[AutoExit] Jupiter quote received - Output: ${quoteData.outAmount} lamports`);
@@ -421,8 +428,55 @@ serve(async (req) => {
               error = 'PENDING_SIGNATURE: Jupiter quote ready, requires wallet signature';
               console.log(`[AutoExit] Jupiter quote ready for ${position.token_symbol} - requires frontend signature`);
             } else {
-              executed = false;
-              error = jupiterResult.error || 'Jupiter sell failed';
+              // Jupiter failed - check if this is a "dead" position that should be force-closed
+              // If the token has lost >95% of value and has no route, mark it as closed (rugged/dead)
+              const isDeadToken = profitLossPercent <= -95;
+              const noRoute = jupiterResult.error?.includes('No Jupiter route') || 
+                              jupiterResult.error?.includes('No route available');
+              
+              if (isDeadToken && noRoute) {
+                console.log(`[AutoExit] Force-closing dead position ${position.token_symbol} at ${profitLossPercent.toFixed(2)}%`);
+                
+                // Force close the position - mark as closed with no tx
+                await supabase
+                  .from('positions')
+                  .update({
+                    status: 'closed',
+                    exit_reason: 'force_closed_dead_token',
+                    exit_price: currentPrice,
+                    exit_tx_id: null,
+                    closed_at: new Date().toISOString(),
+                    current_price: currentPrice,
+                    current_value: currentValue,
+                    profit_loss_percent: profitLossPercent,
+                    profit_loss_value: profitLossValue,
+                  })
+                  .eq('id', position.id);
+                
+                // Log the force close
+                await supabase.from('system_logs').insert({
+                  user_id: user.id,
+                  event_type: 'force_close_dead_token',
+                  event_category: 'trading',
+                  message: `Force-closed dead token: ${position.token_symbol} at ${profitLossPercent.toFixed(2)}%`,
+                  metadata: {
+                    position_id: position.id,
+                    token_symbol: position.token_symbol,
+                    entry_price: position.entry_price,
+                    exit_price: currentPrice,
+                    profit_loss_percent: profitLossPercent,
+                    reason: 'No Jupiter route available - token likely rugged or dead',
+                  },
+                  severity: 'warning',
+                });
+                
+                executed = true;
+                txId = 'force_closed';
+                error = undefined;
+              } else {
+                executed = false;
+                error = jupiterResult.error || 'Jupiter sell failed';
+              }
             }
           }
 

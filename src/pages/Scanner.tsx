@@ -263,12 +263,21 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   }, [isDemo, demoTotalPnLPercent, realOpenPositions, totalPnL]);
 
   // Resume monitors when navigating back to Scanner with bot still active
+  // CRITICAL: Also start auto-exit when there are open positions in live mode
   useEffect(() => {
-    if (isBotActive && !isPaused) {
-      if (isDemo) {
+    if (isDemo) {
+      // Demo mode: only run demo monitor when bot is active
+      if (isBotActive && !isPaused) {
         startDemoMonitor(5000);
-      } else if (autoExitEnabled) {
-        startAutoExitMonitor(30000);
+      }
+    } else {
+      // Live mode: ALWAYS run auto-exit monitor when there are open positions OR bot is active with autoExit
+      const hasOpenLivePositions = realOpenPositions.length > 0;
+      const shouldRunAutoExit = hasOpenLivePositions || (isBotActive && !isPaused && autoExitEnabled);
+      
+      if (shouldRunAutoExit && wallet.isConnected) {
+        console.log(`[Scanner] Starting auto-exit monitor: ${realOpenPositions.length} open positions, bot=${isBotActive}, autoExit=${autoExitEnabled}`);
+        startAutoExitMonitor(15000); // Check every 15 seconds for faster response
       }
     }
     
@@ -277,7 +286,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       stopDemoMonitor();
       stopAutoExitMonitor();
     };
-  }, [isBotActive, isPaused, isDemo, autoExitEnabled, startDemoMonitor, stopDemoMonitor, startAutoExitMonitor, stopAutoExitMonitor]);
+  }, [isBotActive, isPaused, isDemo, autoExitEnabled, startDemoMonitor, stopDemoMonitor, startAutoExitMonitor, stopAutoExitMonitor, realOpenPositions.length, wallet.isConnected]);
 
   // Cleanup on unmount
   useEffect(() => {
