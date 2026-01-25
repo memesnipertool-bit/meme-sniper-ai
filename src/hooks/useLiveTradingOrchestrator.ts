@@ -183,10 +183,15 @@ export function useLiveTradingOrchestrator() {
       const position = result.position;
       if (position) {
         try {
+          // Use trading engine metadata first (from DexScreener/liquidity detection),
+          // fall back to scanner token metadata if not available
+          const finalSymbol = position.tokenSymbol || token.symbol;
+          const finalName = position.tokenName || token.name;
+          
           const savedPosition = await createPosition(
             token.address,
-            position.tokenSymbol || token.symbol,
-            token.name,
+            finalSymbol,
+            finalName,
             'solana',
             position.entryPrice,
             position.tokenAmount,
