@@ -9,6 +9,7 @@ import {
   Play, 
   Loader2,
   AlertTriangle,
+  XCircle,
 } from "lucide-react";
 
 interface RecoveryControlsProps {
@@ -16,9 +17,12 @@ interface RecoveryControlsProps {
   onForceEvaluate: () => void;
   onClearProcessed: () => void;
   onResetBot: () => void;
+  onCleanupStuck?: () => void;
   scanning: boolean;
   evaluating: boolean;
+  cleaningUp?: boolean;
   processedCount: number;
+  stuckPositionsCount?: number;
   botActive: boolean;
 }
 
@@ -27,9 +31,12 @@ export default function RecoveryControls({
   onForceEvaluate,
   onClearProcessed,
   onResetBot,
+  onCleanupStuck,
   scanning,
   evaluating,
+  cleaningUp = false,
   processedCount,
+  stuckPositionsCount = 0,
   botActive,
 }: RecoveryControlsProps) {
   const [scanCooldown, setScanCooldown] = useState(false);
@@ -114,6 +121,24 @@ export default function RecoveryControls({
             Reset Bot
           </Button>
         </div>
+        
+        {/* Cleanup Stuck Positions - Full width button */}
+        {onCleanupStuck && stuckPositionsCount > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full h-9 text-xs mt-2 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={onCleanupStuck}
+            disabled={cleaningUp}
+          >
+            {cleaningUp ? (
+              <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+            ) : (
+              <XCircle className="w-3 h-3 mr-1.5" />
+            )}
+            {cleaningUp ? 'Cleaning...' : `Cleanup ${stuckPositionsCount} Stuck Position${stuckPositionsCount > 1 ? 's' : ''}`}
+          </Button>
+        )}
         
         <p className="text-[10px] text-muted-foreground mt-2 text-center">
           Use if bot appears stuck or not trading.
