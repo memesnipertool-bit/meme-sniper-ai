@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWallet } from '@/hooks/useWallet';
+import { addBotLog } from '@/components/scanner/BotActivityLog';
 
 export interface ExitResult {
   positionId: string;
@@ -45,6 +46,15 @@ export function useAutoExit() {
       });
       return false;
     }
+
+    const actionLabel = result.action === 'take_profit' ? '💰 TAKE PROFIT' : '🛑 STOP LOSS';
+    addBotLog({
+      level: 'info',
+      category: 'exit',
+      message: `${actionLabel} triggered: ${result.symbol}`,
+      tokenSymbol: result.symbol,
+      details: `Current P&L: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}% | Price: $${result.currentPrice.toFixed(8)}`,
+    });
 
     try {
       // Get the position details from DB
@@ -185,7 +195,18 @@ export function useAutoExit() {
           });
       }
 
-      // Success notification
+      // Success notification & detailed log
+      const exitLabel = result.action === 'take_profit' ? '💰 TAKE PROFIT' : '🛑 STOP LOSS';
+      const pnlText = result.profitLossPercent >= 0 ? `+${result.profitLossPercent.toFixed(2)}%` : `${result.profitLossPercent.toFixed(2)}%`;
+      
+      addBotLog({
+        level: result.action === 'take_profit' ? 'success' : 'warning',
+        category: 'exit',
+        message: `✅ SELL FILLED: ${result.symbol}`,
+        tokenSymbol: result.symbol,
+        details: `Exit: $${result.currentPrice.toFixed(8)} | P&L: ${pnlText} | Reason: ${result.action.replace('_', ' ')} | TX: ${signResult.signature.slice(0, 12)}...`,
+      });
+
       toast({
         title: result.action === 'take_profit' ? '💰 Take Profit Executed!' : '🛑 Stop Loss Executed!',
         description: `${result.symbol} sold at ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(1)}%`,
@@ -197,6 +218,15 @@ export function useAutoExit() {
 
     } catch (error: any) {
       console.error('[AutoExit] Execute exit error:', error);
+      
+      addBotLog({
+        level: 'error',
+        category: 'exit',
+        message: `❌ SELL FAILED: ${result.symbol}`,
+        tokenSymbol: result.symbol,
+        details: `Reason: ${error.message || 'Unknown error'} | Price at failure: $${result.currentPrice.toFixed(8)}`,
+      });
+
       toast({
         title: 'Exit Execution Failed',
         description: error.message || 'Unknown error',
