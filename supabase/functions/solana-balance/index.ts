@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
+    if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Authorization required" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -51,22 +51,24 @@ Deno.serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
 
-    // Verify user
+    // Verify user using getClaims for proper JWT validation
     const token = authHeader.replace("Bearer ", "");
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser(token);
+    const { data, error: authError } = await supabase.auth.getClaims(token);
 
-    if (authError || !user) {
+    if (authError || !data?.claims?.sub) {
+      console.error("[SolanaBalance] Auth error:", authError?.message);
       return new Response(JSON.stringify({ error: "Invalid authentication" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const userId = data.claims.sub;
 
     const body: BalanceRequest = await req.json().catch(() => ({ publicKey: "" }));
     if (!body.publicKey || typeof body.publicKey !== "string") {
@@ -85,7 +87,7 @@ Deno.serve(async (req) => {
       rpcHost = rpcUrl.slice(0, 32);
     }
 
-    console.log(`[SolanaBalance] user=${user.id} rpcHost=${rpcHost}`);
+    console.log(`[SolanaBalance] user=${userId} rpcHost=${rpcHost}`);
 
     const balanceLamports = await getBalanceLamports(rpcUrl, body.publicKey);
     const balanceSol = balanceLamports / 1e9;
