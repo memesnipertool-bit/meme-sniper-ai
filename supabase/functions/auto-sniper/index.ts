@@ -64,6 +64,10 @@ interface SnipeDecision {
     amount: number;
     slippage: number;
     priority: string;
+    profitTakePercent?: number;
+    stopLossPercent?: number;
+    minLiquidity?: number;
+    maxConcurrentTrades?: number;
   } | null;
 }
 
@@ -585,9 +589,10 @@ serve(async (req) => {
     const { tokens, executeOnApproval } = validationResult.data!;
 
     // Default settings to use if user hasn't configured any
+    // IMPORTANT: These MUST match the defaults in useSniperSettings.ts
     const defaultSettings: UserSettings = {
       user_id: user.id,
-      min_liquidity: 300,
+      min_liquidity: 5, // 5 SOL minimum (matches frontend default)
       profit_take_percentage: 100,
       stop_loss_percentage: 20,
       trade_amount: 0.1,
@@ -642,31 +647,50 @@ serve(async (req) => {
       const reasons: string[] = [];
       let allPassed = true;
 
-      // Rule 1: Liquidity check
-      const liquidityCheck = checkLiquidity(tokenData, settings);
-      reasons.push(liquidityCheck.reason);
-      if (!liquidityCheck.passed) allPassed = false;
+      // Rule 0: CRITICAL - Token must be sellable to avoid stuck positions
+      if (tokenData.canSell === false) {
+        reasons.push('✗ Token cannot be sold (would create stuck position)');
+        allPassed = false;
+        console.log(`[Sellability] Token ${tokenData.symbol} rejected - not sellable`);
+      }
+
+      // Rule 1: Liquidity check against user's min_liquidity setting
+      if (allPassed) {
+        const liquidityCheck = checkLiquidity(tokenData, settings);
+        reasons.push(liquidityCheck.reason);
+        if (!liquidityCheck.passed) {
+          allPassed = false;
+          console.log(`[Liquidity] Token ${tokenData.symbol} rejected - ${tokenData.liquidity} SOL < ${settings.min_liquidity} SOL minimum`);
+        }
+      }
 
       // Rule 2: Liquidity lock check (optional - can be bypassed if not required)
-      const lockCheck = checkLiquidityLock(tokenData);
-      reasons.push(lockCheck.reason);
-      // Don't fail on lock check alone - just add reason
-      // if (!lockCheck.passed) allPassed = false;
+      if (allPassed) {
+        const lockCheck = checkLiquidityLock(tokenData);
+        reasons.push(lockCheck.reason);
+        // Don't fail on lock check alone - just add reason
+      }
 
       // Rule 3: Category filter check
-      const categoryCheck = checkCategoryMatch(tokenData, settings);
-      reasons.push(categoryCheck.reason);
-      if (!categoryCheck.passed) allPassed = false;
+      if (allPassed) {
+        const categoryCheck = checkCategoryMatch(tokenData, settings);
+        reasons.push(categoryCheck.reason);
+        if (!categoryCheck.passed) allPassed = false;
+      }
 
       // Rule 4: Buyer position check
-      const positionCheck = checkBuyerPosition(tokenData);
-      reasons.push(positionCheck.reason);
-      if (!positionCheck.passed) allPassed = false;
+      if (allPassed) {
+        const positionCheck = checkBuyerPosition(tokenData);
+        reasons.push(positionCheck.reason);
+        if (!positionCheck.passed) allPassed = false;
+      }
 
       // Check blacklist/whitelist
-      const listCheck = checkBlacklistWhitelist(tokenData, settings);
-      reasons.push(listCheck.reason);
-      if (!listCheck.passed) allPassed = false;
+      if (allPassed) {
+        const listCheck = checkBlacklistWhitelist(tokenData, settings);
+        reasons.push(listCheck.reason);
+        if (!listCheck.passed) allPassed = false;
+      }
 
       // Rule 5: Risk API check (only if other rules pass AND API is configured)
       // Skip risk check if no API configured - don't block trades due to missing config
@@ -698,8 +722,8 @@ serve(async (req) => {
         }
       }
       
-      // Log the decision for debugging
-      console.log(`Token ${tokenData.symbol}: approved=${allPassed}, reasons=${reasons.join(' | ')}`);
+      // Log the decision for debugging with settings context
+      console.log(`Token ${tokenData.symbol}: approved=${allPassed} | Settings: ${settings.trade_amount} SOL, TP ${settings.profit_take_percentage}%, SL ${settings.stop_loss_percentage}%, Min Liq ${settings.min_liquidity} SOL`);
 
 
       const decision: SnipeDecision = {
@@ -708,8 +732,14 @@ serve(async (req) => {
         reasons,
         tradeParams: allPassed ? {
           amount: settings.trade_amount,
-          slippage: settings.priority === 'turbo' ? 15 : settings.priority === 'fast' ? 10 : 5,
+          // Use user's configured slippage from settings, fallback to priority-based
+          slippage: (userSettings as any)?.slippage_tolerance ?? (settings.priority === 'turbo' ? 15 : settings.priority === 'fast' ? 10 : 5),
           priority: settings.priority,
+          // Include TP/SL for reference
+          profitTakePercent: settings.profit_take_percentage,
+          stopLossPercent: settings.stop_loss_percentage,
+          minLiquidity: settings.min_liquidity,
+          maxConcurrentTrades: settings.max_concurrent_trades,
         } : null,
       };
 
