@@ -50,12 +50,11 @@ export interface LiveTradeResult {
   source?: 'trading-engine' | 'edge-function';
 }
 
-// Orchestrator state
+// Orchestrator state - executedTokens moved to ref for stable closure access
 interface OrchestratorState {
   isExecuting: boolean;
   currentToken: string | null;
   pendingQueue: ApprovedToken[];
-  executedTokens: Set<string>;
   lastTradeTime: number;
 }
 
@@ -76,12 +75,15 @@ export function useLiveTradingOrchestrator() {
     isExecuting: false,
     currentToken: null,
     pendingQueue: [],
-    executedTokens: new Set(),
     lastTradeTime: 0,
   });
 
   const executingRef = useRef(false);
   const queueRef = useRef<ApprovedToken[]>([]);
+  
+  // CRITICAL: Use ref for executedTokens to prevent stale closure issues
+  // This ensures deduplication works correctly across all callbacks
+  const executedTokensRef = useRef<Set<string>>(new Set());
 
   /**
    * Validate prerequisites for live trading
@@ -314,8 +316,8 @@ export function useLiveTradingOrchestrator() {
       const token = queueRef.current.shift();
       if (!token) break;
 
-      // Skip if already executed
-      if (state.executedTokens.has(token.address)) {
+      // Skip if already executed - use ref for stable closure access
+      if (executedTokensRef.current.has(token.address)) {
         continue;
       }
 
@@ -333,10 +335,10 @@ export function useLiveTradingOrchestrator() {
 
       const result = await executeSingleTrade(token, settings!);
 
-      // Mark as executed regardless of result
+      // Mark as executed regardless of result - use ref for immediate effect
+      executedTokensRef.current.add(token.address);
       setState(prev => ({
         ...prev,
-        executedTokens: new Set(prev.executedTokens).add(token.address),
         lastTradeTime: Date.now(),
       }));
 
@@ -365,15 +367,15 @@ export function useLiveTradingOrchestrator() {
     }));
     
     executingRef.current = false;
-  }, [validatePrerequisites, state, settings, executeSingleTrade, toast, refreshBalance, fetchPositions, openWalletModal]);
+  }, [validatePrerequisites, state.lastTradeTime, settings, executeSingleTrade, toast, refreshBalance, fetchPositions, openWalletModal]);
 
   /**
    * Queue approved tokens for execution
    */
   const queueTokens = useCallback((tokens: ApprovedToken[]) => {
-    // Filter out already executed or queued tokens
+    // Filter out already executed or queued tokens - use ref for stable access
     const newTokens = tokens.filter(t => 
-      !state.executedTokens.has(t.address) &&
+      !executedTokensRef.current.has(t.address) &&
       !queueRef.current.some(q => q.address === t.address)
     );
 
@@ -394,7 +396,7 @@ export function useLiveTradingOrchestrator() {
 
     // Start processing
     processQueue();
-  }, [state.executedTokens, processQueue]);
+  }, [processQueue]);
 
   /**
    * Execute immediate trade (bypass queue)
@@ -426,10 +428,7 @@ export function useLiveTradingOrchestrator() {
    * Reset executed tokens (allow re-trading)
    */
   const resetExecutedTokens = useCallback(() => {
-    setState(prev => ({
-      ...prev,
-      executedTokens: new Set(),
-    }));
+    executedTokensRef.current.clear();
   }, []);
 
   return {
@@ -437,7 +436,7 @@ export function useLiveTradingOrchestrator() {
     isExecuting: state.isExecuting,
     currentToken: state.currentToken,
     queueLength: queueRef.current.length,
-    executedCount: state.executedTokens.size,
+    executedCount: executedTokensRef.current.size,
     engineStatus: tradingEngine.status,
 
     // Actions
