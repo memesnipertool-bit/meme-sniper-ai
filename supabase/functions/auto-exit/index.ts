@@ -67,6 +67,48 @@ interface ExitResult {
   error?: string;
 }
 
+// SPL Token Mint layout: decimals at offset 44
+function base64ToBytes(base64: string): Uint8Array {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function rpcRequest(rpcUrl: string, method: string, params: unknown[]): Promise<any> {
+  const res = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`RPC error ${res.status}: ${text.slice(0, 160)}`);
+  }
+  const data = await res.json();
+  if (data?.error) throw new Error(data.error?.message || 'RPC returned an error');
+  return data?.result;
+}
+
+async function getMintDecimals(rpcUrl: string, mint: string): Promise<number> {
+  if (mint === 'So11111111111111111111111111111111111111112') return 9;
+  const result = await rpcRequest(rpcUrl, 'getAccountInfo', [mint, { encoding: 'base64' }]);
+  const value = result?.value;
+  const data = value?.data;
+  const base64 = Array.isArray(data) ? data[0] : null;
+  if (!base64 || typeof base64 !== 'string') throw new Error('Mint account not found');
+  const bytes = base64ToBytes(base64);
+  if (bytes.length < 45) throw new Error(`Invalid mint data length: ${bytes.length}`);
+  const decimals = bytes[44];
+  return typeof decimals === 'number' ? decimals : 6;
+}
+
+function toBaseUnits(amountDecimal: number, decimals: number): string {
+  const fixed = Math.max(0, amountDecimal).toFixed(decimals);
+  const [whole, frac = ''] = fixed.split('.');
+  return BigInt(`${whole}${frac.padEnd(decimals, '0')}`).toString();
+}
+
 // Get API key from environment (secure) with fallback to database (legacy)
 function getApiKey(apiType: string, dbApiKey: string | null): string | null {
   // Priority 1: Environment variable (Supabase Secrets - secure)
@@ -227,15 +269,27 @@ async function fetchCurrentPrice(
 async function executeJupiterSell(
   position: Position,
   reason: 'take_profit' | 'stop_loss',
-  rpcUrl: string
+  rpcUrl: string,
+  tokenAmountUiOverride?: number
 ): Promise<{ success: boolean; txId?: string; quote?: any; error?: string }> {
   try {
     console.log(`[AutoExit] Executing SELL via Jupiter for ${position.token_symbol} - Reason: ${reason}`);
     
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
     
-    // Convert token amount to integer (assuming 9 decimals for most Solana tokens)
-    const amountInSmallestUnit = Math.floor(position.amount * 1e9);
+    const tokenAmountUi = (typeof tokenAmountUiOverride === 'number' && tokenAmountUiOverride > 0)
+      ? tokenAmountUiOverride
+      : position.amount;
+
+    // Convert token amount to base units using real mint decimals
+    let decimals = 6;
+    try {
+      decimals = await getMintDecimals(rpcUrl, position.token_address);
+    } catch {
+      decimals = 6;
+    }
+
+    const amountInSmallestUnit = toBaseUnits(tokenAmountUi, decimals);
     
     // Use lite-api.jup.ag which is the recommended public endpoint
     // See: https://station.jup.ag/docs/apis/price-api
@@ -486,12 +540,17 @@ serve(async (req) => {
     for (const position of positions as Position[]) {
       // Check on-chain balance if wallet address provided (detects externally sold tokens)
       // CRITICAL: Pass created_at to prevent false positives on new positions
+      let onChainBalanceUi: number | null = null;
+      let onChainBalanceSkipped = false;
       if (walletAddress) {
         const { hasBalance, balance, skipped } = await checkOnChainBalance(
           position.token_address, 
           walletAddress,
           position.created_at || new Date().toISOString()
         );
+
+        onChainBalanceUi = balance;
+        onChainBalanceSkipped = skipped;
         
         // Only mark as sold externally if NOT skipped (position old enough) AND balance is zero
         if (!skipped && (!hasBalance || balance < position.amount * 0.01)) {
@@ -554,8 +613,11 @@ serve(async (req) => {
       
       // Calculate P&L using entry_price_usd for accurate USD-based calculations
       const entryPriceForCalc = position.entry_price_usd ?? position.entry_price;
-      const entryValueForCalc = position.entry_value ?? (position.amount * entryPriceForCalc);
-      const currentValue = position.amount * currentPrice;
+      const effectiveAmountForValuation = (!onChainBalanceSkipped && typeof onChainBalanceUi === 'number' && onChainBalanceUi > 0)
+        ? onChainBalanceUi
+        : position.amount;
+      const entryValueForCalc = position.entry_value ?? (effectiveAmountForValuation * entryPriceForCalc);
+      const currentValue = effectiveAmountForValuation * currentPrice;
       // Use entry_value for accurate P&L $ calculation
       const profitLossValue = entryValueForCalc * (profitLossPercent / 100);
 
@@ -586,8 +648,11 @@ serve(async (req) => {
             error = sellResult.error;
           } else {
             // Use Jupiter for real sell execution
-            const rpcUrl = Deno.env.get("SOLANA_RPC_URL") || "https://api.mainnet-beta.solana.com";
-            const jupiterResult = await executeJupiterSell(position, reason, rpcUrl);
+             const rpcUrl = Deno.env.get("SOLANA_RPC_URL") || "https://api.mainnet-beta.solana.com";
+             const tokenAmountForExit = (!onChainBalanceSkipped && typeof onChainBalanceUi === 'number' && onChainBalanceUi > 0)
+               ? onChainBalanceUi
+               : position.amount;
+             const jupiterResult = await executeJupiterSell(position, reason, rpcUrl, tokenAmountForExit);
             
             if (jupiterResult.success && jupiterResult.quote) {
               // Jupiter quote received - mark position with pending_exit and quote info

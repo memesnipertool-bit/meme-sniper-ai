@@ -48,6 +48,43 @@ const PUMPFUN_TRADE_API = "https://pumpportal.fun/api/trade-local";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
+// SPL Token Mint layout: decimals at offset 44
+function base64ToBytes(base64: string): Uint8Array {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function rpcRequest(rpcUrl: string, method: string, params: unknown[]): Promise<any> {
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`RPC error ${res.status}: ${text.slice(0, 160)}`);
+  }
+  const data = await res.json();
+  if (data?.error) throw new Error(data.error?.message || "RPC returned an error");
+  return data?.result;
+}
+
+async function getMintDecimals(rpcUrl: string, mint: string): Promise<number> {
+  if (mint === SOL_MINT) return 9;
+  const result = await rpcRequest(rpcUrl, "getAccountInfo", [mint, { encoding: "base64" }]);
+  const value = result?.value;
+  const data = value?.data;
+  const base64 = Array.isArray(data) ? data[0] : null;
+  if (!base64 || typeof base64 !== "string") throw new Error("Mint account not found");
+  const bytes = base64ToBytes(base64);
+  if (bytes.length < 45) throw new Error(`Invalid mint data length: ${bytes.length}`);
+  const decimals = bytes[44];
+  if (typeof decimals !== "number" || decimals > 18) throw new Error(`Invalid decimals: ${decimals}`);
+  return decimals;
+}
+
 interface QuoteRequest {
   inputMint: string;
   outputMint: string;
@@ -888,7 +925,12 @@ Deno.serve(async (req) => {
         const inputAmountLamports = parseInt(body.amount);
         const outputAmountLamports = parseInt(quoteData.outAmount || quoteData.outputAmount);
         const inputAmountDecimal = inputAmountLamports / 1e9;
-        const outputAmountDecimal = outputAmountLamports / (pumpCheck.isPumpFun ? 1e6 : 1e6);
+
+        const rpcUrl = Deno.env.get("SOLANA_RPC_URL") || "https://api.mainnet-beta.solana.com";
+        const outputDecimals = pumpCheck.isPumpFun
+          ? 6
+          : await getMintDecimals(rpcUrl, body.outputMint);
+        const outputAmountDecimal = outputAmountLamports / Math.pow(10, outputDecimals);
         const entryPrice = inputAmountDecimal / outputAmountDecimal;
 
         const { data: position, error: posError } = await supabase
