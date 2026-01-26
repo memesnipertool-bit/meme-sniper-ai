@@ -326,10 +326,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
+    // CRITICAL: Clear local state FIRST before server signout
+    // This prevents auto-login from persisted session if server call fails
     clearSessionTimers();
-    await supabase.auth.signOut();
+    setUser(null);
+    setSession(null);
     setRole(null);
     setSessionExpiring(false);
+    setIsSuspended(false);
+    setSuspensionReason(null);
+    
+    try {
+      // Attempt server signout - may fail if session already expired
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) {
+        console.warn('Server signout warning (session may have expired):', error.message);
+      }
+    } catch (err) {
+      // Server signout failed, but local state is already cleared
+      console.warn('Signout error (local state already cleared):', err);
+    }
   };
 
   return (
