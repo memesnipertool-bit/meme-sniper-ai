@@ -11,6 +11,7 @@ import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { useAutoExit } from "@/hooks/useAutoExit";
 import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
 import SolTradesBanner from "@/components/dashboard/SolTradesBanner";
+import { TransactionHistory } from "@/components/portfolio/TransactionHistory";
 import { isPlaceholderTokenText } from "@/lib/dexscreener";
 import { 
   TrendingUp, 
@@ -563,105 +564,11 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
 
           {/* Transaction History Tab */}
           <TabsContent value="history">
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <History className="w-5 h-5 text-primary" />
-                    Transaction History
-                  </CardTitle>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => refetchTrades()}
-                    disabled={tradesLoading}
-                  >
-                    {tradesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                {tradesLoading && trades.length === 0 ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                  </div>
-                ) : trades.length === 0 ? (
-                  <div className="p-8 text-center">
-                    <History className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-muted-foreground">No transactions yet</p>
-                    <p className="text-sm text-muted-foreground">Your buy and sell transactions will appear here</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
-                    {trades.map((trade) => (
-                      <div 
-                        key={trade.id} 
-                        className="flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${trade.trade_type === 'buy' ? 'bg-success/20' : 'bg-destructive/20'}`}>
-                            {trade.trade_type === 'buy' ? (
-                              <ArrowDownRight className="w-4 h-4 text-success" />
-                            ) : (
-                              <ArrowUpRight className="w-4 h-4 text-destructive" />
-                            )}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-foreground">
-                                {!isPlaceholderTokenText(trade.token_symbol)
-                                  ? (trade.token_symbol as string)
-                                  : shortAddress(trade.token_address)}
-                              </span>
-                              <Badge variant="outline" className="text-xs capitalize">
-                                {trade.trade_type}
-                              </Badge>
-                              <Badge 
-                                variant="outline" 
-                                className={`text-xs ${
-                                  trade.status === 'completed' ? 'bg-success/10 text-success border-success/30' :
-                                  trade.status === 'failed' ? 'bg-destructive/10 text-destructive border-destructive/30' :
-                                  'bg-warning/10 text-warning border-warning/30'
-                                }`}
-                              >
-                                {trade.status || 'pending'}
-                              </Badge>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              {format(new Date(trade.created_at), 'MMM d, yyyy HH:mm')}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-4">
-                          <div className="text-right">
-                            <p className="font-medium text-foreground text-sm">
-                              {trade.amount.toFixed(4)} tokens
-                            </p>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              {trade.price_sol && <span>{trade.price_sol.toFixed(6)} SOL</span>}
-                              {trade.price_usd && <span>(${trade.price_usd.toFixed(4)})</span>}
-                            </div>
-                          </div>
-                          
-                          {trade.tx_hash && (
-                            <a
-                              href={`https://solscan.io/tx/${trade.tx_hash}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              TX
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <TransactionHistory 
+              trades={trades} 
+              loading={tradesLoading} 
+              onRefetch={refetchTrades} 
+            />
           </TabsContent>
         </Tabs>
       </div>
