@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { fetchDexScreenerTokenMetadata, fetchDexScreenerPrices, isPlaceholderTokenText, isLikelyRealSolanaMint } from '@/lib/dexscreener';
-
 export interface Position {
   id: string;
   user_id: string;
@@ -62,6 +62,10 @@ export function usePositions() {
   const [exitResults, setExitResults] = useState<ExitResult[]>([]);
   const [lastPriceUpdate, setLastPriceUpdate] = useState<string | null>(null);
   const { toast } = useToast();
+  const { user } = useAuth();
+  
+  // Track user ID to reset state when user changes
+  const currentUserIdRef = useRef<string | null>(null);
 
   // Cache DexScreener metadata by token address to avoid repeated external calls
   const tokenMetaCacheRef = useRef(new Map<string, { name: string; symbol: string }>());
@@ -85,6 +89,13 @@ export function usePositions() {
 
   // Fetch positions (forceUpdate bypasses signature check for explicit refreshes)
   const fetchPositions = useCallback(async (forceUpdate: boolean = false) => {
+    // CRITICAL: Don't fetch if no user is logged in
+    if (!user) {
+      setPositions([]);
+      setLoading(false);
+      return;
+    }
+    
     // Check if we should force this update
     const shouldForce = forceUpdate || forceNextFetchRef.current;
     forceNextFetchRef.current = false; // Reset the flag
@@ -94,9 +105,12 @@ export function usePositions() {
       if (isInitialLoad) setLoading(true);
       else setRefreshing(true);
 
+      // CRITICAL FIX: Explicitly filter by user_id to ensure data isolation
+      // This provides defense-in-depth alongside RLS policies
       const { data, error } = await supabase
         .from('positions')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -157,7 +171,7 @@ export function usePositions() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [toast]);
+  }, [toast, user]);
 
   // Create a new position
   const createPosition = useCallback(async (
@@ -500,18 +514,41 @@ export function usePositions() {
     }
   }, []);
 
+  // CRITICAL: Reset state when user changes to prevent cross-user data leakage
+  useEffect(() => {
+    const newUserId = user?.id ?? null;
+    
+    if (currentUserIdRef.current !== newUserId) {
+      // User changed - reset all state
+      setPositions([]);
+      setExitResults([]);
+      setLastExitCheck(null);
+      setLastPriceUpdate(null);
+      hasLoadedOnceRef.current = false;
+      lastServerSignatureRef.current = '';
+      forceNextFetchRef.current = true;
+      tokenMetaCacheRef.current.clear();
+      
+      currentUserIdRef.current = newUserId;
+    }
+  }, [user]);
+
   // Subscribe to realtime updates (keep this effect stable so we don't miss events)
   useEffect(() => {
+    if (!user) return;
+    
     fetchPositions();
 
+    // CRITICAL FIX: Add user_id filter to realtime subscription
     const channel = supabase
-      .channel('positions-changes')
+      .channel(`positions-changes-${user.id}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'positions',
+          filter: `user_id=eq.${user.id}`,
         },
         () => {
           // Skip realtime updates during optimistic update window
@@ -527,7 +564,7 @@ export function usePositions() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchPositions]);
+  }, [user, fetchPositions]);
 
   // Periodic price refresh (separate effect so it can't interfere with realtime subscriptions)
   useEffect(() => {

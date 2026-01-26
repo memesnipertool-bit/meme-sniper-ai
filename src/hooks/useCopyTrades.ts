@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
 export interface CopyTrade {
@@ -20,14 +21,24 @@ export interface CopyTrade {
 export function useCopyTrades() {
   const [trades, setTrades] = useState<CopyTrade[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const fetchTrades = useCallback(async () => {
+    // CRITICAL: Don't fetch if no user is logged in
+    if (!user) {
+      setTrades([]);
+      setLoading(false);
+      return;
+    }
+    
     try {
       setLoading(true);
+      // CRITICAL FIX: Explicitly filter by user_id for data isolation
       const { data, error } = await supabase
         .from('copy_trades' as never)
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -43,7 +54,7 @@ export function useCopyTrades() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [user, toast]);
 
   const addCopyTrade = useCallback(async (trade: Omit<CopyTrade, 'id' | 'user_id' | 'created_at'>) => {
     try {
@@ -72,13 +83,24 @@ export function useCopyTrades() {
   }, [toast]);
 
   useEffect(() => {
+    if (!user) {
+      setTrades([]);
+      return;
+    }
+    
     fetchTrades();
 
+    // CRITICAL FIX: Add user_id filter to realtime subscription
     const channel = supabase
       .channel('copy-trades-changes')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'copy_trades' },
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'copy_trades',
+          filter: `user_id=eq.${user.id}`,
+        },
         () => fetchTrades()
       )
       .subscribe();
@@ -86,7 +108,7 @@ export function useCopyTrades() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchTrades]);
+  }, [user, fetchTrades]);
 
   return {
     trades,
