@@ -141,29 +141,46 @@ serve(async (req) => {
 
     if (action === 'save_api_key') {
       if (!apiType || !API_SECRET_MAPPING[apiType]) {
-        return new Response(JSON.stringify({ error: 'Invalid API type' }), {
+        console.error(`[api-secrets] Invalid API type for save: ${apiType}`);
+        return new Response(JSON.stringify({ 
+          success: false,
+          error: `Invalid API type: ${apiType}. Valid types: ${Object.keys(API_SECRET_MAPPING).join(', ')}` 
+        }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
       if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length === 0) {
-        return new Response(JSON.stringify({ error: 'API key is required' }), {
+        console.error(`[api-secrets] Empty API key for ${apiType}`);
+        return new Response(JSON.stringify({ 
+          success: false,
+          error: 'API key is required and cannot be empty' 
+        }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
+      console.log(`[api-secrets] Saving API key for ${apiType}, length: ${apiKey.trim().length}`);
+      
       const encryptedKey = encryptKey(apiKey.trim());
+      console.log(`[api-secrets] Encrypted key prefix: ${encryptedKey.substring(0, 10)}...`);
 
       // Check if configuration exists
-      const { data: existing } = await supabase
+      const { data: existing, error: selectError } = await supabase
         .from('api_configurations')
         .select('id')
         .eq('api_type', apiType)
         .maybeSingle();
 
+      if (selectError) {
+        console.error(`[api-secrets] Error checking existing config: ${selectError.message}`);
+        throw new Error(`Failed to check existing configuration: ${selectError.message}`);
+      }
+
       if (existing) {
+        console.log(`[api-secrets] Updating existing config ${existing.id} for ${apiType}`);
         const { error: updateError } = await supabase
           .from('api_configurations')
           .update({ 
@@ -173,9 +190,12 @@ serve(async (req) => {
           .eq('id', existing.id);
 
         if (updateError) {
+          console.error(`[api-secrets] Update error: ${updateError.message}`);
           throw new Error(`Failed to update API key: ${updateError.message}`);
         }
+        console.log(`[api-secrets] Successfully updated API key for ${apiType}`);
       } else {
+        console.log(`[api-secrets] Creating new config for ${apiType}`);
         // Create new configuration with the API key
         const { error: insertError } = await supabase
           .from('api_configurations')
@@ -189,8 +209,10 @@ serve(async (req) => {
           });
 
         if (insertError) {
+          console.error(`[api-secrets] Insert error: ${insertError.message}`);
           throw new Error(`Failed to save API key: ${insertError.message}`);
         }
+        console.log(`[api-secrets] Successfully created config with API key for ${apiType}`);
       }
 
       // Log for audit

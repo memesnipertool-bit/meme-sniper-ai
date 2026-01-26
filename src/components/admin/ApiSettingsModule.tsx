@@ -299,9 +299,11 @@ export function ApiSettingsModule() {
     try {
       const { api_key, ...configData } = formData;
       
+      // IMPORTANT: Don't touch api_key_encrypted in the config update
+      // It will be handled separately by saveApiKey to avoid race conditions
       const saveData = {
         ...configData,
-        api_key_encrypted: null,
+        // Don't set api_key_encrypted here - let saveApiKey handle it
       };
 
       if (editingConfig) {
@@ -310,13 +312,16 @@ export function ApiSettingsModule() {
         await addConfiguration(saveData);
       }
       
-      // Save API key if provided
+      // Save API key if provided - this now handles the encryption correctly
       if (api_key && api_key.trim()) {
         const result = await saveApiKey(formData.api_type, api_key.trim());
         if (!result.success) {
-          console.error('Failed to save API key after configuration');
+          console.error('Failed to save API key:', result.message);
         }
       }
+      
+      // Refresh configurations to get updated state
+      await fetchConfigurations();
       
       setIsDialogOpen(false);
       setFormData(defaultFormData);
