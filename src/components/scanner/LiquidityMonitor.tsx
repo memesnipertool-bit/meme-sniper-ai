@@ -425,6 +425,8 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
     prevProps.trade.current_price === nextProps.trade.current_price &&
     prevProps.trade.profit_loss_percent === nextProps.trade.profit_loss_percent &&
     prevProps.trade.profit_loss_value === nextProps.trade.profit_loss_value &&
+    prevProps.trade.token_name === nextProps.trade.token_name &&
+    prevProps.trade.token_symbol === nextProps.trade.token_symbol &&
     prevProps.colorIndex === nextProps.colorIndex
   );
 });
