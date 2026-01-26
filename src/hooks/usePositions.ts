@@ -49,8 +49,8 @@ export interface AutoExitSummary {
   executed: number;
 }
 
-// Price update interval: 15 seconds for real-time feel
-const PRICE_UPDATE_INTERVAL_MS = 15000;
+// Price update interval: 5 seconds for minimal P&L gap
+const PRICE_UPDATE_INTERVAL_MS = 5000;
 
 export function usePositions() {
   const [positions, setPositions] = useState<Position[]>([]);
@@ -452,13 +452,13 @@ export function usePositions() {
 
           const currentPriceUsd = priceData.priceUsd;
           
-          // DEEP COMPARISON: Only update if price changed by more than 0.01%
+          // DEEP COMPARISON: Only update if price changed by more than 0.001% for high precision
           const oldPrice = p.current_price ?? 0;
           const priceChangePercent = oldPrice > 0 
             ? Math.abs((currentPriceUsd - oldPrice) / oldPrice) * 100 
             : 100;
           
-          if (priceChangePercent < 0.01) return p; // No meaningful change
+          if (priceChangePercent < 0.001) return p; // Very minimal threshold for accuracy
           
           hasChanges = true;
           
@@ -572,11 +572,18 @@ export function usePositions() {
       updatePricesFromDexScreener();
     }, PRICE_UPDATE_INTERVAL_MS);
 
+    // Initial price update immediately, then stagger follow-up
     const initialPriceTimeout = setTimeout(() => {
       updatePricesFromDexScreener();
-    }, 2000);
+    }, 500);
+
+    // Secondary update at 2.5s for quick convergence
+    const secondaryTimeout = setTimeout(() => {
+      updatePricesFromDexScreener();
+    }, 2500);
 
     return () => {
+      clearTimeout(secondaryTimeout);
       clearInterval(priceInterval);
       clearTimeout(initialPriceTimeout);
     };
