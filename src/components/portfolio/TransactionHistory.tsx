@@ -559,80 +559,122 @@ export function TransactionHistory({ trades, loading, onRefetch }: TransactionHi
                   <TableHead>Type</TableHead>
                   <TableHead>Token</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-right">Price (SOL)</TableHead>
+                  <TableHead className="text-right">Value (USD)</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">TX</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredTrades.map((trade) => (
-                  <TableRow key={trade.id} className="hover:bg-secondary/30">
-                    <TableCell className="whitespace-nowrap">
-                      <div className="text-sm">{format(new Date(trade.created_at), 'MMM d, yyyy')}</div>
-                      <div className="text-xs text-muted-foreground">{format(new Date(trade.created_at), 'HH:mm:ss')}</div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className={`p-1.5 rounded-lg ${trade.trade_type === 'buy' ? 'bg-success/20' : 'bg-destructive/20'}`}>
-                          {trade.trade_type === 'buy' ? (
-                            <ArrowDownRight className="w-3 h-3 text-success" />
-                          ) : (
-                            <ArrowUpRight className="w-3 h-3 text-destructive" />
-                          )}
+                {filteredTrades.map((trade) => {
+                  // Normalize status for display (confirmed = completed in the UI)
+                  const displayStatus = trade.status === 'confirmed' ? 'completed' : (trade.status || 'pending');
+                  const statusColors = {
+                    completed: 'bg-success/10 text-success border-success/30',
+                    confirmed: 'bg-success/10 text-success border-success/30',
+                    failed: 'bg-destructive/10 text-destructive border-destructive/30',
+                    pending: 'bg-warning/10 text-warning border-warning/30',
+                  };
+                  const statusColor = statusColors[displayStatus as keyof typeof statusColors] || statusColors.pending;
+                  
+                  // Calculate total value
+                  const totalValueUsd = trade.price_usd ? trade.amount * trade.price_usd : null;
+                  const totalValueSol = trade.price_sol ? trade.amount * trade.price_sol : null;
+                  
+                  return (
+                    <TableRow key={trade.id} className="hover:bg-secondary/30 group">
+                      <TableCell className="whitespace-nowrap">
+                        <div className="text-sm font-medium">{format(new Date(trade.created_at), 'MMM d, yyyy')}</div>
+                        <div className="text-xs text-muted-foreground">{format(new Date(trade.created_at), 'HH:mm:ss')}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <div className={`p-1.5 rounded-lg ${trade.trade_type === 'buy' ? 'bg-success/20' : 'bg-destructive/20'}`}>
+                            {trade.trade_type === 'buy' ? (
+                              <ArrowDownRight className="w-3.5 h-3.5 text-success" />
+                            ) : (
+                              <ArrowUpRight className="w-3.5 h-3.5 text-destructive" />
+                            )}
+                          </div>
+                          <Badge variant="outline" className={`capitalize font-medium ${trade.trade_type === 'buy' ? 'border-success/30 text-success' : 'border-destructive/30 text-destructive'}`}>
+                            {trade.trade_type}
+                          </Badge>
                         </div>
-                        <Badge variant="outline" className={`capitalize ${trade.trade_type === 'buy' ? 'border-success/30 text-success' : 'border-destructive/30 text-destructive'}`}>
-                          {trade.trade_type}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="font-medium">
-                        {!isPlaceholderTokenText(trade.token_symbol) ? trade.token_symbol : shortAddress(trade.token_address)}
-                      </div>
-                      {!isPlaceholderTokenText(trade.token_name) && (
-                        <div className="text-xs text-muted-foreground truncate max-w-[150px]">{trade.token_name}</div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {trade.amount.toFixed(4)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="font-medium text-primary">
-                        {trade.price_sol ? `${trade.price_sol.toFixed(6)} SOL` : '-'}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {trade.price_usd ? `($${trade.price_usd.toFixed(4)})` : ''}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge 
-                        variant="outline" 
-                        className={`text-xs ${
-                          trade.status === 'completed' ? 'bg-success/10 text-success border-success/30' :
-                          trade.status === 'failed' ? 'bg-destructive/10 text-destructive border-destructive/30' :
-                          'bg-warning/10 text-warning border-warning/30'
-                        }`}
-                      >
-                        {trade.status || 'pending'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {trade.tx_hash ? (
-                        <a
-                          href={`https://solscan.io/tx/${trade.tx_hash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-foreground">
+                            {!isPlaceholderTokenText(trade.token_symbol) ? trade.token_symbol : shortAddress(trade.token_address)}
+                          </span>
+                          {!isPlaceholderTokenText(trade.token_name) && (
+                            <span className="text-xs text-muted-foreground truncate max-w-[120px]">{trade.token_name}</span>
+                          )}
+                          <a
+                            href={`https://solscan.io/token/${trade.token_address}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary/70 hover:text-primary hover:underline truncate max-w-[100px] opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            {shortAddress(trade.token_address)}
+                          </a>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="font-mono text-sm">{trade.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div>
+                        <div className="text-xs text-muted-foreground">tokens</div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="font-medium text-primary">
+                          {trade.price_sol ? `${trade.price_sol.toFixed(6)}` : '-'}
+                        </div>
+                        {trade.price_usd && (
+                          <div className="text-xs text-muted-foreground">
+                            ${trade.price_usd.toFixed(6)}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {totalValueSol !== null ? (
+                          <>
+                            <div className="font-semibold text-foreground">
+                              {totalValueSol.toFixed(4)} SOL
+                            </div>
+                            {totalValueUsd !== null && (
+                              <div className="text-xs text-muted-foreground">
+                                (${totalValueUsd.toFixed(2)})
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge 
+                          variant="outline" 
+                          className={`text-xs capitalize ${statusColor}`}
                         >
-                          <ExternalLink className="w-3 h-3" />
-                          View
-                        </a>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {displayStatus}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {trade.tx_hash ? (
+                          <a
+                            href={`https://solscan.io/tx/${trade.tx_hash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline font-medium"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            View TX
+                          </a>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

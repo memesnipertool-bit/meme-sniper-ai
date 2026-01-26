@@ -71,6 +71,7 @@ export function useTradeHistory(limit: number = 1000) {
     const positions = ((positionsData || []) as unknown as PositionBackfillRow[]).map((p) => ({ ...p }));
     if (positions.length === 0) return 0;
 
+    // Use 'confirmed' to match the database check constraint
     const buyRows = positions.map((p) => ({
       user_id: user.id,
       token_address: p.token_address,
@@ -80,7 +81,7 @@ export function useTradeHistory(limit: number = 1000) {
       amount: Number(p.amount),
       price_sol: p.entry_price ?? null,
       price_usd: p.entry_price_usd ?? null,
-      status: 'completed',
+      status: 'confirmed',
       tx_hash: null,
       created_at: p.created_at,
     }));
@@ -96,7 +97,7 @@ export function useTradeHistory(limit: number = 1000) {
         amount: Number(p.amount),
         price_sol: p.exit_price ?? null,
         price_usd: null,
-        status: 'completed',
+        status: 'confirmed',
         tx_hash: p.exit_tx_id ?? null,
         created_at: p.closed_at ?? p.created_at,
       }));
