@@ -81,17 +81,25 @@ serve(async (req) => {
 
     // All other actions require user authentication
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
+    if (!authHeader?.startsWith('Bearer ')) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'Invalid token' }), {
+    // Use anon key client for JWT claims verification (works with signing-keys on custom domains)
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const authClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const token = authHeader.slice('Bearer '.length);
+    const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(token);
+    const userId = claimsData?.claims?.sub;
+
+    if (claimsError || !userId) {
+      return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -101,7 +109,7 @@ serve(async (req) => {
     const { data: roleData } = await supabase
       .from('user_roles')
       .select('role')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single();
 
     if (roleData?.role !== 'admin') {
@@ -216,7 +224,7 @@ serve(async (req) => {
       }
 
       // Log for audit
-      console.log(`[AUDIT] API key saved by admin ${user.id}: ${apiType} at ${new Date().toISOString()}`);
+      console.log(`[AUDIT] API key saved by admin ${userId}: ${apiType} at ${new Date().toISOString()}`);
 
       return new Response(JSON.stringify({ 
         success: true,
@@ -247,7 +255,7 @@ serve(async (req) => {
       }
 
       // Log for audit
-      console.log(`[AUDIT] API key deleted by admin ${user.id}: ${apiType} at ${new Date().toISOString()}`);
+      console.log(`[AUDIT] API key deleted by admin ${userId}: ${apiType} at ${new Date().toISOString()}`);
 
       return new Response(JSON.stringify({ 
         success: true,
