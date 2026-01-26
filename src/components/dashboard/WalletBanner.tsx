@@ -1,7 +1,7 @@
+import React, { forwardRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Wallet, ExternalLink, Copy, Check } from "lucide-react";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
 
@@ -11,7 +11,7 @@ interface WalletBannerProps {
   network: string;
 }
 
-export default function WalletBanner({ address, balance, network }: WalletBannerProps) {
+const WalletBanner = forwardRef<HTMLDivElement, WalletBannerProps>(function WalletBanner({ address, balance, network }, ref) {
   const [copied, setCopied] = useState(false);
   const { solPrice, solToUsd } = useDisplayUnit();
   
@@ -25,7 +25,7 @@ export default function WalletBanner({ address, balance, network }: WalletBanner
   };
 
   return (
-    <Card className="relative overflow-hidden border-0 bg-gradient-to-r from-primary/10 via-primary/5 to-accent/5 backdrop-blur-xl animate-fade-in">
+    <Card ref={ref} className="relative overflow-hidden border-0 bg-gradient-to-r from-primary/10 via-primary/5 to-accent/5 backdrop-blur-xl animate-fade-in">
       {/* Animated gradient background */}
       <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 animate-shimmer" />
       
@@ -106,4 +106,6 @@ export default function WalletBanner({ address, balance, network }: WalletBanner
       </CardContent>
     </Card>
   );
-}
+});
+
+export default WalletBanner;
