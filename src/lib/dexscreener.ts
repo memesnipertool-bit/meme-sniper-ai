@@ -97,13 +97,14 @@ export async function fetchDexScreenerTokenMetadata(
 /**
  * Fetch live price data for multiple tokens from DexScreener.
  * Returns real-time price, 24h change, volume, and liquidity.
+ * Optimized for minimal latency with 3s timeout.
  */
 export async function fetchDexScreenerPrices(
   addresses: string[],
   opts?: { timeoutMs?: number; chunkSize?: number }
 ): Promise<Map<string, DexTokenPriceData>> {
-  const timeoutMs = opts?.timeoutMs ?? 5000;
-  const chunkSize = opts?.chunkSize ?? 25;
+  const timeoutMs = opts?.timeoutMs ?? 3000; // Reduced from 5s to 3s for speed
+  const chunkSize = opts?.chunkSize ?? 30; // Increased batch size
 
   const unique = Array.from(
     new Set(addresses.filter((a) => isLikelyRealSolanaMint(a)))

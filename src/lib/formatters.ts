@@ -17,7 +17,7 @@ export function formatPercentage(value: number | null | undefined, showSign = tr
 
 /**
  * Format currency value with appropriate precision
- * Handles large values (M/K) and small values
+ * Enhanced for accurate small value display in P&L
  * @param value - The dollar value
  * @param showSign - Whether to show +/- sign (default true)
  * @returns Formatted string like "+$12.34" or "-$5.00"
@@ -33,11 +33,17 @@ export function formatCurrency(value: number | null | undefined, showSign = true
   if (absValue >= 1000) {
     return `${sign}$${(num / 1000).toFixed(2)}K`;
   }
-  if (absValue >= 0.01) {
+  if (absValue >= 1) {
     return `${sign}$${num.toFixed(2)}`;
   }
-  if (absValue > 0) {
+  if (absValue >= 0.01) {
+    return `${sign}$${num.toFixed(3)}`;
+  }
+  if (absValue >= 0.0001) {
     return `${sign}$${num.toFixed(4)}`;
+  }
+  if (absValue > 0) {
+    return `${sign}$${num.toFixed(6)}`;
   }
   return showSign ? '+$0.00' : '$0.00';
 }
@@ -74,15 +80,19 @@ export function calculatePnLValue(
 
 /**
  * Format price with appropriate precision based on magnitude
+ * Enhanced for high-precision display of small token prices
  * @param value - The price value
  * @returns Formatted string like "$0.00012345" or "$123.45"
  */
 export function formatPrice(value: number | null | undefined): string {
   const num = value ?? 0;
   if (num === 0) return '$0.00';
-  if (num < 0.00001) return `$${num.toExponential(2)}`;
-  if (num < 0.01) return `$${num.toFixed(6)}`;
+  if (num < 0.0000001) return `$${num.toExponential(2)}`;
+  if (num < 0.00001) return `$${num.toFixed(8)}`;
+  if (num < 0.001) return `$${num.toFixed(6)}`;
+  if (num < 0.01) return `$${num.toFixed(5)}`;
   if (num < 1) return `$${num.toFixed(4)}`;
+  if (num < 100) return `$${num.toFixed(3)}`;
   return `$${num.toFixed(2)}`;
 }
 
