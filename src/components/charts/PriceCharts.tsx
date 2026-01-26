@@ -1,4 +1,3 @@
-import React, { forwardRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDisplayUnit, DisplayUnit } from '@/contexts/DisplayUnitContext';

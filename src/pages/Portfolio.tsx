@@ -1,4 +1,4 @@
-import React, { forwardRef, useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import AppLayout from "@/components/layout/AppLayout";
 import { useWallet } from "@/hooks/useWallet";
 import { Button } from "@/components/ui/button";
@@ -168,7 +168,7 @@ const PositionRow = ({ position, onClose, compact = false, formatValue }: Positi
   );
 };
 
-const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, ref) {
+function Portfolio() {
   const { 
     openPositions, 
     closedPositions, 
@@ -574,8 +574,6 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
       </div>
     </AppLayout>
   );
-});
-
-Portfolio.displayName = 'Portfolio';
+}
 
 export default Portfolio;

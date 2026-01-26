@@ -1,4 +1,4 @@
-import React, { forwardRef, useMemo } from "react";
+import React, { useMemo } from "react";
 import AppLayout from "@/components/layout/AppLayout";
 import StatsGrid from "@/components/dashboard/StatsGrid";
 import WalletBanner from "@/components/dashboard/WalletBanner";
@@ -21,7 +21,7 @@ import { PortfolioChart } from "@/components/charts/PriceCharts";
 import { TrendingUp, ArrowUpRight, FlaskConical, Coins, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
+function Index() {
   const { openPositions: realOpenPositions, closedPositions: realClosedPositions, positions: allPositions, loading: positionsLoading } = usePositions();
   const { wallet } = useWallet();
   const { isDemo } = useAppMode();
@@ -305,8 +305,6 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
       </div>
     </AppLayout>
   );
-});
-
-Index.displayName = 'Index';
+}
 
 export default Index;
