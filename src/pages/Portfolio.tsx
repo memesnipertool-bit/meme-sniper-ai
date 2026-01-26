@@ -190,7 +190,8 @@ function Portfolio() {
 
   const { formatPrimaryValue, formatDualValue } = useDisplayUnit();
 
-  const { trades, loading: tradesLoading, refetch: refetchTrades } = useTradeHistory(100);
+  // Fetch up to the backend max (1000) so the table always shows the full history.
+  const { trades, loading: tradesLoading, refetch: refetchTrades } = useTradeHistory(1000);
   const [autoMonitor, setAutoMonitor] = useState(false);
   const [autoExecute, setAutoExecute] = useState(true);
   const { wallet, connectPhantom, disconnect } = useWallet();
@@ -567,7 +568,7 @@ function Portfolio() {
             <TransactionHistory 
               trades={trades} 
               loading={tradesLoading} 
-              onRefetch={refetchTrades} 
+              onRefetch={() => refetchTrades({ forceBackfill: true })} 
             />
           </TabsContent>
         </Tabs>
