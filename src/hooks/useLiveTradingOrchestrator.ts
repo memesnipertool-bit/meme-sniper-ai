@@ -140,10 +140,10 @@ export function useLiveTradingOrchestrator() {
     addBotLog({
       level: 'info',
       category: 'trade',
-      message: `🚀 Executing BUY: ${token.symbol}`,
+      message: `🚀 Executing BUY: ${token.name} (${token.symbol})`,
       tokenSymbol: token.symbol,
       tokenAddress: token.address,
-      details: `💧 Liquidity: ${liquidityText} | 👤 Buyer Pos: ${buyerPosText} | 🛡️ Safety: ${safetyScoreText}\n⚙️ User Settings: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority} | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%`,
+      details: `🪙 Token: ${token.name} (${token.symbol})\n💧 Liquidity: ${liquidityText} | 👤 Buyer Pos: ${buyerPosText} | 🛡️ Safety: ${safetyScoreText}\n⚙️ User Settings: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority} | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%`,
     });
 
     try {
@@ -203,10 +203,19 @@ export function useLiveTradingOrchestrator() {
       const position = result.position;
       if (position) {
         try {
-          // Use trading engine metadata first (from DexScreener/liquidity detection),
-          // fall back to scanner token metadata if not available
-          const finalSymbol = position.tokenSymbol || token.symbol;
-          const finalName = position.tokenName || token.name;
+          // PRIORITY: Use scanner token metadata (from pool scan) FIRST
+          // This ensures position names match what user saw during discovery
+          // Only fall back to trading engine metadata if scanner data is unavailable/placeholder
+          const isPlaceholder = (text: string | null | undefined): boolean => {
+            if (!text) return true;
+            const t = text.toLowerCase();
+            return t === 'unknown' || t === '???' || t.includes('token') && t.includes('…');
+          };
+          
+          // Scanner data (token.symbol/name) is from pool discovery - most reliable
+          // Trading engine data (position.tokenSymbol/Name) may be from DexScreener enrichment
+          const finalSymbol = !isPlaceholder(token.symbol) ? token.symbol : (position.tokenSymbol || token.symbol);
+          const finalName = !isPlaceholder(token.name) ? token.name : (position.tokenName || token.name);
           
           const savedPosition = await createPosition(
             token.address,
@@ -229,10 +238,10 @@ export function useLiveTradingOrchestrator() {
           addBotLog({
             level: 'success',
             category: 'trade',
-            message: `✅ BUY FILLED: ${finalSymbol}`,
+            message: `✅ BUY FILLED: ${finalName} (${finalSymbol})`,
             tokenSymbol: finalSymbol,
             tokenAddress: token.address,
-            details: `💧 Liquidity: ${liquidityTextSuccess} | 👤 Buyer Pos: ${buyerPosTextSuccess} | 🛡️ Safety: ${safetyScoreTextSuccess}\nEntry: $${position.entryPrice.toFixed(8)} | Tokens: ${position.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} | Value: $${entryValueUsd.toFixed(4)} | SOL: ${position.solSpent.toFixed(4)}\n🔗 TX: ${txHashFull}`,
+            details: `🪙 Token: ${finalName} (${finalSymbol})\n💧 Liquidity: ${liquidityTextSuccess} | 👤 Buyer Pos: ${buyerPosTextSuccess} | 🛡️ Safety: ${safetyScoreTextSuccess}\nEntry: $${position.entryPrice.toFixed(8)} | Tokens: ${position.tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} | Value: $${entryValueUsd.toFixed(4)} | SOL: ${position.solSpent.toFixed(4)}\n🔗 TX: ${txHashFull}`,
           });
 
           return {
@@ -270,10 +279,10 @@ export function useLiveTradingOrchestrator() {
       addBotLog({
         level: 'error',
         category: 'trade',
-        message: `❌ BUY FAILED: ${token.symbol}`,
+        message: `❌ BUY FAILED: ${token.name} (${token.symbol})`,
         tokenSymbol: token.symbol,
         tokenAddress: token.address,
-        details: `💧 Liquidity: ${liqFail} | 👤 Buyer Pos: ${buyerPosFail} | 🛡️ Safety: ${safetyFail}\n❗ Reason: ${errorMessage}\n⚙️ Attempted: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%\n📍 Token: ${token.address}`,
+        details: `🪙 Token: ${token.name} (${token.symbol})\n💧 Liquidity: ${liqFail} | 👤 Buyer Pos: ${buyerPosFail} | 🛡️ Safety: ${safetyFail}\n❗ Reason: ${errorMessage}\n⚙️ Attempted: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%\n📍 Token: ${token.address}`,
       });
 
       return { success: false, error: errorMessage, source: 'trading-engine' };

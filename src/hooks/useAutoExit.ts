@@ -48,12 +48,14 @@ export function useAutoExit() {
     }
 
     const actionLabel = result.action === 'take_profit' ? '💰 TAKE PROFIT' : '🛑 STOP LOSS';
+    // Note: At this point we don't have position details yet, so we use symbol
+    // Full token name will be logged after DB fetch
     addBotLog({
       level: 'info',
       category: 'exit',
       message: `${actionLabel} triggered: ${result.symbol}`,
       tokenSymbol: result.symbol,
-      details: `Current P&L: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}% | Price: $${result.currentPrice.toFixed(8)}`,
+      details: `🪙 Token: ${result.symbol}\nCurrent P&L: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}% | Price: $${result.currentPrice.toFixed(8)}`,
     });
 
     try {
@@ -202,13 +204,14 @@ export function useAutoExit() {
       const exitValue = result.currentPrice * position.amount;
       const entryValue = position.entry_value || (entryPrice * position.amount);
       const pnlValue = entryValue * (result.profitLossPercent / 100);
+      const tokenName = position.token_name || result.symbol;
       
       addBotLog({
         level: result.action === 'take_profit' ? 'success' : 'warning',
         category: 'exit',
-        message: `✅ SELL FILLED: ${result.symbol}`,
+        message: `✅ SELL FILLED: ${tokenName} (${result.symbol})`,
         tokenSymbol: result.symbol,
-        details: `📊 Entry: $${entryPrice.toFixed(8)} → Exit: $${result.currentPrice.toFixed(8)}\nP&L: ${pnlText} ($${pnlValue >= 0 ? '+' : ''}${pnlValue.toFixed(4)}) | Reason: ${result.action.replace('_', ' ')}\nTokens Sold: ${position.amount.toLocaleString()} | Exit Value: $${exitValue.toFixed(4)}\n🔗 TX: ${signResult.signature}`,
+        details: `🪙 Token: ${tokenName} (${result.symbol})\n📊 Entry: $${entryPrice.toFixed(8)} → Exit: $${result.currentPrice.toFixed(8)}\nP&L: ${pnlText} ($${pnlValue >= 0 ? '+' : ''}${pnlValue.toFixed(4)}) | Reason: ${result.action.replace('_', ' ')}\nTokens Sold: ${position.amount.toLocaleString()} | Exit Value: $${exitValue.toFixed(4)}\n🔗 TX: ${signResult.signature}`,
       });
 
       toast({
@@ -223,12 +226,13 @@ export function useAutoExit() {
     } catch (error: any) {
       console.error('[AutoExit] Execute exit error:', error);
       
+      // Note: position is not available in catch block, use result.symbol only
       addBotLog({
         level: 'error',
         category: 'exit',
         message: `❌ SELL FAILED: ${result.symbol}`,
         tokenSymbol: result.symbol,
-        details: `Reason: ${error.message || 'Unknown error'}\nPrice at failure: $${result.currentPrice.toFixed(8)} | P&L: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}%\nAttempted: ${result.action.replace('_', ' ')} exit`,
+        details: `🪙 Token: ${result.symbol}\nReason: ${error.message || 'Unknown error'}\nPrice at failure: $${result.currentPrice.toFixed(8)} | P&L: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}%\nAttempted: ${result.action.replace('_', ' ')} exit`,
       });
 
       toast({
