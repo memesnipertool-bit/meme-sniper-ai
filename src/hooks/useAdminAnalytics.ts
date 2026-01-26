@@ -19,6 +19,29 @@ export interface TradeStats {
   totalVolume: number;
   avgTradeSize: number;
   byStatus: Record<string, number>;
+  byExitReason: Record<string, number>;
+}
+
+export interface UserStats {
+  userId: string;
+  email: string | null;
+  displayName: string | null;
+  totalTrades: number;
+  openPositions: number;
+  closedPositions: number;
+  totalPnL: number;
+  winRate: number;
+  totalVolume: number;
+  lastActive: string | null;
+}
+
+export interface PlatformPnL {
+  totalRealizedPnL: number;
+  totalUnrealizedPnL: number;
+  winningTrades: number;
+  losingTrades: number;
+  avgWinPercent: number;
+  avgLossPercent: number;
 }
 
 export interface UserVolumeData {
@@ -76,7 +99,7 @@ const defaultAnalytics: AnalyticsData = {
   apiHealth: { total: 0, healthy: 0, errors: 0, avgLatency: 0, byType: {} },
   apiErrors: { recent: [], byType: {} },
   sniperEvents: { total: 0, approved: 0, rejected: 0, executed: 0, recent: [] },
-  tradeStats: { total: 0, successful: 0, failed: 0, successRate: 0, totalVolume: 0, avgTradeSize: 0, byStatus: {} },
+  tradeStats: { total: 0, successful: 0, failed: 0, successRate: 0, totalVolume: 0, avgTradeSize: 0, byStatus: {}, byExitReason: {} },
   userVolume: { totalUsers: 0, activeTraders: 0, totalVolume: 0, volumeByDay: [] },
   copyTradingStats: { totalTrades: 0, totalVolume: 0, uniqueLeaders: 0, byStatus: {}, recent: [] },
   riskAlerts: { total: 0, honeypotDetected: 0, blacklistDetected: 0, highRisk: 0, recent: [] },

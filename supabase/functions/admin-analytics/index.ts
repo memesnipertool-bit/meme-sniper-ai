@@ -7,6 +7,19 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface UserStats {
+  userId: string;
+  email: string | null;
+  displayName: string | null;
+  totalTrades: number;
+  openPositions: number;
+  closedPositions: number;
+  totalPnL: number;
+  winRate: number;
+  totalVolume: number;
+  lastActive: string | null;
+}
+
 interface AnalyticsData {
   apiHealth: {
     total: number;
@@ -34,12 +47,22 @@ interface AnalyticsData {
     totalVolume: number;
     avgTradeSize: number;
     byStatus: Record<string, number>;
+    byExitReason: Record<string, number>;
   };
   userVolume: {
     totalUsers: number;
     activeTraders: number;
     totalVolume: number;
     volumeByDay: Array<{ date: string; volume: number; trades: number }>;
+  };
+  userStats: UserStats[];
+  platformPnL: {
+    totalRealizedPnL: number;
+    totalUnrealizedPnL: number;
+    winningTrades: number;
+    losingTrades: number;
+    avgWinPercent: number;
+    avgLossPercent: number;
   };
   copyTradingStats: {
     totalTrades: number;
@@ -172,7 +195,12 @@ serve(async (req) => {
         executed: sniperLogs?.filter((l: any) => l.event_type === 'executed').length || 0,
       };
 
-      // Fetch trade stats from positions
+      // Fetch ALL positions for comprehensive stats
+      const { data: allPositionsData } = await supabase
+        .from('positions')
+        .select('*');
+
+      // Fetch time-filtered positions
       const { data: positions } = await supabase
         .from('positions')
         .select('*')
@@ -187,16 +215,35 @@ serve(async (req) => {
         tradesByStatus[p.status] = (tradesByStatus[p.status] || 0) + 1;
       });
 
-      // Fetch user volume by day
-      const { data: allPositions } = await supabase
-        .from('positions')
-        .select('entry_value, created_at, user_id')
-        .gte('created_at', startDateStr);
+      // Exit reason breakdown
+      const tradesByExitReason: Record<string, number> = {};
+      closedPositions.forEach((p: any) => {
+        const reason = p.exit_reason || 'unknown';
+        tradesByExitReason[reason] = (tradesByExitReason[reason] || 0) + 1;
+      });
 
+      // Calculate platform-wide P&L stats
+      const allClosed = (allPositionsData || []).filter((p: any) => p.status === 'closed');
+      const allOpen = (allPositionsData || []).filter((p: any) => p.status === 'open');
+      
+      const totalRealizedPnL = allClosed.reduce((sum: number, p: any) => sum + (p.profit_loss_value || 0), 0);
+      const totalUnrealizedPnL = allOpen.reduce((sum: number, p: any) => sum + (p.profit_loss_value || 0), 0);
+      
+      const winningTrades = allClosed.filter((p: any) => (p.profit_loss_percent || 0) > 0);
+      const losingTrades = allClosed.filter((p: any) => (p.profit_loss_percent || 0) < 0);
+      
+      const avgWinPercent = winningTrades.length > 0 
+        ? winningTrades.reduce((sum: number, p: any) => sum + (p.profit_loss_percent || 0), 0) / winningTrades.length 
+        : 0;
+      const avgLossPercent = losingTrades.length > 0 
+        ? losingTrades.reduce((sum: number, p: any) => sum + (p.profit_loss_percent || 0), 0) / losingTrades.length 
+        : 0;
+
+      // Fetch user volume by day
       const volumeByDay: Record<string, { volume: number; trades: number }> = {};
       const activeUserIds = new Set<string>();
 
-      (allPositions || []).forEach((p: any) => {
+      (positions || []).forEach((p: any) => {
         const date = new Date(p.created_at).toISOString().split('T')[0];
         if (!volumeByDay[date]) {
           volumeByDay[date] = { volume: 0, trades: 0 };
@@ -209,6 +256,60 @@ serve(async (req) => {
       const { count: totalUsers } = await supabase
         .from('profiles')
         .select('*', { count: 'exact', head: true });
+
+      // Fetch user profiles for stats
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('user_id, email, display_name, updated_at');
+
+      // Build user statistics
+      const userStatsMap: Record<string, UserStats> = {};
+      
+      (allPositionsData || []).forEach((p: any) => {
+        if (!userStatsMap[p.user_id]) {
+          const profile = (profiles || []).find((pr: any) => pr.user_id === p.user_id);
+          userStatsMap[p.user_id] = {
+            userId: p.user_id,
+            email: profile?.email || null,
+            displayName: profile?.display_name || null,
+            totalTrades: 0,
+            openPositions: 0,
+            closedPositions: 0,
+            totalPnL: 0,
+            winRate: 0,
+            totalVolume: 0,
+            lastActive: profile?.updated_at || p.created_at,
+          };
+        }
+        
+        const stats = userStatsMap[p.user_id];
+        stats.totalTrades++;
+        stats.totalVolume += p.entry_value || 0;
+        stats.totalPnL += p.profit_loss_value || 0;
+        
+        if (p.status === 'open') {
+          stats.openPositions++;
+        } else {
+          stats.closedPositions++;
+        }
+        
+        if (new Date(p.created_at) > new Date(stats.lastActive || 0)) {
+          stats.lastActive = p.created_at;
+        }
+      });
+
+      // Calculate win rates for each user
+      Object.values(userStatsMap).forEach((stats) => {
+        const userClosed = (allPositionsData || []).filter(
+          (p: any) => p.user_id === stats.userId && p.status === 'closed'
+        );
+        const userWins = userClosed.filter((p: any) => (p.profit_loss_percent || 0) > 0).length;
+        stats.winRate = userClosed.length > 0 ? Math.round((userWins / userClosed.length) * 100) : 0;
+      });
+
+      const userStats = Object.values(userStatsMap)
+        .sort((a, b) => b.totalVolume - a.totalVolume)
+        .slice(0, 20);
 
       // Fetch copy trading stats
       const { data: copyTrades } = await supabase
@@ -227,26 +328,33 @@ serve(async (req) => {
         copyVolume += t.amount * t.price;
       });
 
-      // Fetch risk alerts
-      const { data: riskLogs } = await supabase
-        .from('risk_check_logs')
-        .select('*')
-        .gte('checked_at', startDateStr)
-        .order('checked_at', { ascending: false })
-        .limit(100);
+      // Fetch risk alerts (use system_logs as fallback if risk_check_logs doesn't exist)
+      let riskLogs: any[] = [];
+      try {
+        const { data } = await supabase
+          .from('system_logs')
+          .select('*')
+          .eq('event_category', 'risk')
+          .gte('created_at', startDateStr)
+          .order('created_at', { ascending: false })
+          .limit(100);
+        riskLogs = data || [];
+      } catch {
+        riskLogs = [];
+      }
 
-      const honeypotCount = riskLogs?.filter((r: any) => r.is_honeypot).length || 0;
-      const blacklistCount = riskLogs?.filter((r: any) => r.is_blacklisted).length || 0;
-      const highRiskCount = riskLogs?.filter((r: any) => r.risk_score >= 70).length || 0;
+      const honeypotCount = riskLogs.filter((r: any) => r.metadata?.is_honeypot).length;
+      const blacklistCount = riskLogs.filter((r: any) => r.metadata?.is_blacklisted).length;
+      const highRiskCount = riskLogs.filter((r: any) => (r.metadata?.risk_score || 0) >= 70).length;
 
-      // Generate mock RPC latency data (would be real in production)
+      // Generate mock RPC latency data
       const rpcLatencyData = [];
       for (let i = 23; i >= 0; i--) {
         const timestamp = new Date();
         timestamp.setHours(timestamp.getHours() - i);
         rpcLatencyData.push({
           timestamp: timestamp.toISOString(),
-          latency: Math.floor(Math.random() * 100) + 50, // 50-150ms mock data
+          latency: Math.floor(Math.random() * 100) + 50,
         });
       }
 
@@ -299,6 +407,7 @@ serve(async (req) => {
           totalVolume,
           avgTradeSize: positions?.length ? totalVolume / positions.length : 0,
           byStatus: tradesByStatus,
+          byExitReason: tradesByExitReason,
         },
         userVolume: {
           totalUsers: totalUsers || 0,
@@ -308,6 +417,15 @@ serve(async (req) => {
             date,
             ...data,
           })).sort((a, b) => a.date.localeCompare(b.date)),
+        },
+        userStats,
+        platformPnL: {
+          totalRealizedPnL,
+          totalUnrealizedPnL,
+          winningTrades: winningTrades.length,
+          losingTrades: losingTrades.length,
+          avgWinPercent,
+          avgLossPercent,
         },
         copyTradingStats: {
           totalTrades: copyTrades?.length || 0,
@@ -323,18 +441,17 @@ serve(async (req) => {
           })),
         },
         riskAlerts: {
-          total: riskLogs?.length || 0,
+          total: riskLogs.length,
           honeypotDetected: honeypotCount,
           blacklistDetected: blacklistCount,
           highRisk: highRiskCount,
-          recent: (riskLogs || [])
-            .filter((r: any) => !r.passed_checks)
+          recent: riskLogs
             .slice(0, 10)
             .map((r: any) => ({
-              token_symbol: r.token_symbol || r.token_address?.slice(0, 8) + '...',
-              risk_score: r.risk_score,
-              rejection_reasons: r.rejection_reasons || [],
-              checked_at: r.checked_at,
+              token_symbol: r.metadata?.token_symbol || 'Unknown',
+              risk_score: r.metadata?.risk_score || 0,
+              rejection_reasons: r.metadata?.rejection_reasons || [],
+              checked_at: r.created_at,
             })),
         },
         rpcLatency: rpcLatencyData,
