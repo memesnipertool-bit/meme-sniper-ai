@@ -12,6 +12,7 @@ import RecoveryControls from "@/components/scanner/RecoveryControls";
 import ApiHealthWidget from "@/components/scanner/ApiHealthWidget";
 import PaidApiAlert from "@/components/scanner/PaidApiAlert";
 import BotPreflightCheck from "@/components/scanner/BotPreflightCheck";
+import ExitPreviewModal from "@/components/scanner/ExitPreviewModal";
 import StatsCard from "@/components/StatsCard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -114,6 +115,13 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   const [cleaningUpPositions, setCleaningUpPositions] = useState(false);
   const [pendingBotAction, setPendingBotAction] = useState<boolean | null>(null);
   
+  // Exit Preview Modal state
+  const [exitPreviewPosition, setExitPreviewPosition] = useState<any | null>(null);
+  const [showExitPreview, setShowExitPreview] = useState(false);
+  
+  // Sync Positions state
+  const [syncingPositions, setSyncingPositions] = useState(false);
+  
   // Get setMode from AppModeContext
   const { setMode } = useAppMode();
   
@@ -150,7 +158,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     return BigInt(`${whole}${frac}`).toString();
   }, []);
 
-  const handleExitPosition = useCallback(async (positionId: string, currentPrice: number) => {
+  // Handler to open the exit preview modal instead of exiting directly
+  const handleOpenExitPreview = useCallback((positionId: string, currentPrice: number) => {
     if (isDemo) {
       closeDemoPosition(positionId, currentPrice, "manual");
       const position = openDemoPositions.find((p) => p.id === positionId);
@@ -171,7 +180,6 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         description: "Connect a Solana wallet to exit live trades.",
         variant: "destructive",
       });
-      // Open wallet modal programmatically
       openWalletModal();
       return;
     }
@@ -186,34 +194,39 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       return;
     }
 
+    // Open the exit preview modal
+    setExitPreviewPosition({
+      ...position,
+      current_price: currentPrice,
+    });
+    setShowExitPreview(true);
+  }, [
+    isDemo,
+    closeDemoPosition,
+    openDemoPositions,
+    addBalance,
+    settings?.trade_amount,
+    toast,
+    wallet.isConnected,
+    wallet.network,
+    wallet.address,
+    realOpenPositions,
+    fetchPositions,
+    fallbackSolPrice,
+    openWalletModal,
+  ]);
+
+  // Actual exit execution - called from modal
+  const handleConfirmExitFromModal = useCallback(async (positionId: string, amountToSell: number, currentPrice: number) => {
+    const position = realOpenPositions.find((p) => p.id === positionId);
+    if (!position || !wallet.address) return;
+
     const safeExitPrice = Number.isFinite(currentPrice) && currentPrice > 0
       ? currentPrice
       : (position.current_price ?? position.entry_price);
 
-    // CRITICAL FIX: Always sell the real on-chain token balance.
-    // DB `positions.amount` can be wrong (e.g. stored 0.001 when wallet holds 1.0+).
-    let tokenAmountToSell = position.amount;
-    try {
-      const { data: meta, error: metaError } = await supabase.functions.invoke('token-metadata', {
-        body: { mint: position.token_address, owner: wallet.address },
-      });
-      const balanceUi = Number((meta as any)?.balanceUi);
-      if (!metaError && Number.isFinite(balanceUi) && balanceUi > 0) {
-        tokenAmountToSell = balanceUi;
-
-        // Sync DB so UI and future logic use correct quantity.
-        const diff = Math.abs(balanceUi - position.amount);
-        const denom = Math.max(balanceUi, position.amount, 1e-12);
-        if (diff / denom > 0.05) {
-          await supabase
-            .from('positions')
-            .update({ amount: balanceUi, updated_at: new Date().toISOString() })
-            .eq('id', positionId);
-        }
-      }
-    } catch {
-      // ignore
-    }
+    // Use the on-chain balance passed from the modal
+    const tokenAmountToSell = amountToSell;
 
     // Use 3-stage engine for Jupiter exit (better routing)
     addBotLog({
@@ -222,6 +235,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       message: 'Exiting position via Jupiter',
       tokenSymbol: position.token_symbol,
       tokenAddress: position.token_address,
+      details: `Selling ${tokenAmountToSell.toFixed(6)} tokens`,
     });
 
     const showForceCloseToast = (title: string, description: string) => {
@@ -418,22 +432,14 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       }
     }
   }, [
-    isDemo,
-    closeDemoPosition,
-    openDemoPositions,
-    addBalance,
-    settings?.trade_amount,
-    toast,
-    wallet.isConnected,
-    wallet.network,
-    wallet.address,
     realOpenPositions,
-    fetchPositions,
+    wallet.address,
     exitPosition,
     signAndSendTransaction,
+    fetchPositions,
     refreshBalance,
-    fallbackSolPrice,
     markPositionClosed,
+    toast,
   ]);
 
   // Calculate stats based on mode
@@ -1200,6 +1206,84 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     toast({ title: 'Bot Reset', description: 'Bot deactivated and cache cleared' });
   }, [isDemo, stopDemoMonitor, stopAutoExitMonitor, stopBot, toast]);
 
+  // Sync all open positions with on-chain wallet balances
+  const handleSyncPositions = useCallback(async () => {
+    if (isDemo || !wallet.address) {
+      toast({ title: 'Not Available', description: 'Sync is only available in Live mode with a connected wallet', variant: 'destructive' });
+      return;
+    }
+
+    setSyncingPositions(true);
+    addBotLog({ level: 'info', category: 'system', message: `Syncing ${realOpenPositions.length} positions with on-chain balances...` });
+
+    let updatedCount = 0;
+    let closedCount = 0;
+    let errorCount = 0;
+
+    for (const position of realOpenPositions) {
+      try {
+        const { data, error } = await supabase.functions.invoke('token-metadata', {
+          body: { mint: position.token_address, owner: wallet.address },
+        });
+
+        if (error) {
+          errorCount++;
+          continue;
+        }
+
+        const balanceUi = Number((data as any)?.balanceUi);
+        const DUST = 1e-6;
+
+        if (!Number.isFinite(balanceUi) || balanceUi <= DUST) {
+          // No balance - mark as sold externally
+          await markPositionClosed(position.id, position.current_price ?? position.entry_price);
+          closedCount++;
+          addBotLog({
+            level: 'warning',
+            category: 'trade',
+            message: `Closed ${position.token_symbol} - no on-chain balance`,
+            tokenAddress: position.token_address,
+          });
+        } else if (Math.abs(balanceUi - position.amount) > DUST) {
+          // Balance mismatch - update amount
+          await supabase
+            .from('positions')
+            .update({ amount: balanceUi, updated_at: new Date().toISOString() })
+            .eq('id', position.id);
+          updatedCount++;
+          addBotLog({
+            level: 'info',
+            category: 'trade',
+            message: `Updated ${position.token_symbol}: ${position.amount.toFixed(4)} → ${balanceUi.toFixed(4)}`,
+            tokenAddress: position.token_address,
+          });
+        }
+      } catch (err) {
+        errorCount++;
+        console.error('Sync error for position:', position.id, err);
+      }
+    }
+
+    setSyncingPositions(false);
+    await fetchPositions(true);
+
+    const summary: string[] = [];
+    if (updatedCount > 0) summary.push(`${updatedCount} updated`);
+    if (closedCount > 0) summary.push(`${closedCount} closed`);
+    if (errorCount > 0) summary.push(`${errorCount} errors`);
+
+    toast({
+      title: 'Sync Complete',
+      description: summary.length > 0 ? summary.join(', ') : 'All positions are in sync',
+    });
+
+    addBotLog({
+      level: 'success',
+      category: 'system',
+      message: `Sync complete: ${summary.join(', ') || 'all in sync'}`,
+    });
+  }, [isDemo, wallet.address, realOpenPositions, markPositionClosed, fetchPositions, toast]);
+
   // Win rate calculation
   const winRate = closedPositions.length > 0 
     ? (closedPositions.filter(p => (p.profit_loss_percent || 0) > 0).length / closedPositions.length) * 100 
@@ -1250,6 +1334,15 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         confirmLabel={cleaningUpPositions ? "Closing..." : "Force Close All"}
         variant="destructive"
         onConfirm={confirmCleanupPositions}
+      />
+      
+      {/* Exit Preview Modal */}
+      <ExitPreviewModal
+        open={showExitPreview}
+        onOpenChange={setShowExitPreview}
+        position={exitPreviewPosition}
+        walletAddress={wallet.address || ''}
+        onConfirmExit={handleConfirmExitFromModal}
       />
       <AppLayout>
         <div className="container mx-auto px-3 md:px-4 space-y-4 md:space-y-6">
@@ -1357,7 +1450,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                 activeTrades={openPositions}
                 loading={loading}
                 apiStatus={loading ? 'active' : 'waiting'}
-                onExitTrade={handleExitPosition}
+                onExitTrade={handleOpenExitPreview}
               />
 
               {/* Bot Activity Log */}
@@ -1437,11 +1530,14 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                   onClearProcessed={handleClearProcessed}
                   onResetBot={handleResetBot}
                   onCleanupStuck={handleCleanupStuckPositions}
+                  onSyncPositions={handleSyncPositions}
                   scanning={loading}
                   evaluating={sniperLoading}
                   cleaningUp={cleaningUpPositions}
+                  syncingPositions={syncingPositions}
                   processedCount={processedTokensRef.current.size}
                   stuckPositionsCount={realOpenPositions.filter(p => p.status === 'open' || p.status === 'pending').length}
+                  openPositionsCount={realOpenPositions.length}
                   botActive={isBotActive}
                 />
               )}
