@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAppMode } from '@/contexts/AppModeContext';
 import { fetchDexScreenerPrices, isLikelyRealSolanaMint } from '@/lib/dexscreener';
+import { getFunctionErrorMessage } from '@/lib/functionErrors';
 
 // Token lifecycle stages (Raydium-only - no bonding curve tokens)
 export type TokenStage = 'LP_LIVE' | 'INDEXING' | 'LISTED';
@@ -429,7 +430,10 @@ export function useTokenScanner() {
         body: { minLiquidity, chains },
       });
 
-      if (error) throw error;
+      if (error) {
+        const message = await getFunctionErrorMessage(error);
+        throw new Error(message);
+      }
 
       const result = data as ScanResult;
       
