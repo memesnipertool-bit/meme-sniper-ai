@@ -571,7 +571,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         t.riskScore < maxRisk &&
         t.liquidity >= minLiq &&
         t.isTradeable !== false && // Must be tradeable
-        t.canBuy !== false // Must be buyable
+        t.canBuy !== false && // Must be buyable
+        t.canSell !== false // CRITICAL: Must be sellable to avoid stuck positions
       );
       
       if (approvedToken && settings.trade_amount && demoBalance >= settings.trade_amount) {
@@ -720,19 +721,37 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     addBotLog({
       level: 'info',
       category: 'trade',
-      message: `Executing ${toExecute.length} live trade(s)`,
-      details: toExecute.map(t => t.token.symbol).join(', '),
+      message: `🚀 Executing ${toExecute.length} live trade(s)`,
+      details: `Tokens: ${toExecute.map(t => t.token.symbol).join(', ')}\n⚙️ Settings: ${tradeAmountSol} SOL | Slippage: ${settings.slippage_tolerance || 15}% | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}% | Min Liq: ${settings.min_liquidity} SOL`,
     });
 
     liveTradeInFlightRef.current = true;
     try {
       for (const next of toExecute) {
+        // CRITICAL: Pre-validate token is sellable before executing buy
+        if (next.token.canSell === false) {
+          addBotLog({
+            level: 'warning',
+            category: 'trade',
+            message: `⚠️ Skipped: ${next.token.symbol} (not sellable)`,
+            tokenSymbol: next.token.symbol,
+            tokenAddress: next.token.address,
+            details: `Token rejected - cannot be sold after purchase\n💧 Liquidity: $${next.token.liquidity?.toLocaleString() || 'N/A'} | 🛡️ Safety: ${100 - (next.token.riskScore || 0)}/100`,
+          });
+          continue;
+        }
+        
+        const buyerPos = next.token.buyerPosition ? `#${next.token.buyerPosition}` : 'N/A';
+        const safetyScore = next.token.riskScore != null ? `${100 - next.token.riskScore}/100` : 'N/A';
+        const liqText = next.token.liquidity ? `$${next.token.liquidity.toLocaleString()}` : 'N/A';
+        
         addBotLog({
           level: 'info',
           category: 'trade',
-          message: 'Starting 3-stage snipe',
+          message: `📝 Starting trade: ${next.token.symbol}`,
           tokenSymbol: next.token.symbol,
           tokenAddress: next.token.address,
+          details: `💧 Liquidity: ${liqText} | 👤 Buyer Pos: ${buyerPos} | 🛡️ Safety: ${safetyScore}\n⚙️ Amount: ${tradeAmountSol} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority}`,
         });
 
         // Use user settings for slippage and priority, with sensible defaults
@@ -766,23 +785,28 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         );
 
         if (result?.status === 'SUCCESS' && result.position) {
+          const entryVal = (result.position.entryPrice || 0) * (result.position.tokenAmount || 0);
           addBotLog({ 
             level: 'success', 
             category: 'trade', 
-            message: 'Trade successful!',
+            message: `✅ BUY FILLED: ${next.token.symbol}`,
             tokenSymbol: next.token.symbol,
-            details: `Entry: $${result.position.entryPrice?.toFixed(8)} | TX: ${result.position.entryTxHash?.slice(0, 12)}...`,
+            tokenAddress: next.token.address,
+            details: `💧 Liquidity: ${liqText} | 👤 Buyer Pos: ${buyerPos} | 🛡️ Safety: ${safetyScore}\n📊 Entry: $${result.position.entryPrice?.toFixed(8)} | Tokens: ${result.position.tokenAmount?.toLocaleString(undefined, { maximumFractionDigits: 2 })} | Value: $${entryVal.toFixed(4)} | SOL: ${result.position.solSpent?.toFixed(4)}\n⚙️ TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%\n🔗 TX: ${result.position.entryTxHash || 'N/A'}`,
           });
           recordTrade(true);
           await fetchPositions();
           refreshBalance();
           await new Promise(r => setTimeout(r, 500));
         } else {
+          const failReason = result?.error || 'Trade failed - unknown error';
           addBotLog({ 
             level: 'error', 
             category: 'trade', 
-            message: result?.error || 'Trade failed',
+            message: `❌ BUY FAILED: ${next.token.symbol}`,
             tokenSymbol: next.token.symbol,
+            tokenAddress: next.token.address,
+            details: `💧 Liquidity: ${liqText} | 👤 Buyer Pos: ${buyerPos} | 🛡️ Safety: ${safetyScore}\n❗ Reason: ${failReason}\n⚙️ Attempted: ${tradeAmountSol} SOL | Slippage: ${settings.slippage_tolerance || 15}%\n📍 Token: ${next.token.address}`,
           });
           recordTrade(false);
           break; // Stop on first failure

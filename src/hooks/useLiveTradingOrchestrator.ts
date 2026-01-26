@@ -33,6 +33,8 @@ export interface ApprovedToken {
   buyerPosition?: number | null;
   isPumpFun?: boolean;
   isTradeable?: boolean;
+  canBuy?: boolean;
+  canSell?: boolean;
   source?: string;
 }
 
@@ -117,6 +119,19 @@ export function useLiveTradingOrchestrator() {
       return { success: false, error: 'No wallet address' };
     }
 
+    // CRITICAL: Pre-validate token is sellable before executing buy
+    if (token.isTradeable === false || token.canBuy === false) {
+      addBotLog({
+        level: 'warning',
+        category: 'trade',
+        message: `⚠️ Skipped: ${token.symbol} (not tradeable)`,
+        tokenSymbol: token.symbol,
+        tokenAddress: token.address,
+        details: `Token cannot be traded - rejected before execution`,
+      });
+      return { success: false, error: 'Token not tradeable' };
+    }
+
     // Prepare trade context for logging
     const buyerPosText = token.buyerPosition ? `#${token.buyerPosition}` : 'N/A';
     const safetyScoreText = token.riskScore != null ? `${100 - token.riskScore}/100` : 'N/A';
@@ -128,7 +143,7 @@ export function useLiveTradingOrchestrator() {
       message: `🚀 Executing BUY: ${token.symbol}`,
       tokenSymbol: token.symbol,
       tokenAddress: token.address,
-      details: `💧 Liquidity: ${liquidityText} | 👤 Buyer Pos: ${buyerPosText} | 🛡️ Safety: ${safetyScoreText}\nAmount: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority} | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%`,
+      details: `💧 Liquidity: ${liquidityText} | 👤 Buyer Pos: ${buyerPosText} | 🛡️ Safety: ${safetyScoreText}\n⚙️ User Settings: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority} | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%`,
     });
 
     try {
@@ -258,7 +273,7 @@ export function useLiveTradingOrchestrator() {
         message: `❌ BUY FAILED: ${token.symbol}`,
         tokenSymbol: token.symbol,
         tokenAddress: token.address,
-        details: `💧 Liquidity: ${liqFail} | 👤 Buyer Pos: ${buyerPosFail} | 🛡️ Safety: ${safetyFail}\nReason: ${errorMessage} | Attempted: ${settings.trade_amount} SOL\n📍 Token: ${token.address}`,
+        details: `💧 Liquidity: ${liqFail} | 👤 Buyer Pos: ${buyerPosFail} | 🛡️ Safety: ${safetyFail}\n❗ Reason: ${errorMessage}\n⚙️ Attempted: ${settings.trade_amount} SOL | Slippage: ${settings.slippage_tolerance || 15}% | TP: ${settings.profit_take_percentage}% | SL: ${settings.stop_loss_percentage}%\n📍 Token: ${token.address}`,
       });
 
       return { success: false, error: errorMessage, source: 'trading-engine' };
