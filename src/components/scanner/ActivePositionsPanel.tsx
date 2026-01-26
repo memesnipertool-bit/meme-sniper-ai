@@ -11,6 +11,14 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { 
+  formatPercentage, 
+  formatCurrency, 
+  calculatePnLValue,
+  formatPrice as formatPriceUtil,
+  getTokenDisplayName,
+  getTokenDisplaySymbol 
+} from "@/lib/formatters";
 
 interface Position {
   id: string;
@@ -19,6 +27,7 @@ interface Position {
   token_address?: string;
   amount: number;
   entry_price: number;
+  entry_value?: number;
   current_price: number;
   profit_loss_percent: number | null;
   profit_loss_value: number | null;
@@ -43,12 +52,7 @@ const avatarColors = [
   'bg-gradient-to-br from-cyan-500/30 to-cyan-500/10 text-cyan-400',
 ];
 
-const formatPrice = (value: number) => {
-  if (value < 0.00001) return `$${value.toExponential(2)}`;
-  if (value < 0.01) return `$${value.toFixed(6)}`;
-  if (value < 1) return `$${value.toFixed(4)}`;
-  return `$${value.toFixed(2)}`;
-};
+const formatPrice = (value: number) => formatPriceUtil(value);
 
 // Memoized position row
 const PositionRow = memo(({ 
@@ -63,9 +67,19 @@ const PositionRow = memo(({
   onForceClose?: (positionId: string) => void;
 }) => {
   const pnlPercent = position.profit_loss_percent || 0;
-  const pnlValue = position.profit_loss_value || 0;
+  // CRITICAL FIX: Calculate P&L value properly when entry_value is available
+  const pnlValue = position.profit_loss_value || calculatePnLValue(
+    position.entry_value,
+    position.profit_loss_percent,
+    position.entry_price,
+    position.amount
+  );
   const isPositive = pnlPercent >= 0;
   const progressWidth = Math.min(Math.abs(pnlPercent), 100);
+
+  // Use actual token name/symbol, fallback to formatted address
+  const displaySymbol = getTokenDisplaySymbol(position.token_symbol, position.token_address || '');
+  const displayName = getTokenDisplayName(position.token_name, position.token_address || '');
 
   const handleClose = useCallback(() => {
     onClosePosition?.(position.id, position.current_price);
@@ -86,12 +100,12 @@ const PositionRow = memo(({
               avatarColors[colorIndex % avatarColors.length]
             )}
           >
-            {position.token_symbol.slice(0, 2).toUpperCase()}
+            {displaySymbol.slice(0, 2).toUpperCase()}
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm text-foreground truncate">{position.token_name}</span>
-              <span className="text-xs text-muted-foreground">{position.token_symbol}</span>
+              <span className="font-semibold text-sm text-foreground truncate">{displayName}</span>
+              <span className="text-xs text-muted-foreground">{displaySymbol}</span>
             </div>
             <p className="text-xs text-muted-foreground tabular-nums">
               {position.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} tokens
@@ -108,13 +122,13 @@ const PositionRow = memo(({
                   "font-bold text-sm tabular-nums transition-all duration-300",
                   isPositive ? 'text-success' : 'text-destructive'
                 )}>
-                  {isPositive ? '+' : ''}{pnlPercent.toFixed(1)}%
+                  {formatPercentage(pnlPercent)}
                 </div>
                 <p className={cn(
                   "text-xs tabular-nums font-medium transition-all duration-300",
                   isPositive ? 'text-success/80' : 'text-destructive/80'
                 )}>
-                  {isPositive ? '+' : ''}${Math.abs(pnlValue).toFixed(2)}
+                  {formatCurrency(pnlValue)}
                 </p>
               </div>
             </TooltipTrigger>
@@ -301,7 +315,7 @@ export default function ActivePositionsPanel({
                     "ml-2 font-medium",
                     totalPnL >= 0 ? 'text-success' : 'text-destructive'
                   )}>
-                    ({totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)})
+                    ({formatCurrency(totalPnL)})
                   </span>
                 )}
               </p>

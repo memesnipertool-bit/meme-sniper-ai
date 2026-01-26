@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart3, TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
+import { formatPercentage } from "@/lib/formatters";
 
 interface PerformancePanelProps {
   winRate: number;
@@ -40,7 +41,7 @@ export default function PerformancePanel({
               Win Rate
             </div>
             <div className="text-2xl font-bold text-success font-mono">
-              {winRate.toFixed(1)}%
+              {formatPercentage(winRate, false)}
             </div>
             <p className="text-xs text-muted-foreground">{wins}W / {losses}L</p>
           </div>
@@ -50,9 +51,9 @@ export default function PerformancePanel({
               Total PnL
             </div>
             <div className={`text-2xl font-bold font-mono ${totalPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
-              {totalPnL >= 0 ? '+' : ''}{totalPnL.toFixed(1)}%
+              {formatPercentage(totalPnL)}
             </div>
-            <p className="text-xs text-muted-foreground">Avg: {avgPnL >= 0 ? '+' : ''}{avgPnL.toFixed(1)}%</p>
+            <p className="text-xs text-muted-foreground">Avg: {formatPercentage(avgPnL)}</p>
           </div>
         </div>
 
@@ -64,7 +65,7 @@ export default function PerformancePanel({
               Best Trade
             </div>
             <div className="text-lg font-bold text-success font-mono">
-              {bestTrade > 0 ? '+' : ''}{bestTrade.toFixed(1)}%
+              {formatPercentage(bestTrade)}
             </div>
           </div>
           <div className="p-3 bg-destructive/10 rounded-lg border border-destructive/20">
@@ -73,7 +74,7 @@ export default function PerformancePanel({
               Worst Trade
             </div>
             <div className="text-lg font-bold text-destructive font-mono">
-              {worstTrade.toFixed(1)}%
+              {formatPercentage(worstTrade)}
             </div>
           </div>
         </div>

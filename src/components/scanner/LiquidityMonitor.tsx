@@ -321,17 +321,20 @@ const PoolRow = memo(({ pool, colorIndex, isNew, onViewDetails }: { pool: Scanne
 
 PoolRow.displayName = 'PoolRow';
 
-// Helper to generate short address format for fallback
-const shortAddress = (address: string) => 
-  address && address.length > 10 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address || 'TOKEN';
+// Import formatters
+import { 
+  formatPercentage, 
+  formatCurrency as formatCurrencyValue, 
+  calculatePnLValue, 
+  getTokenDisplayName, 
+  getTokenDisplaySymbol,
+  isPlaceholderText,
+  shortAddress as formatShortAddress 
+} from '@/lib/formatters';
 
-// Check if text is a placeholder
-const isPlaceholder = (val: string | null | undefined) => {
-  if (!val) return true;
-  const v = val.trim();
-  if (!v) return true;
-  return /^(unknown|unknown token|token|\?\?\?|n\/a)$/i.test(v);
-};
+// Legacy helpers (kept for pools display)
+const shortAddress = (address: string) => formatShortAddress(address);
+const isPlaceholder = (val: string | null | undefined) => isPlaceholderText(val);
 
 // Memoized Trade Row with improved visibility
 const TradeRow = memo(({ trade, colorIndex, onExit }: { 
@@ -340,16 +343,18 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   onExit?: (id: string, price: number) => void 
 }) => {
   const pnlPercent = trade.profit_loss_percent || 0;
-  const pnlValue = trade.profit_loss_value || 0;
+  // CRITICAL FIX: Calculate P&L value properly when entry_value is available
+  const pnlValue = trade.profit_loss_value || calculatePnLValue(
+    trade.entry_value,
+    trade.profit_loss_percent,
+    trade.entry_price,
+    trade.amount
+  );
   const isPositive = pnlPercent >= 0;
   
-  // Use short address as fallback for placeholder names/symbols
-  const displaySymbol = isPlaceholder(trade.token_symbol) 
-    ? shortAddress(trade.token_address) 
-    : trade.token_symbol;
-  const displayName = isPlaceholder(trade.token_name) 
-    ? `Token ${shortAddress(trade.token_address)}` 
-    : trade.token_name;
+  // Use actual token name/symbol, fallback to formatted address
+  const displaySymbol = getTokenDisplaySymbol(trade.token_symbol, trade.token_address);
+  const displayName = getTokenDisplayName(trade.token_name, trade.token_address);
     
   const initials = displaySymbol.slice(0, 2).toUpperCase();
   const avatarClass = avatarColors[colorIndex % avatarColors.length];
@@ -392,13 +397,13 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
           "font-bold text-sm tabular-nums transition-all duration-300",
           isPositive ? 'text-success' : 'text-destructive'
         )}>
-          {isPositive ? '+' : ''}{pnlPercent.toFixed(1)}%
+          {formatPercentage(pnlPercent)}
         </div>
         <div className={cn(
           "text-xs tabular-nums font-medium transition-all duration-300",
           isPositive ? 'text-success/80' : 'text-destructive/80'
         )}>
-          {isPositive ? '+' : ''}${Math.abs(pnlValue).toFixed(2)}
+          {formatCurrencyValue(pnlValue)}
         </div>
       </div>
       

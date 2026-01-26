@@ -1,5 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, Activity, Zap, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { formatCurrency as formatCurrencyUtil, formatPercentage } from "@/lib/formatters";
 
 interface StatsGridProps {
   totalValue: number;
@@ -9,11 +10,7 @@ interface StatsGridProps {
   closedPositionsCount: number;
 }
 
-const formatCurrency = (value: number) => {
-  if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
-  if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}K`;
-  return `$${value.toFixed(2)}`;
-};
+const formatCurrency = (value: number, showSign = true) => formatCurrencyUtil(value, showSign);
 
 interface StatCardProps {
   title: string;
@@ -102,8 +99,8 @@ export default function StatsGrid({
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       <StatCard
         title="Total P&L"
-        value={`${totalPnL >= 0 ? '+' : ''}${formatCurrency(totalPnL)}`}
-        change={`${totalPnLPercent >= 0 ? '+' : ''}${totalPnLPercent.toFixed(1)}% all time`}
+        value={formatCurrency(totalPnL)}
+        change={`${formatPercentage(totalPnLPercent)} all time`}
         changeType={totalPnL >= 0 ? 'positive' : 'negative'}
         icon={totalPnL >= 0 ? TrendingUp : TrendingDown}
         iconColor={totalPnL >= 0 ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"}

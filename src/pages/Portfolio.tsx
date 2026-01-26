@@ -36,12 +36,16 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 
-const formatCurrency = (value: number) => {
-  if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
-  if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}K`;
-  if (Math.abs(value) >= 0.01) return `$${value.toFixed(2)}`;
-  return `$${value.toFixed(4)}`;
-};
+import { 
+  formatCurrency as formatCurrencyUtil, 
+  formatPercentage, 
+  formatPrice, 
+  calculatePnLValue,
+  getTokenDisplayName,
+  getTokenDisplaySymbol 
+} from "@/lib/formatters";
+
+const formatCurrency = (value: number) => formatCurrencyUtil(value);
 
 const shortAddress = (address: string) =>
   address && address.length > 10
@@ -72,12 +76,16 @@ const PositionRow = ({ position, onClose, compact = false }: PositionRowProps) =
   const isPendingTakeProfit = (position.profit_loss_percent ?? 0) >= (position.profit_take_percent ?? 100) * 0.8;
   const isPendingStopLoss = (position.profit_loss_percent ?? 0) <= -(position.stop_loss_percent ?? 20) * 0.8;
 
-  const displaySymbol = !isPlaceholderTokenText(position.token_symbol)
-    ? (position.token_symbol as string)
-    : shortAddress(position.token_address);
-  const displayName = !isPlaceholderTokenText(position.token_name)
-    ? (position.token_name as string)
-    : 'Token';
+  const displaySymbol = getTokenDisplaySymbol(position.token_symbol, position.token_address);
+  const displayName = getTokenDisplayName(position.token_name, position.token_address);
+  
+  // Calculate P&L value properly
+  const pnlValue = position.profit_loss_value ?? calculatePnLValue(
+    position.entry_value,
+    position.profit_loss_percent,
+    position.entry_price,
+    position.amount
+  );
 
   const exitInfo = position.status === 'closed' ? getExitReasonDisplay(position.exit_reason) : null;
   const ExitIcon = exitInfo?.icon || XCircle;
@@ -125,10 +133,10 @@ const PositionRow = ({ position, onClose, compact = false }: PositionRowProps) =
         <div className="text-right min-w-[80px]">
           <p className="text-xs text-muted-foreground">P&L</p>
           <div className={`flex items-center justify-end gap-1 font-bold text-sm ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-            {isProfit ? '+' : ''}{(position.profit_loss_percent ?? 0).toFixed(2)}%
+            {formatPercentage(position.profit_loss_percent ?? 0)}
           </div>
           <p className={`text-xs ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-            {isProfit ? '+' : ''}{formatCurrency(position.profit_loss_value ?? 0)}
+            {formatCurrency(pnlValue)}
           </p>
         </div>
 
@@ -299,10 +307,10 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                 <span className="text-xs text-muted-foreground">Total P&L</span>
               </div>
               <p className={`text-xl font-bold ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {stats.totalPnL >= 0 ? '+' : ''}{formatCurrency(stats.totalPnL)}
+                {formatCurrency(stats.totalPnL)}
               </p>
               <p className={`text-xs ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {stats.totalPnLPercent >= 0 ? '+' : ''}{stats.totalPnLPercent.toFixed(2)}%
+                {formatPercentage(stats.totalPnLPercent)}
               </p>
             </CardContent>
           </Card>
