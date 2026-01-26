@@ -1,3 +1,4 @@
+import React, { forwardRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDisplayUnit, DisplayUnit } from '@/contexts/DisplayUnitContext';
@@ -170,8 +171,8 @@ export const PortfolioChart = ({ data, height = 200, loading = false, displayUni
     return `$${value.toFixed(2)}`;
   };
 
-  // Custom tooltip with dual values
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  // Custom tooltip render function (not a component to avoid ref warnings)
+  const renderTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload || !payload.length) return null;
     
     const valueInDisplayUnit = payload[0].value;
@@ -217,7 +218,7 @@ export const PortfolioChart = ({ data, height = 200, loading = false, displayUni
           domain={[yMin, yMax]}
           width={70}
         />
-        <Tooltip content={<CustomTooltip />} />
+        <Tooltip content={renderTooltip} />
         <defs>
           <linearGradient id="portfolioGradient" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>
