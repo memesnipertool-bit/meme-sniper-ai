@@ -1,5 +1,6 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useDisplayUnit, DisplayUnit } from '@/contexts/DisplayUnitContext';
 
 interface PriceChartProps {
   data: { time: string; price: number }[];
@@ -96,6 +97,7 @@ interface PortfolioChartProps {
   data: { date: string; value: number; pnl: number }[];
   height?: number;
   loading?: boolean;
+  displayUnit?: DisplayUnit;
 }
 
 // Portfolio chart skeleton
@@ -132,31 +134,74 @@ const PortfolioChartSkeleton = ({ height }: { height: number }) => (
   </div>
 );
 
-export const PortfolioChart = ({ data, height = 200, loading = false }: PortfolioChartProps) => {
+export const PortfolioChart = ({ data, height = 200, loading = false, displayUnit: propDisplayUnit }: PortfolioChartProps) => {
+  const { displayUnit: contextDisplayUnit, usdToSol, solPrice } = useDisplayUnit();
+  const displayUnit = propDisplayUnit ?? contextDisplayUnit;
+  
   // Show skeleton while loading or if no data
   if (loading || !data || data.length === 0) {
     return <PortfolioChartSkeleton height={height} />;
   }
 
+  // Convert values if displaying in SOL
+  const chartData = displayUnit === 'SOL' 
+    ? data.map(d => ({ ...d, value: usdToSol(d.value), pnl: usdToSol(d.pnl) }))
+    : data;
+
   // Calculate proper Y-axis domain with padding
-  const values = data.map(d => d.value).filter(v => Number.isFinite(v));
+  const values = chartData.map(d => d.value).filter(v => Number.isFinite(v));
   const minValue = values.length > 0 ? Math.min(...values) : 0;
   const maxValue = values.length > 0 ? Math.max(...values) : 100;
-  const padding = (maxValue - minValue) * 0.1 || 10; // 10% padding or minimum 10
+  const padding = (maxValue - minValue) * 0.1 || (displayUnit === 'SOL' ? 0.1 : 10);
   const yMin = Math.max(0, minValue - padding);
   const yMax = maxValue + padding;
 
-  // Format Y-axis ticks based on value magnitude
+  // Format Y-axis ticks based on display unit and magnitude
   const formatYAxis = (value: number) => {
+    if (displayUnit === 'SOL') {
+      if (value >= 1000) return `${(value / 1000).toFixed(1)}K SOL`;
+      if (value >= 1) return `${value.toFixed(1)} SOL`;
+      return `${value.toFixed(3)} SOL`;
+    }
+    // USD formatting
     if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
     if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`;
     if (value >= 1) return `$${value.toFixed(0)}`;
     return `$${value.toFixed(2)}`;
   };
 
+  // Custom tooltip with dual values
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || !payload.length) return null;
+    
+    const valueInDisplayUnit = payload[0].value;
+    const valueInUsd = displayUnit === 'SOL' ? valueInDisplayUnit * solPrice : valueInDisplayUnit;
+    const valueInSol = displayUnit === 'SOL' ? valueInDisplayUnit : valueInDisplayUnit / solPrice;
+    
+    return (
+      <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
+        <p className="text-xs text-muted-foreground mb-2">{label}</p>
+        <div className="space-y-1">
+          <p className="text-sm font-bold text-foreground">
+            {displayUnit === 'SOL' 
+              ? `${valueInSol.toFixed(4)} SOL`
+              : `$${valueInUsd.toFixed(2)}`
+            }
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {displayUnit === 'SOL'
+              ? `≈ $${valueInUsd.toFixed(2)} USD`
+              : `≈ ${valueInSol.toFixed(4)} SOL`
+            }
+          </p>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+      <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
         <XAxis 
           dataKey="date" 
@@ -170,20 +215,9 @@ export const PortfolioChart = ({ data, height = 200, loading = false }: Portfoli
           tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickFormatter={formatYAxis}
           domain={[yMin, yMax]}
-          width={60}
+          width={70}
         />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: 'hsl(var(--card))',
-            border: '1px solid hsl(var(--border))',
-            borderRadius: '8px',
-          }}
-          labelStyle={{ color: 'hsl(var(--foreground))' }}
-          formatter={(value: number, name: string) => [
-            formatYAxis(value),
-            name === 'value' ? 'Portfolio Value' : 'P&L'
-          ]}
-        />
+        <Tooltip content={<CustomTooltip />} />
         <defs>
           <linearGradient id="portfolioGradient" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4}/>

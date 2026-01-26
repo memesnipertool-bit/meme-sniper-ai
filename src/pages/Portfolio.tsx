@@ -9,6 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePositions, Position } from "@/hooks/usePositions";
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { useAutoExit } from "@/hooks/useAutoExit";
+import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
+import SolTradesBanner from "@/components/dashboard/SolTradesBanner";
 import { isPlaceholderTokenText } from "@/lib/dexscreener";
 import { 
   TrendingUp, 
@@ -33,6 +35,7 @@ import {
   Zap,
   Trophy,
   PieChart,
+  Coins,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 
@@ -44,8 +47,6 @@ import {
   getTokenDisplayName,
   getTokenDisplaySymbol 
 } from "@/lib/formatters";
-
-const formatCurrency = (value: number) => formatCurrencyUtil(value);
 
 const shortAddress = (address: string) =>
   address && address.length > 10
@@ -69,9 +70,10 @@ interface PositionRowProps {
   position: Position;
   onClose?: () => void;
   compact?: boolean;
+  formatValue: (usd: number, options?: { showSign?: boolean }) => string;
 }
 
-const PositionRow = ({ position, onClose, compact = false }: PositionRowProps) => {
+const PositionRow = ({ position, onClose, compact = false, formatValue }: PositionRowProps) => {
   const isProfit = (position.profit_loss_percent ?? 0) >= 0;
   const isPendingTakeProfit = (position.profit_loss_percent ?? 0) >= (position.profit_take_percent ?? 100) * 0.8;
   const isPendingStopLoss = (position.profit_loss_percent ?? 0) <= -(position.stop_loss_percent ?? 20) * 0.8;
@@ -136,14 +138,14 @@ const PositionRow = ({ position, onClose, compact = false }: PositionRowProps) =
             {formatPercentage(position.profit_loss_percent ?? 0)}
           </div>
           <p className={`text-xs ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-            {formatCurrency(pnlValue)}
+            {formatValue(pnlValue, { showSign: true })}
           </p>
         </div>
 
         {!compact && (
           <div className="text-right hidden lg:block min-w-[100px]">
             <p className="text-xs text-muted-foreground">Entry Value</p>
-            <p className="font-medium text-foreground text-sm">{formatCurrency(position.entry_value ?? 0)}</p>
+            <p className="font-medium text-foreground text-sm">{formatValue(position.entry_value ?? 0)}</p>
           </div>
         )}
 
@@ -184,6 +186,8 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
     stopAutoExitMonitor,
     isMonitoring,
   } = useAutoExit();
+
+  const { formatPrimaryValue, formatDualValue } = useDisplayUnit();
 
   const { trades, loading: tradesLoading, refetch: refetchTrades } = useTradeHistory(100);
   const [autoMonitor, setAutoMonitor] = useState(false);
@@ -287,16 +291,21 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
           </Button>
         </div>
 
+        {/* SOL Trades Banner */}
+        <div className="mb-6">
+          <SolTradesBanner />
+        </div>
+
         {/* Stats Overview - Comprehensive Grid */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
           <Card className="bg-gradient-to-br from-card to-card/80">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
-                <DollarSign className="w-4 h-4 text-primary" />
+                <Coins className="w-4 h-4 text-primary" />
                 <span className="text-xs text-muted-foreground">Open Value</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatCurrency(stats.openValue)}</p>
-              <p className="text-xs text-muted-foreground">{openPositions.length} positions</p>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openValue).secondary}</p>
             </CardContent>
           </Card>
 
@@ -307,10 +316,10 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                 <span className="text-xs text-muted-foreground">Total P&L</span>
               </div>
               <p className={`text-xl font-bold ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {formatCurrency(stats.totalPnL)}
+                {formatDualValue(stats.totalPnL, { showSign: true }).primary}
               </p>
-              <p className={`text-xs ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {formatPercentage(stats.totalPnLPercent)}
+              <p className={`text-xs ${stats.totalPnL >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
+                {formatDualValue(stats.totalPnL, { showSign: true }).secondary}
               </p>
             </CardContent>
           </Card>
@@ -503,6 +512,7 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                       key={position.id} 
                       position={position} 
                       onClose={() => handleClosePosition(position)}
+                      formatValue={formatPrimaryValue}
                     />
                   ))}
                 </CardContent>
@@ -543,6 +553,7 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                     <PositionRow 
                       key={position.id} 
                       position={position}
+                      formatValue={formatPrimaryValue}
                     />
                   ))}
                 </CardContent>

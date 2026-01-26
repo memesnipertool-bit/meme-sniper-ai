@@ -2,6 +2,8 @@ import React, { forwardRef, useMemo } from "react";
 import AppLayout from "@/components/layout/AppLayout";
 import StatsGrid from "@/components/dashboard/StatsGrid";
 import WalletBanner from "@/components/dashboard/WalletBanner";
+import SolTradesBanner from "@/components/dashboard/SolTradesBanner";
+import UnitToggle from "@/components/dashboard/UnitToggle";
 import ActiveTradesCard from "@/components/dashboard/ActiveTradesCard";
 import MarketOverview from "@/components/dashboard/MarketOverview";
 import QuickActions from "@/components/dashboard/QuickActions";
@@ -14,21 +16,17 @@ import { usePositions } from "@/hooks/usePositions";
 import { useWallet } from "@/hooks/useWallet";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useDemoPortfolio } from "@/contexts/DemoPortfolioContext";
+import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
 import { PortfolioChart } from "@/components/charts/PriceCharts";
 import { TrendingUp, ArrowUpRight, FlaskConical, Coins, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-
-const formatCurrency = (value: number) => {
-  if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
-  if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}K`;
-  return `$${value.toFixed(2)}`;
-};
 
 const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
   const { openPositions: realOpenPositions, closedPositions: realClosedPositions, positions: allPositions, loading: positionsLoading } = usePositions();
   const { wallet } = useWallet();
   const { isDemo } = useAppMode();
   const { toast } = useToast();
+  const { formatPrimaryValue, displayUnit } = useDisplayUnit();
   
   // Demo portfolio context
   const {
@@ -198,6 +196,9 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
           </Alert>
         )}
 
+        {/* SOL Trades Banner - Informational */}
+        <SolTradesBanner />
+
         {/* Wallet Banner */}
         {wallet.isConnected && wallet.address && (
           <WalletBanner 
@@ -241,7 +242,7 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
                         <span className="text-2xl font-bold text-foreground">
                           {isDemo 
                             ? `${demoBalance.toFixed(0)} SOL`
-                            : formatCurrency(portfolioData[portfolioData.length - 1]?.value || totalValue)
+                            : formatPrimaryValue(portfolioData[portfolioData.length - 1]?.value || totalValue)
                           }
                         </span>
                         <Badge 
@@ -254,20 +255,25 @@ const Index = forwardRef<HTMLDivElement, object>(function Index(_props, ref) {
                       </div>
                     </div>
                   </div>
-                  <div className="flex gap-1 bg-secondary/60 rounded-lg p-0.5">
-                    {(['1H', '24H', '7D', '30D'] as const).map((period) => (
-                      <button
-                        key={period}
-                        onClick={() => setSelectedPeriod(period)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-                          period === selectedPeriod 
-                            ? 'bg-primary text-primary-foreground' 
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        {period}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-3">
+                    {/* SOL/USD Toggle */}
+                    <UnitToggle size="sm" />
+                    {/* Period selector */}
+                    <div className="flex gap-1 bg-secondary/60 rounded-lg p-0.5">
+                      {(['1H', '24H', '7D', '30D'] as const).map((period) => (
+                        <button
+                          key={period}
+                          onClick={() => setSelectedPeriod(period)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                            period === selectedPeriod 
+                              ? 'bg-primary text-primary-foreground' 
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {period}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </CardHeader>
