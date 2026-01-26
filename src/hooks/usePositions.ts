@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { fetchDexScreenerTokenMetadata, fetchDexScreenerPrices, isPlaceholderTokenText, isLikelyRealSolanaMint } from '@/lib/dexscreener';
+import { fetchDexScreenerPrices, fetchDexScreenerTokenMetadata, isLikelyRealSolanaMint } from '@/lib/dexscreener';
+import { isPlaceholderText } from '@/lib/formatters';
 export interface Position {
   id: string;
   user_id: string;
@@ -132,7 +133,7 @@ export function usePositions() {
         new Set(
           rawPositions
             .filter((p) =>
-              isPlaceholderTokenText(p.token_symbol) || isPlaceholderTokenText(p.token_name)
+              isPlaceholderText(p.token_symbol) || isPlaceholderText(p.token_name)
             )
             .map((p) => p.token_address)
             .filter((addr) => !tokenMetaCacheRef.current.has(addr))
@@ -153,8 +154,8 @@ export function usePositions() {
               if (!meta) return p;
               return {
                 ...p,
-                token_symbol: isPlaceholderTokenText(p.token_symbol) ? meta.symbol : p.token_symbol,
-                token_name: isPlaceholderTokenText(p.token_name) ? meta.name : p.token_name,
+                token_symbol: isPlaceholderText(p.token_symbol) ? meta.symbol : p.token_symbol,
+                token_name: isPlaceholderText(p.token_name) ? meta.name : p.token_name,
               };
             })
           );
@@ -492,12 +493,34 @@ export function usePositions() {
           // Which simplifies to: entryValue * profitLossPercent/100
           const profitLossValue = entryValueForCalc * (profitLossPercent / 100);
 
+          // Check if metadata needs enrichment (name/symbol are placeholders)
+          const needsMetadataEnrichment = isPlaceholderText(p.token_name) || isPlaceholderText(p.token_symbol);
+          
+          // Enrich with actual token name/symbol from DexScreener if available
+          let enrichedName = p.token_name;
+          let enrichedSymbol = p.token_symbol;
+          
+          if (needsMetadataEnrichment && priceData.name && priceData.symbol) {
+            // Only update if DexScreener provides valid (non-placeholder) metadata
+            if (!isPlaceholderText(priceData.name)) {
+              enrichedName = priceData.name;
+              hasChanges = true;
+            }
+            if (!isPlaceholderText(priceData.symbol)) {
+              enrichedSymbol = priceData.symbol;
+              hasChanges = true;
+            }
+          }
+          
           return {
             ...p,
             current_price: currentPriceUsd,
             current_value: currentValue,
             profit_loss_value: profitLossValue,
             profit_loss_percent: profitLossPercent,
+            // Enrich token metadata from DexScreener
+            token_name: enrichedName,
+            token_symbol: enrichedSymbol,
             // Backfill entry_price_usd if we detected a unit mismatch
             // (entry was in SOL but current is in USD)
             entry_price_usd: needsBackfill ? null : (p.entry_price_usd ?? entryPriceForCalc),
