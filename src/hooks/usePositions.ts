@@ -307,7 +307,12 @@ export function usePositions() {
   }, [toast, fetchPositions]);
 
   // Close a position manually
-  const closePosition = useCallback(async (positionId: string, exitPrice: number): Promise<boolean> => {
+  // CRITICAL: Now accepts optional exitTxId to record the on-chain transaction hash
+  const closePosition = useCallback(async (
+    positionId: string, 
+    exitPrice: number,
+    exitTxId?: string | null
+  ): Promise<boolean> => {
     // IMPORTANT: do not rely on `positions` from the closure here.
     // Use the ref so we always act on the latest list (prevents "Position not found" / stale updates).
     const snapshot = positionsRef.current;
@@ -347,18 +352,26 @@ export function usePositions() {
       // Use entry_value for accurate P&L $ calculation
       const profitLossValue = entryValue * (profitLossPercent / 100);
 
+      // Build update payload - include exit_tx_id if provided
+      const updatePayload: Record<string, unknown> = {
+        status: 'closed',
+        exit_reason: 'manual',
+        exit_price: safeExitPrice,
+        current_price: safeExitPrice,
+        current_value: currentValue,
+        profit_loss_percent: profitLossPercent,
+        profit_loss_value: profitLossValue,
+        closed_at: new Date().toISOString(),
+      };
+      
+      // CRITICAL: Save the exit transaction ID if provided
+      if (exitTxId) {
+        updatePayload.exit_tx_id = exitTxId;
+      }
+
       const { data: updatedRows, error } = await supabase
         .from('positions')
-        .update({
-          status: 'closed',
-          exit_reason: 'manual',
-          exit_price: safeExitPrice,
-          current_price: safeExitPrice,
-          current_value: currentValue,
-          profit_loss_percent: profitLossPercent,
-          profit_loss_value: profitLossValue,
-          closed_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', positionId)
         .select('id, updated_at, status');
 

@@ -1,4 +1,5 @@
 import React, { forwardRef, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import AppLayout from "@/components/layout/AppLayout";
 import LiquidityBotPanel from "@/components/trading/LiquidityBotPanel";
 import SniperDecisionPanel from "@/components/trading/SniperDecisionPanel";
@@ -242,7 +243,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       if (result.success) {
         // IMPORTANT: A successful on-chain sell does NOT automatically update our positions table.
         // Mark the position closed so it is removed from Active Trades immediately.
-        const closed = await markPositionClosed(positionId, safeExitPrice);
+        // CRITICAL FIX: Pass the transaction hash so it's recorded in the database
+        const closed = await markPositionClosed(positionId, safeExitPrice, result.txHash);
 
         if (closed) {
           addBotLog({
@@ -250,8 +252,29 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             category: 'trade',
             message: 'Position closed successfully',
             tokenSymbol: position.token_symbol,
-            details: `Received ${result.solReceived?.toFixed(4)} SOL`,
+            details: `Received ${result.solReceived?.toFixed(4)} SOL | TX: ${result.txHash?.slice(0, 12)}...`,
           });
+          
+          // Log to trade_history for Transaction History display
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              await supabase.from('trade_history').insert({
+                user_id: user.id,
+                token_address: position.token_address,
+                token_symbol: position.token_symbol,
+                token_name: position.token_name,
+                trade_type: 'sell',
+                amount: position.amount,
+                price_sol: result.solReceived ? (result.solReceived / position.amount) : null,
+                price_usd: safeExitPrice,
+                status: 'confirmed',
+                tx_hash: result.txHash,
+              });
+            }
+          } catch (historyErr) {
+            console.error('Failed to log sell to trade_history:', historyErr);
+          }
         } else {
           addBotLog({
             level: 'warning',
