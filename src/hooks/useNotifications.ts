@@ -11,13 +11,19 @@ export interface Notification {
   metadata?: Record<string, any>;
 }
 
-const NOTIFICATIONS_STORAGE_KEY = 'meme_sniper_notifications';
+const NOTIFICATIONS_STORAGE_KEY_PREFIX = 'meme_sniper_notifications_';
 const MAX_NOTIFICATIONS = 50;
 
-// Load notifications from localStorage
-const loadFromStorage = (): Notification[] => {
+// Get user-specific storage key
+const getStorageKey = (userId: string | null): string => {
+  return userId ? `${NOTIFICATIONS_STORAGE_KEY_PREFIX}${userId}` : `${NOTIFICATIONS_STORAGE_KEY_PREFIX}anonymous`;
+};
+
+// Load notifications from localStorage for specific user
+const loadFromStorage = (userId: string | null): Notification[] => {
   try {
-    const stored = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+    const key = getStorageKey(userId);
+    const stored = localStorage.getItem(key);
     if (stored) {
       return JSON.parse(stored);
     }
@@ -27,12 +33,13 @@ const loadFromStorage = (): Notification[] => {
   return [];
 };
 
-// Save notifications to localStorage
-const saveToStorage = (notifications: Notification[]) => {
+// Save notifications to localStorage for specific user
+const saveToStorage = (notifications: Notification[], userId: string | null) => {
   try {
     // Keep only the most recent notifications
     const trimmed = notifications.slice(0, MAX_NOTIFICATIONS);
-    localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(trimmed));
+    const key = getStorageKey(userId);
+    localStorage.setItem(key, JSON.stringify(trimmed));
   } catch (error) {
     console.error('Failed to save notifications to storage:', error);
   }
@@ -40,19 +47,27 @@ const saveToStorage = (notifications: Notification[]) => {
 
 export function useNotifications() {
   const { user } = useAuth();
-  const [notifications, setNotifications] = useState<Notification[]>(() => loadFromStorage());
+  const userId = user?.id ?? null;
+  
+  // Initialize with user-specific notifications
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  // CRITICAL: Load user-specific notifications when user changes
+  useEffect(() => {
+    setNotifications(loadFromStorage(userId));
+  }, [userId]);
 
   // Calculate unread count
   useEffect(() => {
     setUnreadCount(notifications.filter(n => !n.read).length);
   }, [notifications]);
 
-  // Persist to localStorage whenever notifications change
+  // Persist to user-specific localStorage whenever notifications change
   useEffect(() => {
-    saveToStorage(notifications);
-  }, [notifications]);
+    saveToStorage(notifications, userId);
+  }, [notifications, userId]);
 
   // Mark notification as read
   const markAsRead = useCallback((notificationId: string) => {
@@ -93,9 +108,9 @@ export function useNotifications() {
   // Refresh (reload from storage)
   const refresh = useCallback(() => {
     setLoading(true);
-    setNotifications(loadFromStorage());
+    setNotifications(loadFromStorage(userId));
     setLoading(false);
-  }, []);
+  }, [userId]);
 
   return {
     notifications,

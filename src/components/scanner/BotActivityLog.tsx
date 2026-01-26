@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { useAuth } from "@/contexts/AuthContext";
 import { 
   Activity, 
   CheckCircle, 
@@ -32,9 +33,69 @@ interface BotActivityLogProps {
   maxEntries?: number;
 }
 
-// Global log store (singleton pattern for cross-component access)
-let globalLogs: BotLogEntry[] = [];
-let logSubscribers: Set<() => void> = new Set();
+// User-scoped log storage keys
+const LOG_STORAGE_KEY_PREFIX = 'meme_sniper_bot_logs_';
+
+// Get user-specific storage key
+const getLogStorageKey = (userId: string | null): string => {
+  return userId ? `${LOG_STORAGE_KEY_PREFIX}${userId}` : `${LOG_STORAGE_KEY_PREFIX}anonymous`;
+};
+
+// Per-user log stores (in-memory cache)
+const userLogStores: Map<string, BotLogEntry[]> = new Map();
+const logSubscribers: Map<string, Set<() => void>> = new Map();
+
+// Get or initialize logs for a user
+function getUserLogs(userId: string | null): BotLogEntry[] {
+  const key = getLogStorageKey(userId);
+  if (!userLogStores.has(key)) {
+    // Try to load from localStorage
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Restore Date objects
+        const logs = parsed.map((log: BotLogEntry) => ({
+          ...log,
+          timestamp: new Date(log.timestamp),
+        }));
+        userLogStores.set(key, logs);
+      } else {
+        userLogStores.set(key, []);
+      }
+    } catch {
+      userLogStores.set(key, []);
+    }
+  }
+  return userLogStores.get(key) || [];
+}
+
+// Save logs to localStorage
+function persistUserLogs(userId: string | null): void {
+  const key = getLogStorageKey(userId);
+  const logs = userLogStores.get(key) || [];
+  try {
+    localStorage.setItem(key, JSON.stringify(logs.slice(0, 200)));
+  } catch (error) {
+    console.error('Failed to persist bot logs:', error);
+  }
+}
+
+// Get subscribers for a user
+function getSubscribers(userId: string | null): Set<() => void> {
+  const key = getLogStorageKey(userId);
+  if (!logSubscribers.has(key)) {
+    logSubscribers.set(key, new Set());
+  }
+  return logSubscribers.get(key)!;
+}
+
+// Current user ID for global add/clear functions
+let currentUserId: string | null = null;
+
+export function setCurrentBotLogUser(userId: string | null): void {
+  currentUserId = userId;
+}
 
 export function addBotLog(entry: Omit<BotLogEntry, 'id' | 'timestamp'>): void {
   const newEntry: BotLogEntry = {
@@ -43,23 +104,44 @@ export function addBotLog(entry: Omit<BotLogEntry, 'id' | 'timestamp'>): void {
     timestamp: new Date(),
   };
   
-  globalLogs = [newEntry, ...globalLogs].slice(0, 200); // Keep last 200
-  logSubscribers.forEach(cb => cb());
+  const key = getLogStorageKey(currentUserId);
+  const logs = getUserLogs(currentUserId);
+  const updatedLogs = [newEntry, ...logs].slice(0, 200);
+  userLogStores.set(key, updatedLogs);
+  persistUserLogs(currentUserId);
+  
+  getSubscribers(currentUserId).forEach(cb => cb());
 }
 
 export function clearBotLogs(): void {
-  globalLogs = [];
-  logSubscribers.forEach(cb => cb());
+  const key = getLogStorageKey(currentUserId);
+  userLogStores.set(key, []);
+  persistUserLogs(currentUserId);
+  getSubscribers(currentUserId).forEach(cb => cb());
 }
 
 export function useBotLogs() {
-  const [logs, setLogs] = useState<BotLogEntry[]>(globalLogs);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const [logs, setLogs] = useState<BotLogEntry[]>([]);
+  
+  // Update current user for global functions
+  useEffect(() => {
+    setCurrentBotLogUser(userId);
+  }, [userId]);
   
   useEffect(() => {
-    const update = () => setLogs([...globalLogs]);
-    logSubscribers.add(update);
-    return () => { logSubscribers.delete(update); };
-  }, []);
+    // Load user-specific logs
+    setLogs(getUserLogs(userId));
+    
+    const update = () => setLogs([...getUserLogs(userId)]);
+    const subs = getSubscribers(userId);
+    subs.add(update);
+    
+    return () => { 
+      subs.delete(update); 
+    };
+  }, [userId]);
   
   return logs;
 }
