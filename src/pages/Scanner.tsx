@@ -190,6 +190,31 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       ? currentPrice
       : (position.current_price ?? position.entry_price);
 
+    // CRITICAL FIX: Always sell the real on-chain token balance.
+    // DB `positions.amount` can be wrong (e.g. stored 0.001 when wallet holds 1.0+).
+    let tokenAmountToSell = position.amount;
+    try {
+      const { data: meta, error: metaError } = await supabase.functions.invoke('token-metadata', {
+        body: { mint: position.token_address, owner: wallet.address },
+      });
+      const balanceUi = Number((meta as any)?.balanceUi);
+      if (!metaError && Number.isFinite(balanceUi) && balanceUi > 0) {
+        tokenAmountToSell = balanceUi;
+
+        // Sync DB so UI and future logic use correct quantity.
+        const diff = Math.abs(balanceUi - position.amount);
+        const denom = Math.max(balanceUi, position.amount, 1e-12);
+        if (diff / denom > 0.05) {
+          await supabase
+            .from('positions')
+            .update({ amount: balanceUi, updated_at: new Date().toISOString() })
+            .eq('id', positionId);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     // Use 3-stage engine for Jupiter exit (better routing)
     addBotLog({
       level: 'info',
@@ -234,13 +259,64 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     try {
       const result = await exitPosition(
         position.token_address,
-        position.amount,
+        tokenAmountToSell,
         wallet.address,
         (tx) => signAndSendTransaction(tx),
         { slippage: 0.15 } // 15% slippage for exits
       );
 
       if (result.success) {
+        // Confirm, then verify remaining balance before closing.
+        // Prevents closing DB position if only a partial sell happened.
+        let confirmed = true;
+        try {
+          const { data: confirmData } = await supabase.functions.invoke('confirm-transaction', {
+            body: { signature: result.txHash, action: 'sell' },
+          });
+          confirmed = Boolean((confirmData as any)?.confirmed ?? true);
+        } catch {
+          // ignore
+        }
+
+        if (!confirmed) {
+          toast({
+            title: 'Exit Pending Confirmation',
+            description: 'Transaction was submitted but not confirmed yet. Try again in a few seconds.',
+            variant: 'destructive',
+          });
+          await fetchPositions(true);
+          return;
+        }
+
+        let remainingBalance: number | null = null;
+        try {
+          const { data: meta2 } = await supabase.functions.invoke('token-metadata', {
+            body: { mint: position.token_address, owner: wallet.address },
+          });
+          const bal = Number((meta2 as any)?.balanceUi);
+          if (Number.isFinite(bal)) remainingBalance = bal;
+        } catch {
+          // ignore
+        }
+
+        const DUST = 1e-6;
+        if (remainingBalance !== null && remainingBalance > DUST) {
+          await supabase
+            .from('positions')
+            .update({ amount: remainingBalance, updated_at: new Date().toISOString() })
+            .eq('id', positionId);
+
+          toast({
+            title: 'Partial Sell Detected',
+            description: `Wallet still holds ${remainingBalance.toFixed(6)} ${position.token_symbol}. Position kept open.`,
+            variant: 'destructive',
+          });
+
+          await fetchPositions(true);
+          refreshBalance();
+          return;
+        }
+
         // IMPORTANT: A successful on-chain sell does NOT automatically update our positions table.
         // Mark the position closed so it is removed from Active Trades immediately.
         // CRITICAL FIX: Pass the transaction hash so it's recorded in the database
@@ -265,8 +341,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                 token_symbol: position.token_symbol,
                 token_name: position.token_name,
                 trade_type: 'sell',
-                amount: position.amount,
-                price_sol: result.solReceived ? (result.solReceived / position.amount) : null,
+                amount: tokenAmountToSell,
+                price_sol: result.solReceived && tokenAmountToSell > 0 ? (result.solReceived / tokenAmountToSell) : null,
                 price_usd: safeExitPrice,
                 status: 'confirmed',
                 tx_hash: result.txHash,

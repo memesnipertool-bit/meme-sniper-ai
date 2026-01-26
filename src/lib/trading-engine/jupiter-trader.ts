@@ -40,30 +40,23 @@ async function getTokenDecimals(tokenMint: string): Promise<number> {
     console.log('[Jupiter] Failed to fetch token decimals from Jupiter API');
   }
   
+  // Robust fallback: ask backend (RPC) for the mint's decimals.
+  // Avoids the dangerous 6-decimal assumption which can make swaps 1000x too small.
   try {
-    // Fallback: Try DexScreener
-    const dexRes = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`,
-      { signal: AbortSignal.timeout(5000) }
-    );
-    
-    if (dexRes.ok) {
-      const dexData = await dexRes.json();
-      const pair = dexData.pairs?.find((p: { chainId: string }) => p.chainId === 'solana');
-      // DexScreener doesn't always have decimals, but baseToken info might help
-      if (pair?.baseToken?.address === tokenMint) {
-        // Most SPL tokens are 6 or 9 decimals
-        // Check if price suggests 6 decimals (typical for meme coins)
-        console.log('[Jupiter] Using DexScreener fallback, assuming 6 decimals for meme token');
-        return 6;
-      }
+    const { data, error } = await supabase.functions.invoke('token-metadata', {
+      body: { mint: tokenMint },
+    });
+    const decimals = (data as any)?.decimals;
+    if (!error && typeof decimals === 'number' && Number.isFinite(decimals)) {
+      console.log(`[Jupiter] RPC fallback decimals for ${tokenMint.slice(0, 8)}...: ${decimals}`);
+      return decimals;
     }
-  } catch (e) {
-    console.log('[Jupiter] DexScreener fallback also failed');
+  } catch {
+    // ignore
   }
-  
-  // Default to 6 decimals (most common for SPL tokens / meme coins)
-  console.log('[Jupiter] Defaulting to 6 decimals');
+
+  // Last resort default (prefer under-selling to over-selling)
+  console.log('[Jupiter] Defaulting to 6 decimals (RPC fallback unavailable)');
   return 6;
 }
 

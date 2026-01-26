@@ -71,9 +71,40 @@ export function useAutoExit() {
         return false;
       }
 
-      // Build Jupiter swap transaction for the sell
+      // Build Jupiter swap transaction for the sell.
+      // CRITICAL FIX: Always sell the on-chain balance, not the DB amount.
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
-      const amountInSmallestUnit = Math.floor(position.amount * 1e9);
+
+      const toBaseUnits = (amountDecimal: number, decimals: number): string => {
+        const fixed = Math.max(0, amountDecimal).toFixed(decimals);
+        const [whole, frac = ''] = fixed.split('.');
+        return BigInt(`${whole}${frac.padEnd(decimals, '0')}`).toString();
+      };
+
+      let tokenAmountToSell = Number(position.amount);
+      let tokenDecimals = 6;
+      try {
+        const { data: meta, error: metaError } = await supabase.functions.invoke('token-metadata', {
+          body: { mint: position.token_address, owner: wallet.address },
+        });
+        const bal = Number((meta as any)?.balanceUi);
+        const dec = Number((meta as any)?.decimals);
+        if (!metaError && Number.isFinite(dec) && dec >= 0) tokenDecimals = dec;
+        if (!metaError && Number.isFinite(bal) && bal > 0) tokenAmountToSell = bal;
+      } catch {
+        // ignore
+      }
+
+      if (!Number.isFinite(tokenAmountToSell) || tokenAmountToSell <= 0) {
+        toast({
+          title: 'Nothing to Sell',
+          description: `No on-chain balance found for ${result.symbol}.`,
+          variant: 'destructive',
+        });
+        return false;
+      }
+
+      const amountInSmallestUnit = toBaseUnits(tokenAmountToSell, tokenDecimals);
       
       // Get Jupiter quote - using lite-api endpoint (public, no auth required)
       // Exit slippage is intentionally higher (15%) to ensure positions can close
@@ -155,7 +186,6 @@ export function useAutoExit() {
       const { data: confirmData, error: confirmError } = await supabase.functions.invoke('confirm-transaction', {
         body: {
           signature: signResult.signature,
-          positionId: result.positionId,
           action: 'sell',
         },
       });
@@ -165,15 +195,36 @@ export function useAutoExit() {
         // Still mark as executed since tx was broadcast
       }
 
-      // Update position as closed
+      // Verify remaining balance before closing
+      let remainingBalance: number | null = null;
+      try {
+        const { data: meta2 } = await supabase.functions.invoke('token-metadata', {
+          body: { mint: position.token_address, owner: wallet.address },
+        });
+        const bal = Number((meta2 as any)?.balanceUi);
+        if (Number.isFinite(bal)) remainingBalance = bal;
+      } catch {
+        // ignore
+      }
+
+      const DUST = 1e-6;
+      const shouldClose = remainingBalance === null ? true : remainingBalance <= DUST;
+
       await supabase
         .from('positions')
         .update({
-          status: 'closed',
+          ...(shouldClose
+            ? {
+                status: 'closed',
+                closed_at: new Date().toISOString(),
+              }
+            : {
+                status: 'open',
+                amount: remainingBalance,
+              }),
           exit_reason: result.action,
           exit_price: result.currentPrice,
           exit_tx_id: signResult.signature,
-          closed_at: new Date().toISOString(),
           profit_loss_percent: result.profitLossPercent,
         })
         .eq('id', result.positionId);
@@ -189,7 +240,7 @@ export function useAutoExit() {
             token_symbol: position.token_symbol,
             token_name: position.token_name,
             trade_type: 'sell',
-            amount: position.amount,
+            amount: tokenAmountToSell,
             price_sol: result.currentPrice,
             price_usd: null,
             status: 'completed',
@@ -201,8 +252,8 @@ export function useAutoExit() {
       const exitLabel = result.action === 'take_profit' ? '💰 TAKE PROFIT' : '🛑 STOP LOSS';
       const pnlText = result.profitLossPercent >= 0 ? `+${result.profitLossPercent.toFixed(2)}%` : `${result.profitLossPercent.toFixed(2)}%`;
       const entryPrice = position.entry_price_usd || position.entry_price || 0;
-      const exitValue = result.currentPrice * position.amount;
-      const entryValue = position.entry_value || (entryPrice * position.amount);
+      const exitValue = result.currentPrice * tokenAmountToSell;
+      const entryValue = position.entry_value || (entryPrice * tokenAmountToSell);
       const pnlValue = entryValue * (result.profitLossPercent / 100);
       const tokenName = position.token_name || result.symbol;
       
@@ -211,7 +262,7 @@ export function useAutoExit() {
         category: 'exit',
         message: `✅ SELL FILLED: ${tokenName} (${result.symbol})`,
         tokenSymbol: result.symbol,
-        details: `🪙 Token: ${tokenName} (${result.symbol})\n📊 Entry: $${entryPrice.toFixed(8)} → Exit: $${result.currentPrice.toFixed(8)}\nP&L: ${pnlText} ($${pnlValue >= 0 ? '+' : ''}${pnlValue.toFixed(4)}) | Reason: ${result.action.replace('_', ' ')}\nTokens Sold: ${position.amount.toLocaleString()} | Exit Value: $${exitValue.toFixed(4)}\n🔗 TX: ${signResult.signature}`,
+        details: `🪙 Token: ${tokenName} (${result.symbol})\n📊 Entry: $${entryPrice.toFixed(8)} → Exit: $${result.currentPrice.toFixed(8)}\nP&L: ${pnlText} ($${pnlValue >= 0 ? '+' : ''}${pnlValue.toFixed(4)}) | Reason: ${result.action.replace('_', ' ')}\nTokens Sold: ${tokenAmountToSell.toLocaleString()} | Exit Value: $${exitValue.toFixed(4)}\n🔗 TX: ${signResult.signature}`,
       });
 
       toast({
