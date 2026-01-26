@@ -1,10 +1,11 @@
-import React, { forwardRef, useState, useEffect } from "react";
+import React, { forwardRef, useState, useMemo } from "react";
 import AppLayout from "@/components/layout/AppLayout";
 import { useWallet } from "@/hooks/useWallet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePositions, Position } from "@/hooks/usePositions";
 import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { useAutoExit } from "@/hooks/useAutoExit";
@@ -27,13 +28,19 @@ import {
   ArrowDownRight,
   ExternalLink,
   Wallet,
+  BarChart3,
+  Activity,
+  Zap,
+  Trophy,
+  PieChart,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
 
 const formatCurrency = (value: number) => {
   if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
   if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}K`;
-  return `$${value.toFixed(2)}`;
+  if (Math.abs(value) >= 0.01) return `$${value.toFixed(2)}`;
+  return `$${value.toFixed(4)}`;
 };
 
 const shortAddress = (address: string) =>
@@ -41,10 +48,29 @@ const shortAddress = (address: string) =>
     ? `${address.slice(0, 4)}…${address.slice(-4)}`
     : address || 'Token';
 
-const PositionCard = ({ position, onClose }: { position: Position; onClose: () => void }) => {
-  const isProfit = position.profit_loss_percent >= 0;
-  const isPendingTakeProfit = position.profit_loss_percent >= position.profit_take_percent * 0.8;
-  const isPendingStopLoss = position.profit_loss_percent <= -position.stop_loss_percent * 0.8;
+const getExitReasonDisplay = (reason: string | null | undefined) => {
+  if (!reason) return { label: 'Manual', icon: XCircle, color: 'text-muted-foreground' };
+  switch (reason) {
+    case 'take_profit': return { label: 'Take Profit', icon: CheckCircle, color: 'text-green-500' };
+    case 'stop_loss': return { label: 'Stop Loss', icon: AlertTriangle, color: 'text-red-500' };
+    case 'sold_externally': return { label: 'External Sale', icon: ArrowUpRight, color: 'text-blue-500' };
+    case 'force_closed_manual': 
+    case 'force_closed_cleanup': return { label: 'Force Closed', icon: XCircle, color: 'text-orange-500' };
+    case 'force_closed_dead_token': return { label: 'Dead Token', icon: AlertTriangle, color: 'text-red-500' };
+    default: return { label: reason.replace(/_/g, ' '), icon: XCircle, color: 'text-muted-foreground' };
+  }
+};
+
+interface PositionRowProps {
+  position: Position;
+  onClose?: () => void;
+  compact?: boolean;
+}
+
+const PositionRow = ({ position, onClose, compact = false }: PositionRowProps) => {
+  const isProfit = (position.profit_loss_percent ?? 0) >= 0;
+  const isPendingTakeProfit = (position.profit_loss_percent ?? 0) >= (position.profit_take_percent ?? 100) * 0.8;
+  const isPendingStopLoss = (position.profit_loss_percent ?? 0) <= -(position.stop_loss_percent ?? 20) * 0.8;
 
   const displaySymbol = !isPlaceholderTokenText(position.token_symbol)
     ? (position.token_symbol as string)
@@ -53,88 +79,81 @@ const PositionCard = ({ position, onClose }: { position: Position; onClose: () =
     ? (position.token_name as string)
     : 'Token';
 
+  const exitInfo = position.status === 'closed' ? getExitReasonDisplay(position.exit_reason) : null;
+  const ExitIcon = exitInfo?.icon || XCircle;
+
   return (
-    <Card className={`border ${
-      isPendingTakeProfit ? 'border-green-500/50 bg-green-500/5' : 
-      isPendingStopLoss ? 'border-red-500/50 bg-red-500/5' : 
-      'border-border'
+    <div className={`flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors ${
+      isPendingTakeProfit ? 'bg-green-500/5 border-l-2 border-green-500' : 
+      isPendingStopLoss ? 'bg-red-500/5 border-l-2 border-red-500' : ''
     }`}>
-      <CardContent className="p-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          {/* Token Info */}
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-semibold text-foreground">{displaySymbol}</h3>
-              <Badge variant="outline" className="text-xs">{displayName}</Badge>
-              <Badge variant="outline" className="text-xs capitalize">{position.chain}</Badge>
-              {position.status === 'open' ? (
-                <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Open</Badge>
-              ) : (
-                <Badge variant="secondary">Closed</Badge>
-              )}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Entry: ${position.entry_price.toFixed(8)} • {formatDistanceToNow(new Date(position.created_at), { addSuffix: true })}
-            </div>
-          </div>
-
-          {/* P&L Display */}
-          <div className="flex items-center gap-6">
-            <div className="text-center">
-              <p className="text-xs text-muted-foreground mb-0.5">Current Price</p>
-              <p className="font-semibold text-foreground">${(position.current_price ?? 0).toFixed(8)}</p>
-            </div>
-            
-            <div className="text-center">
-              <p className="text-xs text-muted-foreground mb-0.5">P&L %</p>
-              <div className={`flex items-center gap-1 font-bold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-                {isProfit ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {isProfit ? '+' : ''}{(position.profit_loss_percent ?? 0).toFixed(2)}%
-              </div>
-            </div>
-
-            <div className="text-center">
-              <p className="text-xs text-muted-foreground mb-0.5">P&L Value</p>
-              <p className={`font-semibold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-                {isProfit ? '+' : ''}{formatCurrency(position.profit_loss_value ?? 0)}
-              </p>
-            </div>
-
-            <div className="text-center">
-              <p className="text-xs text-muted-foreground mb-0.5">Targets</p>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-green-500">TP: {position.profit_take_percent}%</span>
-                <span className="text-red-500">SL: {position.stop_loss_percent}%</span>
-              </div>
-            </div>
-
-            {position.status === 'open' && (
-              <Button size="sm" variant="outline" onClick={onClose}>
-                <XCircle className="w-3 h-3 mr-1" />
-                Close
-              </Button>
-            )}
-          </div>
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        <div className={`p-2 rounded-lg ${isProfit ? 'bg-success/20' : 'bg-destructive/20'}`}>
+          {isProfit ? (
+            <TrendingUp className="w-4 h-4 text-success" />
+          ) : (
+            <TrendingDown className="w-4 h-4 text-destructive" />
+          )}
         </div>
-
-        {/* Exit Info for Closed Positions */}
-        {position.status === 'closed' && position.exit_reason && (
-          <div className="mt-3 pt-3 border-t border-border flex items-center gap-2 text-sm">
-            {position.exit_reason === 'take_profit' ? (
-              <CheckCircle className="w-4 h-4 text-green-500" />
-            ) : position.exit_reason === 'stop_loss' ? (
-              <AlertTriangle className="w-4 h-4 text-red-500" />
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-foreground truncate">{displaySymbol}</span>
+            <Badge variant="outline" className="text-xs">{displayName}</Badge>
+            {position.status === 'open' ? (
+              <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">Open</Badge>
             ) : (
-              <XCircle className="w-4 h-4 text-muted-foreground" />
+              <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                <ExitIcon className={`w-3 h-3 ${exitInfo?.color}`} />
+                {exitInfo?.label}
+              </Badge>
             )}
-            <span className="text-muted-foreground">
-              Closed via {position.exit_reason?.replace('_', ' ')} at ${position.exit_price?.toFixed(8)}
-              {position.closed_at && ` • ${formatDistanceToNow(new Date(position.closed_at), { addSuffix: true })}`}
-            </span>
+          </div>
+          <p className="text-xs text-muted-foreground truncate">
+            Entry: ${position.entry_price.toFixed(8)} • {formatDistanceToNow(new Date(position.created_at), { addSuffix: true })}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4 md:gap-6">
+        {!compact && (
+          <div className="text-right hidden md:block">
+            <p className="text-xs text-muted-foreground">Current</p>
+            <p className="font-medium text-foreground text-sm">${(position.current_price ?? 0).toFixed(8)}</p>
           </div>
         )}
-      </CardContent>
-    </Card>
+        
+        <div className="text-right min-w-[80px]">
+          <p className="text-xs text-muted-foreground">P&L</p>
+          <div className={`flex items-center justify-end gap-1 font-bold text-sm ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+            {isProfit ? '+' : ''}{(position.profit_loss_percent ?? 0).toFixed(2)}%
+          </div>
+          <p className={`text-xs ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+            {isProfit ? '+' : ''}{formatCurrency(position.profit_loss_value ?? 0)}
+          </p>
+        </div>
+
+        {!compact && (
+          <div className="text-right hidden lg:block min-w-[100px]">
+            <p className="text-xs text-muted-foreground">Entry Value</p>
+            <p className="font-medium text-foreground text-sm">{formatCurrency(position.entry_value ?? 0)}</p>
+          </div>
+        )}
+
+        {position.status === 'open' && onClose && (
+          <Button size="sm" variant="outline" onClick={onClose} className="shrink-0">
+            <XCircle className="w-3 h-3 mr-1" />
+            Close
+          </Button>
+        )}
+        
+        {position.status === 'closed' && position.closed_at && (
+          <div className="text-right min-w-[80px] hidden sm:block">
+            <p className="text-xs text-muted-foreground">Closed</p>
+            <p className="text-xs text-foreground">{format(new Date(position.closed_at), 'MMM d, HH:mm')}</p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -158,15 +177,15 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
     isMonitoring,
   } = useAutoExit();
 
-  const { trades, loading: tradesLoading, refetch: refetchTrades } = useTradeHistory(50);
+  const { trades, loading: tradesLoading, refetch: refetchTrades } = useTradeHistory(100);
   const [autoMonitor, setAutoMonitor] = useState(false);
-  const [autoExecute, setAutoExecute] = useState(true); // Default to true for real execution
+  const [autoExecute, setAutoExecute] = useState(true);
   const { wallet, connectPhantom, disconnect } = useWallet();
 
   // Sync auto monitor state with hook
-  useEffect(() => {
+  React.useEffect(() => {
     if (autoMonitor && openPositions.length > 0 && wallet.isConnected) {
-      startAutoExitMonitor(30000); // Check every 30 seconds
+      startAutoExitMonitor(30000);
     } else {
       stopAutoExitMonitor();
     }
@@ -180,12 +199,51 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
     checkExitConditions(autoExecute);
   };
 
-  // Calculate totals
-  const totalValue = openPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
-  const totalPnL = openPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
-  const totalPnLPercent = openPositions.length > 0 
-    ? (totalPnL / openPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0)) * 100 
-    : 0;
+  // Calculate comprehensive stats
+  const stats = useMemo(() => {
+    const openValue = openPositions.reduce((sum, p) => sum + (p.current_value ?? p.entry_value ?? 0), 0);
+    const openEntryValue = openPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0);
+    const openPnL = openPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
+    
+    const closedPnL = closedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
+    const closedEntryValue = closedPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0);
+    
+    const totalPnL = openPnL + closedPnL;
+    const totalEntryValue = openEntryValue + closedEntryValue;
+    const totalPnLPercent = totalEntryValue > 0 ? (totalPnL / totalEntryValue) * 100 : 0;
+    
+    const wins = closedPositions.filter(p => (p.profit_loss_percent ?? 0) > 0).length;
+    const losses = closedPositions.filter(p => (p.profit_loss_percent ?? 0) < 0).length;
+    const winRate = closedPositions.length > 0 ? (wins / closedPositions.length) * 100 : 0;
+    
+    const takeProfitExits = closedPositions.filter(p => p.exit_reason === 'take_profit').length;
+    const stopLossExits = closedPositions.filter(p => p.exit_reason === 'stop_loss').length;
+    const externalExits = closedPositions.filter(p => p.exit_reason === 'sold_externally').length;
+    
+    const avgWinPercent = wins > 0 
+      ? closedPositions.filter(p => (p.profit_loss_percent ?? 0) > 0).reduce((sum, p) => sum + (p.profit_loss_percent ?? 0), 0) / wins 
+      : 0;
+    const avgLossPercent = losses > 0 
+      ? closedPositions.filter(p => (p.profit_loss_percent ?? 0) < 0).reduce((sum, p) => sum + (p.profit_loss_percent ?? 0), 0) / losses 
+      : 0;
+    
+    return {
+      openValue,
+      openPnL,
+      closedPnL,
+      totalPnL,
+      totalPnLPercent,
+      wins,
+      losses,
+      winRate,
+      takeProfitExits,
+      stopLossExits,
+      externalExits,
+      avgWinPercent,
+      avgLossPercent,
+      totalTrades: openPositions.length + closedPositions.length,
+    };
+  }, [openPositions, closedPositions]);
 
   const recentExits = exitResults.filter(r => r.action !== 'hold');
 
@@ -200,212 +258,224 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
   return (
     <AppLayout>
       <div className="container mx-auto px-4">
-          {/* Page Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
-                Portfolio & Auto-Exit
-              </h1>
-              <p className="text-muted-foreground">
-                Track positions and auto-exit on profit/loss targets
-                {lastExitCheck && ` • Last check: ${formatDistanceToNow(new Date(lastExitCheck), { addSuffix: true })}`}
-              </p>
-            </div>
-            <Button
-              variant="glow"
-              onClick={() => fetchPositions(true)}
-              disabled={loading}
-            >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Refresh
-            </Button>
+        {/* Page Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-1">
+              Portfolio
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Track all positions and auto-exit management
+              {lastExitCheck && ` • Last check: ${formatDistanceToNow(new Date(lastExitCheck), { addSuffix: true })}`}
+            </p>
           </div>
+          <Button
+            variant="glow"
+            onClick={() => fetchPositions(true)}
+            disabled={loading}
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Refresh
+          </Button>
+        </div>
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-blue-500/20">
-                    <DollarSign className="w-5 h-5 text-blue-400" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Total Value</p>
-                    <p className="text-xl font-bold text-foreground">{formatCurrency(totalValue)}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${totalPnL >= 0 ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
-                    {totalPnL >= 0 ? (
-                      <TrendingUp className="w-5 h-5 text-green-400" />
-                    ) : (
-                      <TrendingDown className="w-5 h-5 text-red-400" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Total P&L</p>
-                    <p className={`text-xl font-bold ${totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {totalPnL >= 0 ? '+' : ''}{formatCurrency(totalPnL)} ({totalPnLPercent.toFixed(2)}%)
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-primary/20">
-                    <Target className="w-5 h-5 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Open Positions</p>
-                    <p className="text-xl font-bold text-foreground">{openPositions.length}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-muted">
-                    <Clock className="w-5 h-5 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Closed Positions</p>
-                    <p className="text-xl font-bold text-foreground">{closedPositions.length}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Auto-Exit Control Panel */}
-          <Card className="mb-6 border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
+        {/* Stats Overview - Comprehensive Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+          <Card className="bg-gradient-to-br from-card to-card/80">
             <CardContent className="p-4">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-primary/20">
-                    <ShieldAlert className="w-5 h-5 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-foreground">Auto-Exit Monitor</h3>
-                    <p className="text-xs text-muted-foreground">
-                      {wallet.isConnected 
-                        ? 'Continuously tracks prices and executes real exits via Jupiter'
-                        : 'Connect wallet to enable real auto-exit execution'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  {!wallet.isConnected ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleConnectWallet}
-                    >
-                      <Wallet className="w-4 h-4 mr-2" />
-                      Connect Wallet
-                    </Button>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={autoMonitor}
-                          onCheckedChange={setAutoMonitor}
-                          disabled={openPositions.length === 0}
-                        />
-                        <span className="text-sm text-muted-foreground">Monitor</span>
-                        {isMonitoring && (
-                          <span className="flex items-center gap-1 text-xs text-green-500">
-                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                            Active
-                          </span>
-                        )}
-                      </div>
-
-                      {autoMonitor && (
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            checked={autoExecute}
-                            onCheckedChange={setAutoExecute}
-                          />
-                          <span className="text-sm text-muted-foreground">Auto-Execute</span>
-                        </div>
-                      )}
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleCheckNow}
-                        disabled={checkingExits || openPositions.length === 0}
-                      >
-                        {checkingExits ? (
-                          <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                        ) : (
-                          <Play className="w-4 h-4 mr-1" />
-                        )}
-                        Check Now
-                      </Button>
-                    </>
-                  )}
-                </div>
+              <div className="flex items-center gap-2 mb-1">
+                <DollarSign className="w-4 h-4 text-primary" />
+                <span className="text-xs text-muted-foreground">Open Value</span>
               </div>
-
-              {/* Pending Exits Waiting for Signature */}
-              {pendingExits.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  <p className="text-sm font-medium text-yellow-400 mb-2 flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Pending Wallet Signatures:
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {pendingExits.map((exit, idx) => (
-                      <Badge
-                        key={idx}
-                        className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
-                      >
-                        {exit.symbol}: {exit.action === 'take_profit' ? 'TP' : 'SL'} @ {exit.profitLossPercent.toFixed(2)}%
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Recent Exit Alerts */}
-              {recentExits.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  <p className="text-sm font-medium text-foreground mb-2">Recent Exit Triggers:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {recentExits.map((exit, idx) => (
-                      <Badge
-                        key={idx}
-                        className={exit.action === 'take_profit' 
-                          ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                          : 'bg-red-500/20 text-red-400 border-red-500/30'
-                        }
-                      >
-                        {exit.symbol}: {exit.action === 'take_profit' ? 'TP' : 'SL'} @ {exit.profitLossPercent.toFixed(2)}%
-                        {exit.executed && ' ✓'}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <p className="text-xl font-bold text-foreground">{formatCurrency(stats.openValue)}</p>
+              <p className="text-xs text-muted-foreground">{openPositions.length} positions</p>
             </CardContent>
           </Card>
 
-          {/* Open Positions */}
-          <div className="mb-8">
-            <h2 className="text-lg font-semibold text-foreground mb-4">Open Positions</h2>
-            {loading ? (
+          <Card className={`bg-gradient-to-br ${stats.totalPnL >= 0 ? 'from-green-500/10 to-card' : 'from-red-500/10 to-card'}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                {stats.totalPnL >= 0 ? <TrendingUp className="w-4 h-4 text-green-500" /> : <TrendingDown className="w-4 h-4 text-red-500" />}
+                <span className="text-xs text-muted-foreground">Total P&L</span>
+              </div>
+              <p className={`text-xl font-bold ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {stats.totalPnL >= 0 ? '+' : ''}{formatCurrency(stats.totalPnL)}
+              </p>
+              <p className={`text-xs ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {stats.totalPnLPercent >= 0 ? '+' : ''}{stats.totalPnLPercent.toFixed(2)}%
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-card to-card/80">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Activity className="w-4 h-4 text-primary" />
+                <span className="text-xs text-muted-foreground">Total Trades</span>
+              </div>
+              <p className="text-xl font-bold text-foreground">{stats.totalTrades}</p>
+              <p className="text-xs text-muted-foreground">{closedPositions.length} closed</p>
+            </CardContent>
+          </Card>
+
+          <Card className={`bg-gradient-to-br ${stats.winRate >= 50 ? 'from-green-500/10 to-card' : 'from-yellow-500/10 to-card'}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Trophy className="w-4 h-4 text-yellow-500" />
+                <span className="text-xs text-muted-foreground">Win Rate</span>
+              </div>
+              <p className={`text-xl font-bold ${stats.winRate >= 50 ? 'text-green-500' : 'text-yellow-500'}`}>
+                {stats.winRate.toFixed(0)}%
+              </p>
+              <p className="text-xs text-muted-foreground">{stats.wins}W / {stats.losses}L</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-green-500/10 to-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <CheckCircle className="w-4 h-4 text-green-500" />
+                <span className="text-xs text-muted-foreground">Avg Win</span>
+              </div>
+              <p className="text-xl font-bold text-green-500">+{stats.avgWinPercent.toFixed(1)}%</p>
+              <p className="text-xs text-muted-foreground">{stats.takeProfitExits} TP exits</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-red-500/10 to-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                <span className="text-xs text-muted-foreground">Avg Loss</span>
+              </div>
+              <p className="text-xl font-bold text-red-500">{stats.avgLossPercent.toFixed(1)}%</p>
+              <p className="text-xs text-muted-foreground">{stats.stopLossExits} SL exits</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Auto-Exit Control Panel */}
+        <Card className="mb-6 border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
+          <CardContent className="p-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-primary/20">
+                  <ShieldAlert className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">Auto-Exit Monitor</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {wallet.isConnected 
+                      ? 'Continuously tracks prices and executes real exits via Jupiter'
+                      : 'Connect wallet to enable real auto-exit execution'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 flex-wrap">
+                {!wallet.isConnected ? (
+                  <Button variant="outline" size="sm" onClick={handleConnectWallet}>
+                    <Wallet className="w-4 h-4 mr-2" />
+                    Connect Wallet
+                  </Button>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={autoMonitor}
+                        onCheckedChange={setAutoMonitor}
+                        disabled={openPositions.length === 0}
+                      />
+                      <span className="text-sm text-muted-foreground">Monitor</span>
+                      {isMonitoring && (
+                        <span className="flex items-center gap-1 text-xs text-green-500">
+                          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                          Active
+                        </span>
+                      )}
+                    </div>
+
+                    {autoMonitor && (
+                      <div className="flex items-center gap-2">
+                        <Switch checked={autoExecute} onCheckedChange={setAutoExecute} />
+                        <span className="text-sm text-muted-foreground">Auto-Execute</span>
+                      </div>
+                    )}
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCheckNow}
+                      disabled={checkingExits || openPositions.length === 0}
+                    >
+                      {checkingExits ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Play className="w-4 h-4 mr-1" />}
+                      Check Now
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Pending Exits */}
+            {pendingExits.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-sm font-medium text-yellow-400 mb-2 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Pending Wallet Signatures:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {pendingExits.map((exit, idx) => (
+                    <Badge key={idx} className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                      {exit.symbol}: {exit.action === 'take_profit' ? 'TP' : 'SL'} @ {exit.profitLossPercent.toFixed(2)}%
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recent Exit Triggers */}
+            {recentExits.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-sm font-medium text-foreground mb-2">Recent Exit Triggers:</p>
+                <div className="flex flex-wrap gap-2">
+                  {recentExits.map((exit, idx) => (
+                    <Badge
+                      key={idx}
+                      className={exit.action === 'take_profit' 
+                        ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                        : 'bg-red-500/20 text-red-400 border-red-500/30'
+                      }
+                    >
+                      {exit.symbol}: {exit.action === 'take_profit' ? 'TP' : 'SL'} @ {exit.profitLossPercent.toFixed(2)}%
+                      {exit.executed && ' ✓'}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Positions Tabs */}
+        <Tabs defaultValue="open" className="space-y-4">
+          <TabsList className="bg-secondary/50">
+            <TabsTrigger value="open" className="gap-2">
+              <Target className="w-4 h-4" />
+              Open ({openPositions.length})
+            </TabsTrigger>
+            <TabsTrigger value="closed" className="gap-2">
+              <CheckCircle className="w-4 h-4" />
+              Closed ({closedPositions.length})
+            </TabsTrigger>
+            <TabsTrigger value="history" className="gap-2">
+              <History className="w-4 h-4" />
+              Transactions
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Open Positions Tab */}
+          <TabsContent value="open">
+            {loading && openPositions.length === 0 ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
               </div>
@@ -418,69 +488,92 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3">
-                {openPositions.map(position => (
-                  <PositionCard 
-                    key={position.id} 
-                    position={position} 
-                    onClose={() => handleClosePosition(position)}
-                  />
-                ))}
-              </div>
+              <Card>
+                <CardContent className="p-0 divide-y divide-border">
+                  {openPositions.map(position => (
+                    <PositionRow 
+                      key={position.id} 
+                      position={position} 
+                      onClose={() => handleClosePosition(position)}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
             )}
-          </div>
+          </TabsContent>
 
-          {/* Closed Positions */}
-          {closedPositions.length > 0 && (
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold text-foreground mb-4">Closed Positions</h2>
-              <div className="space-y-3">
-                {closedPositions.slice(0, 10).map(position => (
-                  <PositionCard 
-                    key={position.id} 
-                    position={position} 
-                    onClose={() => {}}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Transaction History */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-primary/20">
-                  <History className="w-5 h-5 text-primary" />
-                </div>
-                <h2 className="text-lg font-semibold text-foreground">Transaction History</h2>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetchTrades()}
-                disabled={tradesLoading}
-              >
-                {tradesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              </Button>
-            </div>
-
-            {tradesLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
-            ) : trades.length === 0 ? (
+          {/* Closed Positions Tab */}
+          <TabsContent value="closed">
+            {closedPositions.length === 0 ? (
               <Card>
                 <CardContent className="p-8 text-center">
                   <History className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-                  <p className="text-muted-foreground">No transactions yet</p>
-                  <p className="text-sm text-muted-foreground">Your buy and sell transactions will appear here</p>
+                  <p className="text-muted-foreground">No closed positions yet</p>
+                  <p className="text-sm text-muted-foreground">Your completed trades will appear here</p>
                 </CardContent>
               </Card>
             ) : (
               <Card>
-                <CardContent className="p-0">
-                  <div className="divide-y divide-border">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">Position History</CardTitle>
+                    <div className="flex gap-2 text-xs">
+                      <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/30">
+                        {stats.takeProfitExits} TP
+                      </Badge>
+                      <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/30">
+                        {stats.stopLossExits} SL
+                      </Badge>
+                      <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/30">
+                        {stats.externalExits} External
+                      </Badge>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0 divide-y divide-border max-h-[600px] overflow-y-auto">
+                  {closedPositions.map(position => (
+                    <PositionRow 
+                      key={position.id} 
+                      position={position}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Transaction History Tab */}
+          <TabsContent value="history">
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <History className="w-5 h-5 text-primary" />
+                    Transaction History
+                  </CardTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => refetchTrades()}
+                    disabled={tradesLoading}
+                  >
+                    {tradesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {tradesLoading && trades.length === 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  </div>
+                ) : trades.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <History className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-muted-foreground">No transactions yet</p>
+                    <p className="text-sm text-muted-foreground">Your buy and sell transactions will appear here</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
                     {trades.map((trade) => (
                       <div 
                         key={trade.id} 
@@ -516,15 +609,15 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                               </Badge>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              {trade.token_name || trade.token_address.slice(0, 8) + '...' + trade.token_address.slice(-6)}
+                              {format(new Date(trade.created_at), 'MMM d, yyyy HH:mm')}
                             </p>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-4">
                           <div className="text-right">
-                            <p className="font-medium text-foreground">
-                              {trade.amount.toFixed(4)} {trade.token_symbol || 'tokens'}
+                            <p className="font-medium text-foreground text-sm">
+                              {trade.amount.toFixed(4)} tokens
                             </p>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
                               {trade.price_sol && <span>{trade.price_sol.toFixed(6)} SOL</span>}
@@ -532,32 +625,28 @@ const Portfolio = forwardRef<HTMLDivElement, object>(function Portfolio(_props, 
                             </div>
                           </div>
                           
-                          <div className="text-right min-w-[80px]">
-                            <p className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(new Date(trade.created_at), { addSuffix: true })}
-                            </p>
-                            {trade.tx_hash && (
-                              <a
-                                href={`https://solscan.io/tx/${trade.tx_hash}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                                View
-                              </a>
-                            )}
-                          </div>
+                          {trade.tx_hash && (
+                            <a
+                              href={`https://solscan.io/tx/${trade.tx_hash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              TX
+                            </a>
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        </div>
-      </AppLayout>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </AppLayout>
   );
 });
 
