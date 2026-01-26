@@ -122,14 +122,26 @@ export function shortAddress(address: string | null | undefined): string {
  */
 export function isPlaceholderText(value: string | null | undefined): boolean {
   if (!value) return true;
-  const v = value.trim().toLowerCase();
+  const v = value.trim();
   if (!v) return true;
   
-  // Check for common placeholder patterns
-  if (/^(unknown|unknown token|token|\?\?\?|n\/a|null|undefined)$/i.test(v)) return true;
+  const lower = v.toLowerCase();
   
-  // Check if it starts with "Token " followed by address-like pattern
-  if (/^token\s+[a-z0-9]{4}.*[a-z0-9]{4}$/i.test(v)) return true;
+  // Check for common placeholder patterns
+  if (/^(unknown|unknown token|token|\?\?\?|n\/a|null|undefined)$/i.test(lower)) return true;
+  
+  // Check if it starts with "Token " followed by address-like pattern (with regular dots, ellipsis, or any separator)
+  if (/^token\s+[a-z0-9]{4}[….\-_][a-z0-9]{4}$/i.test(v)) return true;
+  if (/^token\s+[a-z0-9]{4}/i.test(v) && v.length < 20) return true;
+  
+  // Check if it's just an address shorthand like "8Jx8…pump" or "27G8…idD4"
+  if (/^[a-z0-9]{4}[….\-_][a-z0-9]{4}$/i.test(v)) return true;
+  
+  // Check if it looks like a Solana address (32-44 chars of base58)
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/i.test(v)) return true;
+  
+  // Check if it ends with common suffixes like "pump" after an ellipsis
+  if (/^[a-z0-9]{2,6}[….\-_](pump|sol|token)$/i.test(v)) return true;
   
   return false;
 }

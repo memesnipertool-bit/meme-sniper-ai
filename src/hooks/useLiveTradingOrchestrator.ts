@@ -20,6 +20,7 @@ import { usePositions } from '@/hooks/usePositions';
 import { useSniperSettings, SniperSettings } from '@/hooks/useSniperSettings';
 import { useToast } from '@/hooks/use-toast';
 import { addBotLog } from '@/components/scanner/BotActivityLog';
+import { isPlaceholderText } from '@/lib/formatters';
 import type { TradingFlowResult } from '@/lib/trading-engine';
 
 // Approved token from auto-sniper
@@ -208,16 +209,14 @@ export function useLiveTradingOrchestrator() {
           // PRIORITY: Use scanner token metadata (from pool scan) FIRST
           // This ensures position names match what user saw during discovery
           // Only fall back to trading engine metadata if scanner data is unavailable/placeholder
-          const isPlaceholder = (text: string | null | undefined): boolean => {
-            if (!text) return true;
-            const t = text.toLowerCase();
-            return t === 'unknown' || t === '???' || t.includes('token') && t.includes('…');
-          };
+          // Use the unified isPlaceholderText from formatters for consistent detection
           
           // Scanner data (token.symbol/name) is from pool discovery - most reliable
           // Trading engine data (position.tokenSymbol/Name) may be from DexScreener enrichment
-          const finalSymbol = !isPlaceholder(token.symbol) ? token.symbol : (position.tokenSymbol || token.symbol);
-          const finalName = !isPlaceholder(token.name) ? token.name : (position.tokenName || token.name);
+          const finalSymbol = !isPlaceholderText(token.symbol) ? token.symbol : 
+            (!isPlaceholderText(position.tokenSymbol) ? position.tokenSymbol : token.symbol);
+          const finalName = !isPlaceholderText(token.name) ? token.name : 
+            (!isPlaceholderText(position.tokenName) ? position.tokenName : token.name);
           
           const savedPosition = await createPosition(
             token.address,

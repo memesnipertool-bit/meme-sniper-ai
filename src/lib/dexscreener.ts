@@ -10,6 +10,9 @@ export type DexTokenPriceData = {
   priceChange24h: number;
   volume24h: number;
   liquidity: number;
+  // Include metadata for enrichment
+  symbol?: string;
+  name?: string;
 };
 
 const PLACEHOLDER_RE = /^(unknown|unknown token|token|\?\?\?|n\/a)$/i;
@@ -137,12 +140,19 @@ export async function fetchDexScreenerPrices(
       }
 
       for (const [addr, { pair, liquidityUsd }] of bestByAddress.entries()) {
+        // Extract symbol and name for metadata enrichment
+        const symbol = String(pair?.baseToken?.symbol || '').trim();
+        const name = String(pair?.baseToken?.name || '').trim();
+        
         result.set(addr, {
           address: addr,
           priceUsd: parseFloat(pair?.priceUsd || '0') || 0,
           priceChange24h: parseFloat(pair?.priceChange?.h24 || '0') || 0,
           volume24h: parseFloat(pair?.volume?.h24 || '0') || 0,
           liquidity: liquidityUsd,
+          // Include metadata for positions that need enrichment
+          symbol: symbol || undefined,
+          name: name || undefined,
         });
       }
     } catch {
