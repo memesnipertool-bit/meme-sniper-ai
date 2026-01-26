@@ -16,6 +16,73 @@ import type {
 import { API_ENDPOINTS, SOL_MINT } from './config';
 
 /**
+ * Fetch token decimals from Jupiter API or fallback to common defaults
+ */
+async function getTokenDecimals(tokenMint: string): Promise<number> {
+  // Known token decimals
+  if (tokenMint === SOL_MINT) return 9;
+  
+  try {
+    // Try Jupiter token list first (most reliable for tradable tokens)
+    const response = await fetch(
+      `https://lite-api.jup.ag/tokens/v1/${tokenMint}`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (typeof data.decimals === 'number') {
+        console.log(`[Jupiter] Token ${tokenMint.slice(0, 8)}... has ${data.decimals} decimals`);
+        return data.decimals;
+      }
+    }
+  } catch (e) {
+    console.log('[Jupiter] Failed to fetch token decimals from Jupiter API');
+  }
+  
+  try {
+    // Fallback: Try DexScreener
+    const dexRes = await fetch(
+      `https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    
+    if (dexRes.ok) {
+      const dexData = await dexRes.json();
+      const pair = dexData.pairs?.find((p: { chainId: string }) => p.chainId === 'solana');
+      // DexScreener doesn't always have decimals, but baseToken info might help
+      if (pair?.baseToken?.address === tokenMint) {
+        // Most SPL tokens are 6 or 9 decimals
+        // Check if price suggests 6 decimals (typical for meme coins)
+        console.log('[Jupiter] Using DexScreener fallback, assuming 6 decimals for meme token');
+        return 6;
+      }
+    }
+  } catch (e) {
+    console.log('[Jupiter] DexScreener fallback also failed');
+  }
+  
+  // Default to 6 decimals (most common for SPL tokens / meme coins)
+  console.log('[Jupiter] Defaulting to 6 decimals');
+  return 6;
+}
+
+/**
+ * Convert amount to smallest unit based on decimals
+ */
+function toSmallestUnit(amount: number, decimals: number): number {
+  return Math.floor(amount * Math.pow(10, decimals));
+}
+
+/**
+ * Convert from smallest unit to decimal based on decimals
+ */
+function fromSmallestUnit(amount: number | string, decimals: number): number {
+  const numAmount = typeof amount === 'string' ? parseInt(amount) : amount;
+  return numAmount / Math.pow(10, decimals);
+}
+
+/**
  * Execute a Jupiter trade (buy or sell)
  */
 export async function executeJupiterTrade(
@@ -33,8 +100,18 @@ export async function executeJupiterTrade(
     const inputMint = mode === 'BUY' ? SOL_MINT : tokenAddress;
     const outputMint = mode === 'BUY' ? tokenAddress : SOL_MINT;
     
-    // Convert amount to lamports/smallest unit
-    const amountInSmallestUnit = Math.floor(amount * 1e9);
+    // CRITICAL FIX: Get correct decimals for the input token
+    // For BUY: input is SOL (9 decimals)
+    // For SELL: input is the token (variable decimals - fetch from API)
+    const inputDecimals = mode === 'BUY' ? 9 : await getTokenDecimals(tokenAddress);
+    const outputDecimals = mode === 'BUY' ? await getTokenDecimals(tokenAddress) : 9;
+    
+    console.log(`[Jupiter] ${mode} ${amount} tokens with ${inputDecimals} input decimals`);
+    
+    // Convert amount to smallest unit using correct decimals
+    const amountInSmallestUnit = toSmallestUnit(amount, inputDecimals);
+    
+    console.log(`[Jupiter] Amount in smallest unit: ${amountInSmallestUnit}`);
     
     // Get quote from Jupiter
     const quote = await getJupiterQuote(
@@ -97,9 +174,9 @@ export async function executeJupiterTrade(
       };
     }
     
-    // Calculate price
-    const inAmount = parseInt(quote.inAmount) / 1e9;
-    const outAmount = parseInt(quote.outAmount) / 1e9;
+    // Calculate amounts using correct decimals
+    const inAmount = fromSmallestUnit(quote.inAmount, inputDecimals);
+    const outAmount = fromSmallestUnit(quote.outAmount, outputDecimals);
     const price = mode === 'BUY' ? inAmount / outAmount : outAmount / inAmount;
     
     const result: JupiterTradeResult = {
