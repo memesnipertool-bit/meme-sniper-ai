@@ -58,7 +58,7 @@ export function useApiConfigurations() {
     }
   };
 
-  const addConfiguration = async (config: Omit<ApiConfiguration, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'last_checked_at'>) => {
+  const addConfiguration = async (config: Omit<ApiConfiguration, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'last_checked_at' | 'api_key_encrypted'>) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const { data, error } = await supabase
@@ -82,8 +82,9 @@ export function useApiConfigurations() {
     }
   };
 
-  const updateConfiguration = async (id: string, updates: Partial<ApiConfiguration>) => {
+  const updateConfiguration = async (id: string, updates: Partial<Omit<ApiConfiguration, 'api_key_encrypted'>>) => {
     try {
+      // Never update api_key_encrypted through this function - use saveApiKey instead
       const { data, error } = await supabase
         .from('api_configurations' as never)
         .update(updates as never)

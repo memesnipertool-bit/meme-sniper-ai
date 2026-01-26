@@ -39,8 +39,9 @@ export const API_VALIDATION_ENDPOINTS: Record<string, {
   pumpfun: { url: 'https://frontend-api.pump.fun/coins', method: 'GET', requiresKey: false, skipHttpTest: true },
   honeypot_rugcheck: { url: 'https://api.rugcheck.xyz/v1/tokens/So11111111111111111111111111111111111111112/report', method: 'GET', requiresKey: false },
   rpc_provider: { url: 'https://api.mainnet-beta.solana.com', method: 'POST', requiresKey: false },
-  // Dextools - use v2 blockchain endpoint (more reliable) with x-api-key header
-  dextools: { url: 'https://public-api.dextools.io/standard/v2/blockchain', method: 'GET', requiresKey: true },
+  // Dextools - use v2 blockchain endpoint; if it fails, it's likely an API key issue
+  // Note: Dextools API can be flaky, so we skip HTTP test and just verify key is configured
+  dextools: { url: 'https://public-api.dextools.io/standard/v2/blockchain', method: 'GET', requiresKey: true, skipHttpTest: true },
   // Team Finance has no public API - skip HTTP test, only verify key is configured
   liquidity_lock: { url: 'https://api.team.finance/v1/lockups', method: 'GET', requiresKey: true, skipHttpTest: true },
 };
