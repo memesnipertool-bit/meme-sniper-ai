@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, Activity, Zap, ArrowUpRight, ArrowDownRight } from "lucide-react";
-import { formatCurrency as formatCurrencyUtil, formatPercentage } from "@/lib/formatters";
+import { formatPercentage } from "@/lib/formatters";
+import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
 
 interface StatsGridProps {
   totalValue: number;
@@ -10,11 +11,10 @@ interface StatsGridProps {
   closedPositionsCount: number;
 }
 
-const formatCurrency = (value: number, showSign = true) => formatCurrencyUtil(value, showSign);
-
 interface StatCardProps {
   title: string;
-  value: string;
+  primaryValue: string;
+  secondaryValue?: string;
   change?: string;
   changeType?: 'positive' | 'negative' | 'neutral';
   icon: React.ElementType;
@@ -25,7 +25,8 @@ interface StatCardProps {
 
 const StatCard = ({ 
   title, 
-  value, 
+  primaryValue,
+  secondaryValue,
   change, 
   changeType = 'neutral', 
   icon: Icon, 
@@ -48,7 +49,12 @@ const StatCard = ({
         <div className="flex items-start justify-between">
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</p>
-            <p className="text-2xl font-bold text-foreground tracking-tight">{value}</p>
+            <div>
+              <p className="text-2xl font-bold text-foreground tracking-tight">{primaryValue}</p>
+              {secondaryValue && (
+                <p className="text-xs text-muted-foreground font-mono mt-0.5">{secondaryValue}</p>
+              )}
+            </div>
             {change && (
               <div className="flex items-center gap-1.5">
                 {changeType === 'positive' ? (
@@ -90,16 +96,23 @@ export default function StatsGrid({
   closedPositionsCount,
   winCount = 0,
 }: StatsGridPropsExtended) {
+  const { formatDualValue } = useDisplayUnit();
+  
   // Calculate actual win rate from real closed positions
   const winRate = closedPositionsCount > 0 
     ? Math.round((winCount / closedPositionsCount) * 100) 
     : 0;
 
+  // Get dual formatted values (SOL primary, USD secondary)
+  const pnlFormatted = formatDualValue(totalPnL, { showSign: true });
+  const valueFormatted = formatDualValue(totalValue);
+
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       <StatCard
         title="Total P&L"
-        value={formatCurrency(totalPnL)}
+        primaryValue={pnlFormatted.primary}
+        secondaryValue={pnlFormatted.secondary}
         change={`${formatPercentage(totalPnLPercent)} all time`}
         changeType={totalPnL >= 0 ? 'positive' : 'negative'}
         icon={totalPnL >= 0 ? TrendingUp : TrendingDown}
@@ -110,7 +123,8 @@ export default function StatsGrid({
 
       <StatCard
         title="Open Value"
-        value={formatCurrency(totalValue)}
+        primaryValue={valueFormatted.primary}
+        secondaryValue={valueFormatted.secondary}
         change={openPositionsCount > 0 ? `${openPositionsCount} active` : 'No open positions'}
         changeType={openPositionsCount > 0 ? 'positive' : 'neutral'}
         icon={Wallet}
@@ -121,7 +135,7 @@ export default function StatsGrid({
 
       <StatCard
         title="Total Trades"
-        value={(openPositionsCount + closedPositionsCount).toString()}
+        primaryValue={(openPositionsCount + closedPositionsCount).toString()}
         change={`${openPositionsCount} open, ${closedPositionsCount} closed`}
         changeType={openPositionsCount > 0 ? 'positive' : 'neutral'}
         icon={Activity}
@@ -132,7 +146,7 @@ export default function StatsGrid({
 
       <StatCard
         title="Win Rate"
-        value={`${winRate}%`}
+        primaryValue={`${winRate}%`}
         change={`${closedPositionsCount} trades`}
         changeType={winRate >= 50 ? 'positive' : winRate > 0 ? 'negative' : 'neutral'}
         icon={Zap}

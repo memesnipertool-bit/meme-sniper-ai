@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Wallet, ExternalLink, Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
 
 interface WalletBannerProps {
   address: string;
@@ -12,6 +13,10 @@ interface WalletBannerProps {
 
 export default function WalletBanner({ address, balance, network }: WalletBannerProps) {
   const [copied, setCopied] = useState(false);
+  const { solPrice, solToUsd } = useDisplayUnit();
+  
+  const balanceNum = parseFloat(balance) || 0;
+  const balanceUsd = solToUsd(balanceNum);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(address);
@@ -73,13 +78,16 @@ export default function WalletBanner({ address, balance, network }: WalletBanner
           </div>
           
           <div className="flex items-center gap-6 sm:gap-8">
-            {/* Balance */}
+            {/* Balance - SOL Primary, USD Secondary */}
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Balance</p>
               <div className="flex items-baseline gap-1.5">
-                <span className="text-xl font-bold text-foreground">{balance || '0'}</span>
-                <span className="text-sm font-medium text-muted-foreground">SOL</span>
+                <span className="text-2xl font-bold text-foreground">{balanceNum.toFixed(4)}</span>
+                <span className="text-sm font-medium text-primary">SOL</span>
               </div>
+              <p className="text-xs text-muted-foreground font-mono">
+                ≈ ${balanceUsd.toFixed(2)} USD
+              </p>
             </div>
             
             {/* Network */}
