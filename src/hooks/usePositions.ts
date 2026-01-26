@@ -499,16 +499,33 @@ export function usePositions() {
           // Enrich with actual token name/symbol from DexScreener if available
           let enrichedName = p.token_name;
           let enrichedSymbol = p.token_symbol;
+          let didEnrichMetadata = false;
           
           if (needsMetadataEnrichment && priceData.name && priceData.symbol) {
             // Only update if DexScreener provides valid (non-placeholder) metadata
             if (!isPlaceholderText(priceData.name)) {
               enrichedName = priceData.name;
               hasChanges = true;
+              didEnrichMetadata = true;
             }
             if (!isPlaceholderText(priceData.symbol)) {
               enrichedSymbol = priceData.symbol;
               hasChanges = true;
+              didEnrichMetadata = true;
+            }
+            
+            // Persist enriched metadata to database (fire-and-forget)
+            if (didEnrichMetadata) {
+              supabase
+                .from('positions')
+                .update({ 
+                  token_name: enrichedName, 
+                  token_symbol: enrichedSymbol 
+                })
+                .eq('id', p.id)
+                .then(({ error }) => {
+                  if (error) console.error('Failed to persist token metadata:', error);
+                });
             }
           }
           

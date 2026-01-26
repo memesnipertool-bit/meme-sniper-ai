@@ -227,6 +227,8 @@ const PositionRow = memo(({
     prevProps.position.current_price === nextProps.position.current_price &&
     prevProps.position.profit_loss_percent === nextProps.position.profit_loss_percent &&
     prevProps.position.profit_loss_value === nextProps.position.profit_loss_value &&
+    prevProps.position.token_name === nextProps.position.token_name &&
+    prevProps.position.token_symbol === nextProps.position.token_symbol &&
     prevProps.colorIndex === nextProps.colorIndex
   );
 });
