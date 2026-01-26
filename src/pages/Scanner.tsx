@@ -120,6 +120,10 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   const lastSniperRunRef = useRef<number>(0);
   const processedTokensRef = useRef<Set<string>>(new Set());
   const liveTradeInFlightRef = useRef(false);
+  
+  // CRITICAL: Separate ref for tokens that have been TRADED (never cleared during bot session)
+  // This prevents the same token from being bought multiple times
+  const tradedTokensRef = useRef<Set<string>>(new Set());
 
   // Use demo or real positions based on mode
   // CRITICAL: Reconcile position metadata with pool data to ensure token names match
@@ -507,8 +511,12 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       return;
     }
     
-    // Filter for tokens we haven't processed yet
-    const unseenTokens = tokens.filter(t => !processedTokensRef.current.has(t.address));
+    // Filter for tokens we haven't processed yet AND haven't traded
+    // tradedTokensRef is NEVER cleared during bot session - prevents duplicate buys
+    const unseenTokens = tokens.filter(t => 
+      !processedTokensRef.current.has(t.address) && 
+      !tradedTokensRef.current.has(t.address)
+    );
 
     if (unseenTokens.length === 0) {
       // No new tokens - this is normal, just wait for next scan
@@ -521,6 +529,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       if (blacklist.has(t.address)) return false;
       if (t.symbol?.toUpperCase() === 'SOL' && t.address !== SOL_MINT) return false;
       if (t.canSell === false) return false;
+      // Double-check against traded tokens
+      if (tradedTokensRef.current.has(t.address)) return false;
       return true;
     });
 
@@ -576,6 +586,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       );
       
       if (approvedToken && settings.trade_amount && demoBalance >= settings.trade_amount) {
+        // CRITICAL: Mark token as traded BEFORE execution to prevent race conditions
+        tradedTokensRef.current.add(approvedToken.address);
+        
         deductBalance(settings.trade_amount);
         const tradeAmountInDollars = settings.trade_amount * solPrice;
         const entryPrice = approvedToken.priceUsd || 0.0001;
@@ -741,6 +754,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           continue;
         }
         
+        // CRITICAL: Mark token as traded BEFORE execution to prevent race conditions
+        tradedTokensRef.current.add(next.token.address);
+        
         const buyerPos = next.token.buyerPosition ? `#${next.token.buyerPosition}` : 'N/A';
         const safetyScore = next.token.riskScore != null ? `${100 - next.token.riskScore}/100` : 'N/A';
         const liqText = next.token.liquidity ? `$${next.token.liquidity.toLocaleString()}` : 'N/A';
@@ -879,8 +895,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
   const handleToggleBotActive = (active: boolean) => {
     if (active) {
-      // Clear processed tokens when activating bot
+      // Clear processed and traded tokens when activating bot (fresh session)
       processedTokensRef.current.clear();
+      tradedTokensRef.current.clear();
       
       if (isDemo) {
         // Start demo auto-exit monitor
