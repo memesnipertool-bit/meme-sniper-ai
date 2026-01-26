@@ -34,6 +34,7 @@ interface Position {
   profit_take_percent: number;
   stop_loss_percent: number;
   status: 'open' | 'closed' | 'pending';
+  created_at: string; // Added for external sale detection timing
 }
 
 // Helper: generate short address format instead of "Unknown"
@@ -85,11 +86,24 @@ function getApiKey(apiType: string, dbApiKey: string | null): string | null {
 }
 
 // Check on-chain token balance to detect externally sold positions
+// CRITICAL: This must NOT trigger for newly created positions (< 60 seconds old)
+// to avoid false "sold_externally" closures due to RPC propagation delays
 async function checkOnChainBalance(
   tokenAddress: string,
-  walletAddress: string
-): Promise<{ hasBalance: boolean; balance: number }> {
+  walletAddress: string,
+  positionCreatedAt: string
+): Promise<{ hasBalance: boolean; balance: number; skipped: boolean }> {
   try {
+    // CRITICAL GUARD: Skip balance check for positions created in the last 60 seconds
+    // RPC nodes may not have propagated the token account yet after a swap
+    const positionAge = Date.now() - new Date(positionCreatedAt).getTime();
+    const MIN_AGE_FOR_EXTERNAL_SALE_CHECK_MS = 60000; // 60 seconds
+    
+    if (positionAge < MIN_AGE_FOR_EXTERNAL_SALE_CHECK_MS) {
+      console.log(`[AutoExit] Skipping external sale check for ${shortAddress(tokenAddress)} - position only ${Math.round(positionAge / 1000)}s old`);
+      return { hasBalance: true, balance: 0, skipped: true };
+    }
+    
     // Use Helius or Solana RPC to check token balance
     const rpcUrl = Deno.env.get('HELIUS_RPC_URL') || Deno.env.get('SOLANA_RPC_URL') || 'https://api.mainnet-beta.solana.com';
     
@@ -111,7 +125,7 @@ async function checkOnChainBalance(
     
     if (!response.ok) {
       console.log(`[AutoExit] RPC balance check failed: ${response.status}`);
-      return { hasBalance: true, balance: 0 }; // Assume has balance if check fails
+      return { hasBalance: true, balance: 0, skipped: false }; // Assume has balance if check fails
     }
     
     const data = await response.json();
@@ -119,7 +133,7 @@ async function checkOnChainBalance(
     
     if (accounts.length === 0) {
       console.log(`[AutoExit] No token account found for ${shortAddress(tokenAddress)} - likely sold externally`);
-      return { hasBalance: false, balance: 0 };
+      return { hasBalance: false, balance: 0, skipped: false };
     }
     
     // Sum up balance from all token accounts for this mint
@@ -130,10 +144,10 @@ async function checkOnChainBalance(
     }
     
     console.log(`[AutoExit] On-chain balance for ${shortAddress(tokenAddress)}: ${totalBalance}`);
-    return { hasBalance: totalBalance > 0, balance: totalBalance };
+    return { hasBalance: totalBalance > 0, balance: totalBalance, skipped: false };
   } catch (error) {
     console.error('[AutoExit] Balance check error:', error);
-    return { hasBalance: true, balance: 0 }; // Assume has balance on error
+    return { hasBalance: true, balance: 0, skipped: false }; // Assume has balance on error
   }
 }
 
@@ -462,10 +476,16 @@ serve(async (req) => {
     // Process each position
     for (const position of positions as Position[]) {
       // Check on-chain balance if wallet address provided (detects externally sold tokens)
+      // CRITICAL: Pass created_at to prevent false positives on new positions
       if (walletAddress) {
-        const { hasBalance, balance } = await checkOnChainBalance(position.token_address, walletAddress);
+        const { hasBalance, balance, skipped } = await checkOnChainBalance(
+          position.token_address, 
+          walletAddress,
+          position.created_at || new Date().toISOString()
+        );
         
-        if (!hasBalance || balance < position.amount * 0.01) {
+        // Only mark as sold externally if NOT skipped (position old enough) AND balance is zero
+        if (!skipped && (!hasBalance || balance < position.amount * 0.01)) {
           // Token was sold externally (Phantom wallet or elsewhere)
           console.log(`[AutoExit] Position ${position.token_symbol} sold externally - closing stale position`);
           
