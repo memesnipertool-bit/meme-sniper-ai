@@ -354,28 +354,32 @@ export function useAutoExit() {
         r => r.action !== 'hold' && !r.executed && r.error?.includes('PENDING_SIGNATURE')
       );
 
-      // Also handle exits that were force-closed (no_route) to show proper notifications
-      const forceClosedExits = exitResults.filter(
-        r => r.executed && (r.txId === 'force_closed_no_route' || r.error?.includes('force_closed'))
+      // Handle exits blocked due to no route - show warning but keep position open
+      const noRouteExits = exitResults.filter(
+        r => r.action !== 'hold' && !r.executed && r.error?.includes('NO_ROUTE')
       );
       
-      // Log force-closed positions to activity
-      forceClosedExits.forEach((result) => {
+      // Log illiquid position warnings
+      noRouteExits.forEach((result) => {
         const actionLabel = result.action === 'take_profit' ? '💰 TAKE PROFIT' : '🛑 STOP LOSS';
         addBotLog({
           level: 'warning',
           category: 'exit',
-          message: `⚠️ ${actionLabel} (Force Closed): ${result.symbol}`,
+          message: `⚠️ ${actionLabel} blocked: ${result.symbol} (no liquidity)`,
           tokenSymbol: result.symbol,
-          details: `Position closed without swap - token has no Jupiter route (illiquid)\nP&L at close: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}% | Price: $${result.currentPrice.toFixed(8)}`,
-        });
-        
-        toast({
-          title: `⚠️ Position Force-Closed`,
-          description: `${result.symbol} removed from active trades - no swap route available`,
-          variant: 'destructive',
+          details: `Exit triggered but token has no Jupiter swap route.\nPosition kept OPEN - use Sync or manual force-close if needed.\nP&L: ${result.profitLossPercent >= 0 ? '+' : ''}${result.profitLossPercent.toFixed(2)}% | Price: $${result.currentPrice.toFixed(8)}`,
         });
       });
+      
+      // Show a single toast for all no-route positions (don't spam)
+      if (noRouteExits.length > 0) {
+        toast({
+          title: `⚠️ ${noRouteExits.length} Exit(s) Blocked`,
+          description: `${noRouteExits.map(r => r.symbol).join(', ')} - no swap route. Positions kept open.`,
+          variant: 'destructive',
+          duration: 8000,
+        });
+      }
 
       if (pendingSignatureExits.length > 0 && executeExits && wallet.isConnected) {
         console.log(`[AutoExit] ${pendingSignatureExits.length} exits need wallet signature`);
