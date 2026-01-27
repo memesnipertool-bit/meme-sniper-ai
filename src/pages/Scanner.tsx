@@ -13,6 +13,7 @@ import ApiHealthWidget from "@/components/scanner/ApiHealthWidget";
 import PaidApiAlert from "@/components/scanner/PaidApiAlert";
 import BotPreflightCheck from "@/components/scanner/BotPreflightCheck";
 import ExitPreviewModal from "@/components/scanner/ExitPreviewModal";
+import NoRouteExitModal from "@/components/scanner/NoRouteExitModal";
 import StatsCard from "@/components/StatsCard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -23,6 +24,7 @@ import { useSniperSettings } from "@/hooks/useSniperSettings";
 import { useAutoSniper, TokenData } from "@/hooks/useAutoSniper";
 import { useAutoExit } from "@/hooks/useAutoExit";
 import { useDemoAutoExit } from "@/hooks/useDemoAutoExit";
+import { useLiquidityRetryWorker } from "@/hooks/useLiquidityRetryWorker";
 import { useWallet } from "@/hooks/useWallet";
 import { useWalletModal } from "@/hooks/useWalletModal";
 import { useTradeExecution, SOL_MINT, type TradeParams, type PriorityLevel } from "@/hooks/useTradeExecution";
@@ -47,6 +49,18 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   const { settings, saving, saveSettings, updateField } = useSniperSettings();
   const { evaluateTokens, result: sniperResult, loading: sniperLoading } = useAutoSniper();
   const { startAutoExitMonitor, stopAutoExitMonitor, isMonitoring } = useAutoExit();
+  const {
+    waitingPositions,
+    checking: checkingLiquidity,
+    fetchWaitingPositions,
+    runRetryCheck: runLiquidityRetryCheck,
+    moveToWaitingForLiquidity,
+    moveBackToOpen,
+    checkAndExecutePosition: tryExecuteWaitingPosition,
+    startRetryWorker: startLiquidityRetryWorker,
+    stopRetryWorker: stopLiquidityRetryWorker,
+    isRunning: isLiquidityRetryRunning,
+  } = useLiquidityRetryWorker();
   const { executeTrade, sellPosition } = useTradeExecution();
   const { snipeToken, exitPosition, status: engineStatus, isExecuting: engineExecuting } = useTradingEngine();
   const { wallet, connectPhantom, disconnect, signAndSendTransaction, refreshBalance } = useWallet();
@@ -123,6 +137,10 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   
   // Sync Positions state
   const [syncingPositions, setSyncingPositions] = useState(false);
+  
+  // No Route Exit Modal state
+  const [noRoutePosition, setNoRoutePosition] = useState<any | null>(null);
+  const [showNoRouteModal, setShowNoRouteModal] = useState(false);
   
   // Get setMode from AppModeContext
   const { setMode } = useAppMode();
@@ -478,11 +496,17 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     } else {
       // Live mode: ALWAYS run auto-exit monitor when there are open positions OR bot is active with autoExit
       const hasOpenLivePositions = realOpenPositions.length > 0;
+      const hasWaitingPositions = waitingPositions.length > 0;
       const shouldRunAutoExit = hasOpenLivePositions || (isBotActive && !isPaused && autoExitEnabled);
       
       if (shouldRunAutoExit && wallet.isConnected) {
         console.log(`[Scanner] Starting auto-exit monitor: ${realOpenPositions.length} open positions, bot=${isBotActive}, autoExit=${autoExitEnabled}`);
         startAutoExitMonitor(15000); // Check every 15 seconds for faster response
+      }
+      
+      // Start liquidity retry worker if there are waiting positions
+      if (hasWaitingPositions && wallet.isConnected) {
+        startLiquidityRetryWorker(30000); // Check every 30 seconds
       }
     }
     
@@ -490,8 +514,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       // Don't stop bot on unmount - just stop monitors (bot state persists)
       stopDemoMonitor();
       stopAutoExitMonitor();
+      stopLiquidityRetryWorker();
     };
-  }, [isBotActive, isPaused, isDemo, autoExitEnabled, startDemoMonitor, stopDemoMonitor, startAutoExitMonitor, stopAutoExitMonitor, realOpenPositions.length, wallet.isConnected]);
+  }, [isBotActive, isPaused, isDemo, autoExitEnabled, startDemoMonitor, stopDemoMonitor, startAutoExitMonitor, stopAutoExitMonitor, realOpenPositions.length, waitingPositions.length, wallet.isConnected, startLiquidityRetryWorker, stopLiquidityRetryWorker]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1407,6 +1432,26 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         walletAddress={wallet.address || ''}
         onConfirmExit={handleConfirmExitFromModal}
       />
+      
+      {/* No Route Exit Modal */}
+      <NoRouteExitModal
+        open={showNoRouteModal}
+        onOpenChange={setShowNoRouteModal}
+        tokenSymbol={noRoutePosition?.token_symbol || ''}
+        tokenName={noRoutePosition?.token_name || ''}
+        onMoveToWaiting={async () => {
+          if (noRoutePosition) {
+            await moveToWaitingForLiquidity(noRoutePosition.id);
+            fetchPositions(true);
+          }
+          setShowNoRouteModal(false);
+          setNoRoutePosition(null);
+        }}
+        onKeepInList={() => {
+          setShowNoRouteModal(false);
+          setNoRoutePosition(null);
+        }}
+      />
       <AppLayout>
         <div className="container mx-auto px-3 md:px-4 space-y-4 md:space-y-6">
           {/* Demo Mode Banner */}
@@ -1511,9 +1556,20 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
               <LiquidityMonitor 
                 pools={tokens}
                 activeTrades={openPositions}
+                waitingPositions={waitingPositions}
                 loading={loading}
                 apiStatus={loading ? 'active' : 'waiting'}
                 onExitTrade={handleOpenExitPreview}
+                onRetryLiquidityCheck={runLiquidityRetryCheck}
+                onMoveBackFromWaiting={moveBackToOpen}
+                onManualSellWaiting={async (pos) => {
+                  const success = await tryExecuteWaitingPosition(pos);
+                  if (success) {
+                    fetchPositions(true);
+                    fetchWaitingPositions();
+                  }
+                }}
+                checkingLiquidity={checkingLiquidity}
               />
 
               {/* Bot Activity Log */}
