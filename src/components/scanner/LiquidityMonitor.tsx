@@ -8,8 +8,9 @@ import { ScannedToken } from "@/hooks/useTokenScanner";
 import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import WaitingLiquidityTab from "./WaitingLiquidityTab";
+import WaitingLiquidityTab, { type CombinedWaitingItem } from "./WaitingLiquidityTab";
 import type { WaitingPosition } from "@/hooks/useLiquidityRetryWorker";
+import type { WalletToken } from "@/hooks/useWalletTokens";
 
 interface ActiveTradePosition {
   id: string;
@@ -34,12 +35,15 @@ interface LiquidityMonitorProps {
   pools: ScannedToken[];
   activeTrades: ActiveTradePosition[];
   waitingPositions?: WaitingPosition[];
+  walletTokens?: WalletToken[];
+  loadingWalletTokens?: boolean;
   loading: boolean;
   apiStatus: 'waiting' | 'active' | 'error' | 'rate_limited';
   onExitTrade?: (positionId: string, currentPrice: number) => void;
   onRetryLiquidityCheck?: () => void;
   onMoveBackFromWaiting?: (positionId: string) => void;
-  onManualSellWaiting?: (position: WaitingPosition) => void;
+  onManualSellWaiting?: (position: WaitingPosition | CombinedWaitingItem) => void;
+  onRefreshWalletTokens?: () => void;
   checkingLiquidity?: boolean;
 }
 
@@ -466,12 +470,15 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
   pools, 
   activeTrades, 
   waitingPositions = [],
+  walletTokens = [],
+  loadingWalletTokens = false,
   loading,
   apiStatus = 'waiting',
   onExitTrade,
   onRetryLiquidityCheck,
   onMoveBackFromWaiting,
   onManualSellWaiting,
+  onRefreshWalletTokens,
   checkingLiquidity = false,
 }, ref) {
   const navigate = useNavigate();
@@ -550,6 +557,15 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
     activeTrades.filter(t => t.status === 'open' || t.status === 'pending'), 
     [activeTrades]
   );
+
+  // Create set of active token addresses for exclusion in Waiting tab
+  const activeTokenAddresses = useMemo(() => {
+    const addresses = new Set<string>();
+    for (const trade of openTrades) {
+      addresses.add(trade.token_address.toLowerCase());
+    }
+    return addresses;
+  }, [openTrades]);
 
   // Memoize total P&L
   const totalPnL = useMemo(() => 
@@ -755,10 +771,14 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
             <TabsContent value="waiting" className="mt-0">
               <WaitingLiquidityTab
                 positions={waitingPositions}
+                walletTokens={walletTokens}
+                activeTokenAddresses={activeTokenAddresses}
                 checking={checkingLiquidity}
+                loadingWalletTokens={loadingWalletTokens}
                 onRetryCheck={onRetryLiquidityCheck || (() => {})}
                 onMoveBack={onMoveBackFromWaiting || (() => {})}
                 onManualSell={onManualSellWaiting || (() => {})}
+                onRefreshWalletTokens={onRefreshWalletTokens}
               />
             </TabsContent>
           </Tabs>
