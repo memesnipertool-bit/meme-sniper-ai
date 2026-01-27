@@ -230,6 +230,8 @@ export type Database = {
           exit_reason: string | null
           exit_tx_id: string | null
           id: string
+          liquidity_check_count: number | null
+          liquidity_last_checked_at: string | null
           pnl_percentage: number | null
           profit_loss_percent: number | null
           profit_loss_value: number | null
@@ -241,6 +243,7 @@ export type Database = {
           token_symbol: string | null
           updated_at: string
           user_id: string
+          waiting_for_liquidity_since: string | null
         }
         Insert: {
           amount: number
@@ -256,6 +259,8 @@ export type Database = {
           exit_reason?: string | null
           exit_tx_id?: string | null
           id?: string
+          liquidity_check_count?: number | null
+          liquidity_last_checked_at?: string | null
           pnl_percentage?: number | null
           profit_loss_percent?: number | null
           profit_loss_value?: number | null
@@ -267,6 +272,7 @@ export type Database = {
           token_symbol?: string | null
           updated_at?: string
           user_id: string
+          waiting_for_liquidity_since?: string | null
         }
         Update: {
           amount?: number
@@ -282,6 +288,8 @@ export type Database = {
           exit_reason?: string | null
           exit_tx_id?: string | null
           id?: string
+          liquidity_check_count?: number | null
+          liquidity_last_checked_at?: string | null
           pnl_percentage?: number | null
           profit_loss_percent?: number | null
           profit_loss_value?: number | null
@@ -293,6 +301,7 @@ export type Database = {
           token_symbol?: string | null
           updated_at?: string
           user_id?: string
+          waiting_for_liquidity_since?: string | null
         }
         Relationships: []
       }

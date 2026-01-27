@@ -5,9 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScannedToken } from "@/hooks/useTokenScanner";
-import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye } from "lucide-react";
+import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import WaitingLiquidityTab from "./WaitingLiquidityTab";
+import type { WaitingPosition } from "@/hooks/useLiquidityRetryWorker";
+
 interface ActiveTradePosition {
   id: string;
   token_address: string;
@@ -23,16 +26,21 @@ interface ActiveTradePosition {
   profit_loss_value: number | null;
   profit_take_percent: number;
   stop_loss_percent: number;
-  status: 'open' | 'closed' | 'pending';
+  status: 'open' | 'closed' | 'pending' | 'waiting_for_liquidity';
   created_at: string;
 }
 
 interface LiquidityMonitorProps {
   pools: ScannedToken[];
   activeTrades: ActiveTradePosition[];
+  waitingPositions?: WaitingPosition[];
   loading: boolean;
   apiStatus: 'waiting' | 'active' | 'error' | 'rate_limited';
   onExitTrade?: (positionId: string, currentPrice: number) => void;
+  onRetryLiquidityCheck?: () => void;
+  onMoveBackFromWaiting?: (positionId: string) => void;
+  onManualSellWaiting?: (position: WaitingPosition) => void;
+  checkingLiquidity?: boolean;
 }
 
 const formatLiquidity = (value: number) => {
@@ -457,9 +465,14 @@ PoolSkeleton.displayName = 'PoolSkeleton';
 const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(function LiquidityMonitor({ 
   pools, 
   activeTrades, 
+  waitingPositions = [],
   loading,
   apiStatus = 'waiting',
-  onExitTrade
+  onExitTrade,
+  onRetryLiquidityCheck,
+  onMoveBackFromWaiting,
+  onManualSellWaiting,
+  checkingLiquidity = false,
 }, ref) {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("pools");
@@ -615,7 +628,19 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
                   value="trades" 
                   className="flex-1 text-xs h-8 data-[state=active]:bg-success data-[state=active]:text-success-foreground"
                 >
-                  Active Trades ({openTrades.length})
+                  Active ({openTrades.length})
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="waiting" 
+                  className={cn(
+                    "flex-1 text-xs h-8 gap-1",
+                    waitingPositions.length > 0 
+                      ? "data-[state=active]:bg-warning data-[state=active]:text-warning-foreground"
+                      : "data-[state=active]:bg-muted data-[state=active]:text-muted-foreground"
+                  )}
+                >
+                  <Clock className="w-3 h-3" />
+                  Waiting ({waitingPositions.length})
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -724,6 +749,17 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
                   </div>
                 </div>
               )}
+            </TabsContent>
+            
+            {/* Waiting for Liquidity Tab */}
+            <TabsContent value="waiting" className="mt-0">
+              <WaitingLiquidityTab
+                positions={waitingPositions}
+                checking={checkingLiquidity}
+                onRetryCheck={onRetryLiquidityCheck || (() => {})}
+                onMoveBack={onMoveBackFromWaiting || (() => {})}
+                onManualSell={onManualSellWaiting || (() => {})}
+              />
             </TabsContent>
           </Tabs>
         </CardContent>
