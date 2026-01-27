@@ -35,6 +35,8 @@ import { useDemoPortfolio } from "@/contexts/DemoPortfolioContext";
 import { useBotContext } from "@/contexts/BotContext";
 import { useSolPrice } from "@/hooks/useSolPrice";
 import { reconcilePositionsWithPools } from "@/lib/positionMetadataReconciler";
+import { fetchDexScreenerTokenMetadata } from "@/lib/dexscreener";
+import { isPlaceholderText } from "@/lib/formatters";
 import { Wallet, TrendingUp, Zap, Activity, AlertTriangle, X, FlaskConical, Coins, RotateCcw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -1214,11 +1216,33 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     }
 
     setSyncingPositions(true);
-    addBotLog({ level: 'info', category: 'system', message: `Syncing ${realOpenPositions.length} positions with on-chain balances...` });
+    addBotLog({ level: 'info', category: 'system', message: `Syncing ${realOpenPositions.length} positions with on-chain balances and metadata...` });
 
     let updatedCount = 0;
     let closedCount = 0;
+    let metadataUpdated = 0;
     let errorCount = 0;
+
+    // Collect addresses that need metadata enrichment
+    const addressesNeedingMetadata = realOpenPositions
+      .filter(p => isPlaceholderText(p.token_symbol) || isPlaceholderText(p.token_name))
+      .map(p => p.token_address);
+
+    // Fetch metadata from DexScreener for all tokens needing enrichment
+    let metadataMap = new Map<string, { name: string; symbol: string }>();
+    if (addressesNeedingMetadata.length > 0) {
+      try {
+        const fetchedMeta = await fetchDexScreenerTokenMetadata(addressesNeedingMetadata);
+        for (const [addr, meta] of fetchedMeta.entries()) {
+          if (meta.name && meta.symbol) {
+            metadataMap.set(addr, { name: meta.name, symbol: meta.symbol });
+          }
+        }
+        addBotLog({ level: 'info', category: 'system', message: `Fetched metadata for ${metadataMap.size} tokens from DexScreener` });
+      } catch (err) {
+        console.error('DexScreener metadata fetch error:', err);
+      }
+    }
 
     for (const position of realOpenPositions) {
       try {
@@ -1234,6 +1258,12 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         const balanceUi = Number((data as any)?.balanceUi);
         const DUST = 1e-6;
 
+        // Build update payload
+        const updatePayload: Record<string, unknown> = {};
+        let hasBalanceChange = false;
+        let hasMetadataChange = false;
+
+        // Check if balance needs update
         if (!Number.isFinite(balanceUi) || balanceUi <= DUST) {
           // No balance - mark as sold externally
           await markPositionClosed(position.id, position.current_price ?? position.entry_price);
@@ -1244,19 +1274,51 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             message: `Closed ${position.token_symbol} - no on-chain balance`,
             tokenAddress: position.token_address,
           });
+          continue; // Skip metadata update for closed positions
         } else if (Math.abs(balanceUi - position.amount) > DUST) {
-          // Balance mismatch - update amount
+          updatePayload.amount = balanceUi;
+          hasBalanceChange = true;
+        }
+
+        // Check if metadata needs enrichment
+        const meta = metadataMap.get(position.token_address);
+        if (meta) {
+          if (isPlaceholderText(position.token_name) && meta.name && !isPlaceholderText(meta.name)) {
+            updatePayload.token_name = meta.name;
+            hasMetadataChange = true;
+          }
+          if (isPlaceholderText(position.token_symbol) && meta.symbol && !isPlaceholderText(meta.symbol)) {
+            updatePayload.token_symbol = meta.symbol;
+            hasMetadataChange = true;
+          }
+        }
+
+        // Apply updates if any
+        if (hasBalanceChange || hasMetadataChange) {
+          updatePayload.updated_at = new Date().toISOString();
           await supabase
             .from('positions')
-            .update({ amount: balanceUi, updated_at: new Date().toISOString() })
+            .update(updatePayload)
             .eq('id', position.id);
-          updatedCount++;
-          addBotLog({
-            level: 'info',
-            category: 'trade',
-            message: `Updated ${position.token_symbol}: ${position.amount.toFixed(4)} → ${balanceUi.toFixed(4)}`,
-            tokenAddress: position.token_address,
-          });
+          
+          if (hasBalanceChange) {
+            updatedCount++;
+            addBotLog({
+              level: 'info',
+              category: 'trade',
+              message: `Updated ${meta?.symbol || position.token_symbol}: ${position.amount.toFixed(4)} → ${balanceUi.toFixed(4)}`,
+              tokenAddress: position.token_address,
+            });
+          }
+          if (hasMetadataChange) {
+            metadataUpdated++;
+            addBotLog({
+              level: 'info',
+              category: 'system',
+              message: `Enriched metadata: ${position.token_symbol} → ${meta?.symbol}`,
+              tokenAddress: position.token_address,
+            });
+          }
         }
       } catch (err) {
         errorCount++;
@@ -1268,7 +1330,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     await fetchPositions(true);
 
     const summary: string[] = [];
-    if (updatedCount > 0) summary.push(`${updatedCount} updated`);
+    if (updatedCount > 0) summary.push(`${updatedCount} amounts synced`);
+    if (metadataUpdated > 0) summary.push(`${metadataUpdated} names fixed`);
     if (closedCount > 0) summary.push(`${closedCount} closed`);
     if (errorCount > 0) summary.push(`${errorCount} errors`);
 
