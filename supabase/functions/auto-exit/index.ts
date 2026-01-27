@@ -662,64 +662,39 @@ serve(async (req) => {
               error = 'PENDING_SIGNATURE: Jupiter quote ready, requires wallet signature';
               console.log(`[AutoExit] Jupiter quote ready for ${position.token_symbol} - requires frontend signature`);
             } else {
-              // Jupiter failed - check if this is a position that should be force-closed
+              // Jupiter failed - NO FORCE CLOSE
+              // Keep position open with warning - user must manually handle illiquid tokens
               const noRoute = jupiterResult.error?.includes('No Jupiter route') || 
                               jupiterResult.error?.includes('No route available') ||
                               jupiterResult.error?.includes('404') ||
                               jupiterResult.error?.includes('Route not found');
               
-              // Force-close if: no route AND (stop loss hit OR take profit hit OR severe loss)
-              // This ensures users don't get stuck with untradeable positions
-              const shouldForceClose = noRoute && (
-                reason === 'stop_loss' ||  // Always force-close stop losses with no route
-                reason === 'take_profit' || // Force-close take profits with no route (user wants out)
-                profitLossPercent <= -50    // Force-close severe losses even without exact SL hit
-              );
-              
-              if (shouldForceClose) {
-                console.log(`[AutoExit] Force-closing position ${position.token_symbol} - ${reason} triggered but no Jupiter route (${profitLossPercent.toFixed(2)}%)`);
+              if (noRoute) {
+                console.log(`[AutoExit] No Jupiter route for ${position.token_symbol} - ${reason} triggered but keeping position OPEN (illiquid)`);
                 
-                // Force close the position - mark as closed with no tx
-                await supabase
-                  .from('positions')
-                  .update({
-                    status: 'closed',
-                    exit_reason: `${reason}_no_route`,
-                    exit_price: currentPrice,
-                    exit_tx_id: null,
-                    closed_at: new Date().toISOString(),
-                    current_price: currentPrice,
-                    current_value: currentValue,
-                    profit_loss_percent: profitLossPercent,
-                    profit_loss_value: profitLossValue,
-                  })
-                  .eq('id', position.id);
-                
-                // Log the force close
+                // Log the warning but DO NOT close the position
                 await supabase.from('system_logs').insert({
                   user_id: user.id,
-                  event_type: 'force_close_no_route',
+                  event_type: 'exit_blocked_no_route',
                   event_category: 'trading',
-                  message: `Force-closed (no route): ${position.token_symbol} - ${reason} at ${profitLossPercent.toFixed(2)}%`,
+                  message: `Exit blocked (no route): ${position.token_symbol} - ${reason} triggered at ${profitLossPercent.toFixed(2)}% but no swap available`,
                   metadata: {
                     position_id: position.id,
                     token_symbol: position.token_symbol,
                     entry_price: position.entry_price,
-                    exit_price: currentPrice,
+                    current_price: currentPrice,
                     profit_loss_percent: profitLossPercent,
-                    reason: `${reason} triggered but Jupiter has no route - token may be illiquid`,
+                    reason: `${reason} triggered but Jupiter has no route - position kept open, user must handle manually`,
                     original_error: jupiterResult.error,
                   },
                   severity: 'warning',
                 });
-                
-                executed = true;
-                txId = 'force_closed_no_route';
-                error = undefined;
-              } else {
-                executed = false;
-                error = jupiterResult.error || 'Jupiter sell failed - waiting for route availability';
               }
+              
+              executed = false;
+              error = noRoute 
+                ? `NO_ROUTE: ${reason} triggered but token has no liquidity - position kept open` 
+                : (jupiterResult.error || 'Jupiter sell failed - waiting for route availability');
             }
           }
 

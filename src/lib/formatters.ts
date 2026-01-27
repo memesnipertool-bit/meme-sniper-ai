@@ -33,17 +33,28 @@ export function formatCurrency(value: number | null | undefined, showSign = true
   if (absValue >= 1000) {
     return `${sign}$${(num / 1000).toFixed(2)}K`;
   }
-  if (absValue >= 1) {
+  if (absValue >= 100) {
     return `${sign}$${num.toFixed(2)}`;
   }
-  if (absValue >= 0.01) {
+  if (absValue >= 1) {
     return `${sign}$${num.toFixed(3)}`;
   }
-  if (absValue >= 0.0001) {
+  if (absValue >= 0.01) {
     return `${sign}$${num.toFixed(4)}`;
   }
-  if (absValue > 0) {
+  if (absValue >= 0.001) {
+    return `${sign}$${num.toFixed(5)}`;
+  }
+  if (absValue >= 0.0001) {
     return `${sign}$${num.toFixed(6)}`;
+  }
+  if (absValue > 0.0000001) {
+    // Show up to 8 decimals for very small values
+    return `${sign}$${num.toFixed(8)}`;
+  }
+  if (absValue > 0) {
+    // Scientific notation for extremely small values
+    return `${sign}$${num.toExponential(2)}`;
   }
   return showSign ? '+$0.00' : '$0.00';
 }

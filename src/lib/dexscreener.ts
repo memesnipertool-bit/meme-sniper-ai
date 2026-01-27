@@ -38,9 +38,52 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+// In-memory cache for persisted metadata (prevents re-fetching after DB save)
+const persistedMetadataCache = new Map<string, { symbol: string; name: string; persistedAt: number }>();
+const PERSISTED_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
- * Best-effort metadata lookup via DexScreener.
+ * Fetch token metadata from Jupiter token list (public, fast, consistent with Phantom)
+ */
+export async function fetchJupiterTokenMetadata(
+  addresses: string[],
+  opts?: { timeoutMs?: number }
+): Promise<Map<string, DexTokenMetadata>> {
+  const timeoutMs = opts?.timeoutMs ?? 3000;
+  const result = new Map<string, DexTokenMetadata>();
+  
+  const unique = Array.from(new Set(addresses.filter((a) => isLikelyRealSolanaMint(a))));
+  if (unique.length === 0) return result;
+  
+  // Jupiter's lite-api supports individual token lookups
+  for (const addr of unique) {
+    try {
+      const res = await fetch(`https://lite-api.jup.ag/tokens/v1/${addr}`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const symbol = String(data?.symbol || '').trim();
+      const name = String(data?.name || '').trim();
+      if (symbol && !isPlaceholderTokenText(symbol)) {
+        result.set(addr, {
+          address: addr,
+          symbol,
+          name: name || symbol,
+        });
+      }
+    } catch {
+      // Ignore: best-effort
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Best-effort metadata lookup via DexScreener FIRST, then Jupiter fallback.
  * Uses the token endpoint which supports comma-separated addresses.
+ * Results are cached to prevent repeated external calls.
  */
 export async function fetchDexScreenerTokenMetadata(
   addresses: string[],
@@ -54,8 +97,23 @@ export async function fetchDexScreenerTokenMetadata(
   );
   const result = new Map<string, DexTokenMetadata>();
   if (unique.length === 0) return result;
+  
+  // Check persisted cache first
+  const now = Date.now();
+  const stillNeeded: string[] = [];
+  for (const addr of unique) {
+    const cached = persistedMetadataCache.get(addr);
+    if (cached && now - cached.persistedAt < PERSISTED_CACHE_TTL_MS) {
+      result.set(addr, { address: addr, symbol: cached.symbol, name: cached.name });
+    } else {
+      stillNeeded.push(addr);
+    }
+  }
+  
+  if (stillNeeded.length === 0) return result;
 
-  for (const batch of chunk(unique, chunkSize)) {
+  // 1. Try DexScreener first
+  for (const batch of chunk(stillNeeded, chunkSize)) {
     try {
       const url = `https://api.dexscreener.com/latest/dex/tokens/${batch.join(',')}`;
       const res = await fetch(url, {
@@ -83,14 +141,27 @@ export async function fetchDexScreenerTokenMetadata(
         const symbol = String(pair?.baseToken?.symbol || '').trim();
         const name = String(pair?.baseToken?.name || '').trim();
         if (!symbol && !name) continue;
-        result.set(addr, {
+        const meta = {
           address: addr,
           symbol: symbol || addr.slice(0, 4),
           name: name || `Token ${addr.slice(0, 6)}`,
-        });
+        };
+        result.set(addr, meta);
+        // Cache it
+        persistedMetadataCache.set(addr, { symbol: meta.symbol, name: meta.name, persistedAt: now });
       }
     } catch {
       // Ignore: best-effort enrichment
+    }
+  }
+  
+  // 2. For addresses still missing, try Jupiter token list as fallback
+  const stillMissing = stillNeeded.filter(a => !result.has(a));
+  if (stillMissing.length > 0) {
+    const jupiterMeta = await fetchJupiterTokenMetadata(stillMissing, { timeoutMs: 3000 });
+    for (const [addr, meta] of jupiterMeta.entries()) {
+      result.set(addr, meta);
+      persistedMetadataCache.set(addr, { symbol: meta.symbol, name: meta.name, persistedAt: now });
     }
   }
 
