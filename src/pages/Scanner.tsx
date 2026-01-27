@@ -35,7 +35,8 @@ import { useNotifications } from "@/hooks/useNotifications";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useDemoPortfolio } from "@/contexts/DemoPortfolioContext";
 import { useBotContext } from "@/contexts/BotContext";
-import { useSolPrice } from "@/hooks/useSolPrice";
+import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
+
 import { reconcilePositionsWithPools } from "@/lib/positionMetadataReconciler";
 import { fetchDexScreenerTokenMetadata } from "@/lib/dexscreener";
 import { isPlaceholderText } from "@/lib/formatters";
@@ -70,8 +71,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   const { addNotification } = useNotifications();
   const { mode } = useAppMode();
   
-  // Real-time SOL price
-  const { price: solPrice } = useSolPrice();
+  // Display unit context for consistent formatting
+  const { formatDualValue, formatSolNativeValue, solPrice } = useDisplayUnit();
   
   // Demo portfolio context
   const {
@@ -1527,17 +1528,17 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
             <StatsCard
               title="Invested"
-              value={`$${totalInvested.toFixed(2)}`}
-              change={`${openPositions.length} active`}
+              value={formatSolNativeValue(totalInvested).primary}
+              change={formatSolNativeValue(totalInvested).secondary}
               changeType="neutral"
-              icon={DollarSign}
+              icon={Coins}
             />
             <StatsCard
-              title={isDemo ? "Open Value" : "Open Value"}
-              value={isDemo ? `${demoBalance.toFixed(0)} SOL` : `$${totalValue.toFixed(2)}`}
-              change={`${totalPnLPercent >= 0 ? '+' : ''}${totalPnLPercent.toFixed(1)}%`}
+              title="Open Value"
+              value={isDemo ? `${demoBalance.toFixed(2)} SOL` : formatDualValue(totalValue).primary}
+              change={isDemo ? `≈ $${(demoBalance * solPrice).toFixed(2)}` : formatDualValue(totalValue).secondary}
               changeType={totalPnLPercent >= 0 ? 'positive' : 'negative'}
-              icon={isDemo ? Coins : Wallet}
+              icon={Wallet}
             />
             <StatsCard
               title="Active"

@@ -15,6 +15,8 @@ interface DisplayUnitContextType {
   // Formatting with proper visual hierarchy
   formatPrimaryValue: (usdValue: number, options?: FormatOptions) => string;
   formatSecondaryValue: (usdValue: number) => string;
+  // Format SOL-native values (input is SOL, not USD) - shows SOL primary, USD secondary
+  formatSolNativeValue: (solValue: number, options?: FormatOptions) => { primary: string; secondary: string };
   formatDualValue: (usdValue: number, options?: FormatOptions) => { primary: string; secondary: string };
 }
 
@@ -126,6 +128,17 @@ export function DisplayUnitProvider({ children }: { children: React.ReactNode })
     };
   }, [displayUnit, usdToSol, formatSolValue, formatUsdValue]);
 
+  // Format SOL-native values (input is SOL, not USD)
+  // Always shows SOL as primary and USD as secondary for consistency
+  const formatSolNativeValue = useCallback((solValue: number, options?: FormatOptions): { primary: string; secondary: string } => {
+    const showSign = options?.showSign ?? false;
+    const usdValue = solToUsd(solValue);
+    return {
+      primary: formatSolValue(solValue, showSign),
+      secondary: formatUsdValue(usdValue, showSign),
+    };
+  }, [solToUsd, formatSolValue, formatUsdValue]);
+
   const value = useMemo(() => ({
     displayUnit,
     setDisplayUnit,
@@ -137,6 +150,7 @@ export function DisplayUnitProvider({ children }: { children: React.ReactNode })
     formatPrimaryValue,
     formatSecondaryValue,
     formatDualValue,
+    formatSolNativeValue,
   }), [
     displayUnit,
     toggleDisplayUnit,
@@ -147,6 +161,7 @@ export function DisplayUnitProvider({ children }: { children: React.ReactNode })
     formatPrimaryValue,
     formatSecondaryValue,
     formatDualValue,
+    formatSolNativeValue,
   ]);
 
   return (
