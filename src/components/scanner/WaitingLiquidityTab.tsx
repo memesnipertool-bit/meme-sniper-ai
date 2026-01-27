@@ -1,7 +1,7 @@
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Clock, RefreshCw, ArrowLeft, Zap, Wallet, DollarSign } from "lucide-react";
+import { Loader2, Clock, RefreshCw, ArrowLeft, Zap, Wallet, ChevronDown, ChevronUp, ExternalLink, Check, X, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import type { WaitingPosition } from "@/hooks/useLiquidityRetryWorker";
@@ -20,9 +20,13 @@ export interface CombinedWaitingItem {
   liquidity_check_count: number;
   waiting_for_liquidity_since: string | null;
   status: string;
-  // Additional fields for wallet tokens
   isWalletToken: boolean;
   valueUsd: number | null;
+}
+
+interface RouteStatus {
+  jupiter: 'checking' | 'available' | 'unavailable' | 'unknown';
+  raydium: 'checking' | 'available' | 'unavailable' | 'unknown';
 }
 
 interface WaitingLiquidityTabProps {
@@ -35,6 +39,7 @@ interface WaitingLiquidityTabProps {
   onMoveBack: (positionId: string) => void;
   onManualSell: (position: WaitingPosition | CombinedWaitingItem) => void;
   onRefreshWalletTokens?: () => void;
+  isTabActive?: boolean;
 }
 
 const avatarColors = [
@@ -60,19 +65,95 @@ const formatValue = (value: number | null) => {
   return `$${(value / 1000).toFixed(1)}K`;
 };
 
+const formatAmount = (value: number) => {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
+  return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+};
+
+const shortAddress = (address: string) => `${address.slice(0, 4)}...${address.slice(-4)}`;
+
+// Route status indicator component
+const RouteIndicator = memo(({ status, label }: { status: 'checking' | 'available' | 'unavailable' | 'unknown'; label: string }) => {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-muted-foreground text-xs">{label}:</span>
+      {status === 'checking' && (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span className="text-xs">Checking</span>
+        </span>
+      )}
+      {status === 'available' && (
+        <span className="flex items-center gap-1 text-success">
+          <Check className="w-3.5 h-3.5" />
+          <span className="text-xs font-medium">Available</span>
+        </span>
+      )}
+      {status === 'unavailable' && (
+        <span className="flex items-center gap-1 text-destructive">
+          <X className="w-3.5 h-3.5" />
+          <span className="text-xs font-medium">No Route</span>
+        </span>
+      )}
+      {status === 'unknown' && (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          <AlertCircle className="w-3.5 h-3.5" />
+          <span className="text-xs">Unknown</span>
+        </span>
+      )}
+    </div>
+  );
+});
+RouteIndicator.displayName = 'RouteIndicator';
+
+// Check Jupiter route availability
+async function checkJupiterRoute(tokenAddress: string): Promise<boolean> {
+  try {
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    const url = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${tokenAddress}&outputMint=${SOL_MINT}&amount=1000000&slippageBps=1500`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data?.routePlan && data.routePlan.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Check Raydium route availability
+async function checkRaydiumRoute(tokenAddress: string): Promise<boolean> {
+  try {
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    const url = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${tokenAddress}&outputMint=${SOL_MINT}&amount=1000000&slippageBps=1500&txVersion=V0`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data?.success === true;
+  } catch {
+    return false;
+  }
+}
+
 const WaitingPositionRow = memo(({ 
   item, 
   colorIndex, 
   onMoveBack, 
-  onManualSell 
+  onManualSell,
+  routeStatus,
+  onCheckRoutes,
 }: { 
   item: CombinedWaitingItem; 
   colorIndex: number;
   onMoveBack: (id: string) => void;
   onManualSell: (item: CombinedWaitingItem) => void;
+  routeStatus: RouteStatus;
+  onCheckRoutes: () => void;
 }) => {
-  const displaySymbol = item.token_symbol || item.token_address.slice(0, 6);
-  const displayName = item.token_name || `Token ${item.token_address.slice(0, 6)}`;
+  const [expanded, setExpanded] = useState(false);
+  
+  const displaySymbol = item.token_symbol || shortAddress(item.token_address);
+  const displayName = item.token_name || `Token ${shortAddress(item.token_address)}`;
   const initials = displaySymbol.slice(0, 2).toUpperCase();
   const avatarClass = avatarColors[colorIndex % avatarColors.length];
 
@@ -84,94 +165,216 @@ const WaitingPositionRow = memo(({
     ? formatDistanceToNow(new Date(item.liquidity_last_checked_at), { addSuffix: true })
     : 'Never';
 
-  const handleMoveBack = useCallback(() => {
+  const handleMoveBack = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
     onMoveBack(item.id);
   }, [onMoveBack, item.id]);
 
-  const handleManualSell = useCallback(() => {
+  const handleManualSell = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
     onManualSell(item);
   }, [onManualSell, item]);
 
+  const hasRoute = routeStatus.jupiter === 'available' || routeStatus.raydium === 'available';
+
   return (
-    <div className="grid grid-cols-[40px_1fr_auto] items-center gap-3 px-3 py-3 border-b border-border/20 hover:bg-secondary/30 transition-colors">
-      {/* Avatar */}
-      <div className={cn(
-        "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs border border-white/5",
-        avatarClass
-      )}>
-        {initials}
-      </div>
-      
-      {/* Token Info */}
-      <div className="min-w-0 space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
-          <span className="text-muted-foreground text-xs">{displaySymbol}</span>
-          {item.isWalletToken ? (
-            <Badge variant="outline" className="bg-blue-500/10 border-blue-500/30 text-blue-400 text-[9px] px-1.5">
-              <Wallet className="w-3 h-3 mr-1" />
-              Wallet
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="bg-warning/10 border-warning/30 text-warning text-[9px] px-1.5">
-              <Clock className="w-3 h-3 mr-1" />
-              Waiting
-            </Badge>
-          )}
+    <div className="border-b border-border/20">
+      <div 
+        className={cn(
+          "grid grid-cols-[40px_1fr_auto] items-center gap-3 px-3 py-3 hover:bg-secondary/30 transition-colors cursor-pointer",
+          expanded && "bg-secondary/20"
+        )}
+        onClick={() => setExpanded(!expanded)}
+      >
+        {/* Avatar */}
+        <div className={cn(
+          "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs border border-white/5",
+          avatarClass
+        )}>
+          {initials}
         </div>
         
-        {item.isWalletToken ? (
+        {/* Token Info */}
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
+            <span className="text-muted-foreground text-xs">{displaySymbol}</span>
+            {item.isWalletToken ? (
+              <Badge variant="outline" className="bg-blue-500/10 border-blue-500/30 text-blue-400 text-[9px] px-1.5">
+                <Wallet className="w-3 h-3 mr-1" />
+                Wallet
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="bg-warning/10 border-warning/30 text-warning text-[9px] px-1.5">
+                <Clock className="w-3 h-3 mr-1" />
+                Waiting
+              </Badge>
+            )}
+            {/* Route status indicator */}
+            {hasRoute && (
+              <Badge variant="outline" className="bg-success/10 border-success/30 text-success text-[9px] px-1.5">
+                <Check className="w-3 h-3 mr-1" />
+                Route
+              </Badge>
+            )}
+          </div>
+          
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>Balance: {item.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
+            <span>Balance: {formatAmount(item.amount)}</span>
             {item.valueUsd !== null && (
               <>
                 <span className="text-muted-foreground/40">•</span>
                 <span className="text-foreground font-medium">{formatValue(item.valueUsd)}</span>
               </>
             )}
+            {!item.isWalletToken && waitingSince && (
+              <>
+                <span className="text-muted-foreground/40">•</span>
+                <span>Waiting {waitingSince}</span>
+              </>
+            )}
           </div>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              {waitingSince && <span>Waiting {waitingSince}</span>}
-              <span className="text-muted-foreground/40">•</span>
-              <span>Checked {item.liquidity_check_count}x</span>
-              <span className="text-muted-foreground/40">•</span>
-              <span>Last: {lastChecked}</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Entry:</span>
-              <span className="font-mono tabular-nums">{formatPrice(item.entry_price)}</span>
-              <span className="text-muted-foreground/40">→</span>
-              <span className="font-mono tabular-nums">{formatPrice(item.current_price)}</span>
-            </div>
-          </>
-        )}
+        </div>
+        
+        {/* Expand indicator */}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-7 px-2 text-xs gap-1",
+              hasRoute 
+                ? "border-success/30 text-success hover:bg-success/10" 
+                : "border-warning/30 text-warning hover:bg-warning/10"
+            )}
+            onClick={handleManualSell}
+          >
+            <Zap className="w-3 h-3" />
+            Exit
+          </Button>
+          {expanded ? (
+            <ChevronUp className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          )}
+        </div>
       </div>
       
-      {/* Actions */}
-      <div className="flex flex-col gap-1.5">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-xs gap-1"
-          onClick={handleManualSell}
-        >
-          <Zap className="w-3 h-3" />
-          Try Sell
-        </Button>
-        {!item.isWalletToken && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs gap-1 text-muted-foreground"
-            onClick={handleMoveBack}
-          >
-            <ArrowLeft className="w-3 h-3" />
-            Move Back
-          </Button>
-        )}
-      </div>
+      {/* Expanded Details */}
+      {expanded && (
+        <div className="px-4 pb-3 pt-1 bg-secondary/20 animate-fade-in">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-background/50 rounded-lg text-xs">
+            <div>
+              <span className="text-muted-foreground block mb-0.5">Token Address</span>
+              <span className="font-mono text-foreground text-[11px]">{shortAddress(item.token_address)}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block mb-0.5">Amount</span>
+              <span className="text-foreground font-semibold">{formatAmount(item.amount)}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block mb-0.5">Value</span>
+              <span className="text-foreground font-semibold">{formatValue(item.valueUsd)}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block mb-0.5">Current Price</span>
+              <span className="text-foreground font-semibold">{formatPrice(item.current_price)}</span>
+            </div>
+            {!item.isWalletToken && (
+              <>
+                <div>
+                  <span className="text-muted-foreground block mb-0.5">Entry Price</span>
+                  <span className="text-foreground font-semibold">{formatPrice(item.entry_price)}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block mb-0.5">Checks</span>
+                  <span className="text-foreground font-semibold">{item.liquidity_check_count}x</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block mb-0.5">Last Check</span>
+                  <span className="text-foreground font-semibold">{lastChecked}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block mb-0.5">P&L</span>
+                  <span className={cn(
+                    "font-semibold",
+                    (item.profit_loss_percent || 0) >= 0 ? 'text-success' : 'text-destructive'
+                  )}>
+                    {item.profit_loss_percent !== null ? `${item.profit_loss_percent >= 0 ? '+' : ''}${item.profit_loss_percent.toFixed(1)}%` : '-'}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+          
+          {/* Swap Route Status */}
+          <div className="mt-2 p-3 bg-background/30 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-muted-foreground text-xs font-medium">Swap Route Availability</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs gap-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCheckRoutes();
+                }}
+                disabled={routeStatus.jupiter === 'checking' || routeStatus.raydium === 'checking'}
+              >
+                {(routeStatus.jupiter === 'checking' || routeStatus.raydium === 'checking') ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3 h-3" />
+                )}
+                Check
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <RouteIndicator status={routeStatus.jupiter} label="Jupiter" />
+              <RouteIndicator status={routeStatus.raydium} label="Raydium" />
+            </div>
+          </div>
+          
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 mt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn(
+                "flex-1 h-8 text-xs gap-1.5",
+                hasRoute 
+                  ? "border-success/30 text-success hover:bg-success/10" 
+                  : "border-warning/30 text-warning hover:bg-warning/10"
+              )}
+              onClick={handleManualSell}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              {hasRoute ? 'Exit Now' : 'Try Exit'}
+            </Button>
+            {!item.isWalletToken && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-3 text-xs gap-1.5 text-muted-foreground"
+                onClick={handleMoveBack}
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Move Back
+              </Button>
+            )}
+            <a 
+              href={`https://solscan.io/token/${item.token_address}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Button>
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -188,7 +391,11 @@ export default function WaitingLiquidityTab({
   onMoveBack,
   onManualSell,
   onRefreshWalletTokens,
+  isTabActive = false,
 }: WaitingLiquidityTabProps) {
+  
+  // Track route status for each token
+  const [routeStatuses, setRouteStatuses] = useState<Record<string, RouteStatus>>({});
   
   // Combine waiting positions and wallet tokens, excluding active positions and duplicates
   const combinedItems = useMemo(() => {
@@ -217,7 +424,7 @@ export default function WaitingLiquidityTab({
         waiting_for_liquidity_since: pos.waiting_for_liquidity_since,
         status: pos.status,
         isWalletToken: false,
-        valueUsd: null,
+        valueUsd: pos.current_price * pos.amount,
       });
     }
     
@@ -262,8 +469,51 @@ export default function WaitingLiquidityTab({
     return items;
   }, [positions, walletTokens, activeTokenAddresses]);
 
+  // Check routes for a specific token
+  const checkRoutesForToken = useCallback(async (tokenAddress: string) => {
+    setRouteStatuses(prev => ({
+      ...prev,
+      [tokenAddress]: { jupiter: 'checking', raydium: 'checking' },
+    }));
+
+    const [jupiterAvailable, raydiumAvailable] = await Promise.all([
+      checkJupiterRoute(tokenAddress),
+      checkRaydiumRoute(tokenAddress),
+    ]);
+
+    setRouteStatuses(prev => ({
+      ...prev,
+      [tokenAddress]: {
+        jupiter: jupiterAvailable ? 'available' : 'unavailable',
+        raydium: raydiumAvailable ? 'available' : 'unavailable',
+      },
+    }));
+  }, []);
+
+  // Auto-refresh wallet tokens when tab becomes active
+  useEffect(() => {
+    if (isTabActive && onRefreshWalletTokens) {
+      onRefreshWalletTokens();
+    }
+  }, [isTabActive, onRefreshWalletTokens]);
+
+  // Auto-check routes for items that don't have status yet
+  useEffect(() => {
+    if (!isTabActive) return;
+    
+    for (const item of combinedItems) {
+      if (!routeStatuses[item.token_address]) {
+        checkRoutesForToken(item.token_address);
+      }
+    }
+  }, [combinedItems, routeStatuses, checkRoutesForToken, isTabActive]);
+
   const waitingCount = positions.filter(p => !activeTokenAddresses.has(p.token_address.toLowerCase())).length;
   const walletCount = combinedItems.filter(i => i.isWalletToken).length;
+
+  const getRouteStatus = useCallback((tokenAddress: string): RouteStatus => {
+    return routeStatuses[tokenAddress] || { jupiter: 'unknown', raydium: 'unknown' };
+  }, [routeStatuses]);
 
   if (combinedItems.length === 0) {
     return (
@@ -354,6 +604,8 @@ export default function WaitingLiquidityTab({
             colorIndex={idx}
             onMoveBack={onMoveBack}
             onManualSell={onManualSell}
+            routeStatus={getRouteStatus(item.token_address)}
+            onCheckRoutes={() => checkRoutesForToken(item.token_address)}
           />
         ))}
       </div>
@@ -361,7 +613,7 @@ export default function WaitingLiquidityTab({
       {/* Info footer */}
       <div className="px-4 py-3 bg-muted/30 border-t border-border/30">
         <p className="text-xs text-muted-foreground">
-          💡 Wallet tokens and positions without swap routes. The bot checks every 30s and auto-sells when a route becomes available.
+          💡 Click a token to expand details. Exit attempts Jupiter first, then Raydium fallback. Auto-checks routes every 30s.
         </p>
       </div>
     </div>
