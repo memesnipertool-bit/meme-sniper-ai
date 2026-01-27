@@ -25,6 +25,7 @@ import { useAutoSniper, TokenData } from "@/hooks/useAutoSniper";
 import { useAutoExit } from "@/hooks/useAutoExit";
 import { useDemoAutoExit } from "@/hooks/useDemoAutoExit";
 import { useLiquidityRetryWorker } from "@/hooks/useLiquidityRetryWorker";
+import { useWalletTokens } from "@/hooks/useWalletTokens";
 import { useWallet } from "@/hooks/useWallet";
 import { useWalletModal } from "@/hooks/useWalletModal";
 import { useTradeExecution, SOL_MINT, type TradeParams, type PriorityLevel } from "@/hooks/useTradeExecution";
@@ -62,6 +63,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     stopRetryWorker: stopLiquidityRetryWorker,
     isRunning: isLiquidityRetryRunning,
   } = useLiquidityRetryWorker();
+  const { tokens: walletTokens, loading: loadingWalletTokens, refetch: refetchWalletTokens } = useWalletTokens({ minValueUsd: 0.01 });
   const { executeTrade, sellPosition } = useTradeExecution();
   const { snipeToken, exitPosition, status: engineStatus, isExecuting: engineExecuting } = useTradingEngine();
   const { wallet, connectPhantom, disconnect, signAndSendTransaction, refreshBalance } = useWallet();
@@ -1755,18 +1757,44 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                 pools={tokens}
                 activeTrades={openPositions}
                 waitingPositions={waitingPositions}
+                walletTokens={walletTokens}
+                loadingWalletTokens={loadingWalletTokens}
                 loading={loading}
                 apiStatus={loading ? 'active' : 'waiting'}
                 onExitTrade={handleOpenExitPreview}
                 onRetryLiquidityCheck={runLiquidityRetryCheck}
                 onMoveBackFromWaiting={moveBackToOpen}
                 onManualSellWaiting={async (pos) => {
-                  const success = await tryExecuteWaitingPosition(pos);
-                  if (success) {
-                    fetchPositions(true);
-                    fetchWaitingPositions();
+                  // Handle both WaitingPosition and CombinedWaitingItem (wallet tokens)
+                  if ('isWalletToken' in pos && pos.isWalletToken) {
+                    // For wallet tokens, we need to create a minimal position object
+                    const walletPos = {
+                      id: pos.id,
+                      token_address: pos.token_address,
+                      token_symbol: pos.token_symbol || pos.token_address.slice(0, 6),
+                      token_name: pos.token_name || `Token ${pos.token_address.slice(0, 6)}`,
+                      amount: pos.amount,
+                      entry_price: pos.current_price,
+                      current_price: pos.current_price,
+                      profit_loss_percent: null,
+                      liquidity_last_checked_at: null,
+                      liquidity_check_count: 0,
+                      waiting_for_liquidity_since: null,
+                      status: 'wallet',
+                    };
+                    const success = await tryExecuteWaitingPosition(walletPos);
+                    if (success) {
+                      refetchWalletTokens();
+                    }
+                  } else {
+                    const success = await tryExecuteWaitingPosition(pos);
+                    if (success) {
+                      fetchPositions(true);
+                      fetchWaitingPositions();
+                    }
                   }
                 }}
+                onRefreshWalletTokens={refetchWalletTokens}
                 checkingLiquidity={checkingLiquidity}
               />
 
