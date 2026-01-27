@@ -567,6 +567,32 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
     return addresses;
   }, [openTrades]);
 
+  // Calculate combined waiting items count (positions + wallet tokens, excluding active and duplicates)
+  const waitingItemsCount = useMemo(() => {
+    const seenAddresses = new Set<string>();
+    let count = 0;
+    
+    // Count waiting positions not in active trades
+    for (const pos of waitingPositions) {
+      const addr = pos.token_address.toLowerCase();
+      if (!activeTokenAddresses.has(addr)) {
+        seenAddresses.add(addr);
+        count++;
+      }
+    }
+    
+    // Count wallet tokens not already counted or in active trades
+    for (const token of (walletTokens || [])) {
+      const addr = token.mint.toLowerCase();
+      if (!seenAddresses.has(addr) && !activeTokenAddresses.has(addr)) {
+        seenAddresses.add(addr);
+        count++;
+      }
+    }
+    
+    return count;
+  }, [waitingPositions, walletTokens, activeTokenAddresses]);
+
   // Memoize total P&L
   const totalPnL = useMemo(() => 
     openTrades.reduce((sum, t) => sum + (t.profit_loss_value || 0), 0),
@@ -656,13 +682,13 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
                   value="waiting" 
                   className={cn(
                     "flex-1 text-xs h-8 gap-1",
-                    waitingPositions.length > 0 
+                    waitingItemsCount > 0 
                       ? "data-[state=active]:bg-warning data-[state=active]:text-warning-foreground"
                       : "data-[state=active]:bg-muted data-[state=active]:text-muted-foreground"
                   )}
                 >
                   <Clock className="w-3 h-3" />
-                  Waiting ({waitingPositions.length})
+                  Waiting ({waitingItemsCount})
                 </TabsTrigger>
               </TabsList>
             </div>
