@@ -336,15 +336,27 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
         const DUST = 1e-6;
         if (remainingBalance !== null && remainingBalance > DUST) {
+          // Update position with remaining balance
           await supabase
             .from('positions')
             .update({ amount: remainingBalance, updated_at: new Date().toISOString() })
             .eq('id', positionId);
 
+          // Calculate how much was sold
+          const soldAmount = tokenAmountToSell - remainingBalance;
+          const soldPercent = tokenAmountToSell > 0 ? ((soldAmount / tokenAmountToSell) * 100).toFixed(1) : '0';
+
           toast({
-            title: 'Partial Sell Detected',
-            description: `Wallet still holds ${remainingBalance.toFixed(6)} ${position.token_symbol}. Position kept open.`,
-            variant: 'destructive',
+            title: 'Partial Exit Completed',
+            description: `Sold ${soldPercent}% (${soldAmount.toFixed(6)} tokens). ${remainingBalance.toFixed(6)} ${position.token_symbol} remaining in wallet.`,
+          });
+
+          addBotLog({
+            level: 'warning',
+            category: 'trade',
+            message: 'Partial sell executed',
+            tokenSymbol: position.token_symbol,
+            details: `Sold ${soldAmount.toFixed(6)}, remaining: ${remainingBalance.toFixed(6)}`,
           });
 
           await fetchPositions(true);
