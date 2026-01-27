@@ -179,6 +179,92 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     return BigInt(`${whole}${frac}`).toString();
   }, []);
 
+  // Raydium swap fallback for when Jupiter has no route
+  const tryRaydiumSwap = useCallback(async (
+    position: { token_address: string; token_symbol?: string | null },
+    tokenAmount: number
+  ): Promise<{ success: boolean; signature?: string; error?: string }> => {
+    if (!wallet.address) {
+      return { success: false, error: 'Wallet not connected' };
+    }
+
+    const SOL_OUTPUT = 'So11111111111111111111111111111111111111112';
+    const RAYDIUM_QUOTE_API = 'https://transaction-v1.raydium.io/compute/swap-base-in';
+    const RAYDIUM_SWAP_API = 'https://transaction-v1.raydium.io/transaction/swap-base-in';
+
+    try {
+      // Get token decimals
+      let decimals = 6;
+      try {
+        const { data: meta } = await supabase.functions.invoke('token-metadata', {
+          body: { mint: position.token_address, owner: wallet.address },
+        });
+        if (meta?.decimals) decimals = meta.decimals;
+      } catch {
+        // Use default
+      }
+
+      const amountInBaseUnits = Math.floor(tokenAmount * Math.pow(10, decimals)).toString();
+
+      // Get Raydium quote
+      const quoteParams = new URLSearchParams({
+        inputMint: position.token_address,
+        outputMint: SOL_OUTPUT,
+        amount: amountInBaseUnits,
+        slippageBps: '1500', // 15% slippage
+        txVersion: 'V0',
+      });
+
+      const quoteRes = await fetch(`${RAYDIUM_QUOTE_API}?${quoteParams}`, {
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!quoteRes.ok) {
+        return { success: false, error: 'Raydium quote failed' };
+      }
+
+      const quoteData = await quoteRes.json();
+      if (!quoteData.success) {
+        return { success: false, error: quoteData.msg || 'No Raydium route' };
+      }
+
+      // Build swap transaction
+      const swapRes = await fetch(RAYDIUM_SWAP_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          swapResponse: quoteData,
+          wallet: wallet.address,
+          txVersion: 'V0',
+          wrapSol: false,
+          unwrapSol: true,
+          computeUnitPriceMicroLamports: '500000',
+        }),
+      });
+
+      if (!swapRes.ok) {
+        return { success: false, error: 'Failed to build Raydium swap' };
+      }
+
+      const swapData = await swapRes.json();
+      if (!swapData.success || !swapData.data?.transaction) {
+        return { success: false, error: swapData.msg || 'Raydium swap build failed' };
+      }
+
+      // Decode and sign
+      const txBytes = Uint8Array.from(atob(swapData.data.transaction), c => c.charCodeAt(0));
+      const { VersionedTransaction } = await import('@solana/web3.js');
+      const transaction = VersionedTransaction.deserialize(txBytes);
+
+      const result = await signAndSendTransaction(transaction);
+      return result.success 
+        ? { success: true, signature: result.signature }
+        : { success: false, error: result.error };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Raydium swap failed' };
+    }
+  }, [wallet.address, signAndSendTransaction]);
+
   // Handler to open the exit preview modal instead of exiting directly
   const handleOpenExitPreview = useCallback((positionId: string, currentPrice: number) => {
     if (isDemo) {
@@ -421,18 +507,95 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       }
 
       const errorMessage = result.error || "Exit failed";
-      const shouldOfferForceClose =
-        errorMessage.includes("don't have this token") ||
-        errorMessage.includes("already been sold") ||
-        errorMessage.includes("REQ_INPUT") ||
+      
+      // Check if this is a "no route" error - indicates liquidity issue
+      const isNoRouteError =
         errorMessage.includes("NO_ROUTE") ||
         errorMessage.toLowerCase().includes("no route") ||
-        errorMessage.toLowerCase().includes("no liquidity");
+        errorMessage.toLowerCase().includes("no liquidity") ||
+        errorMessage.toLowerCase().includes("route not found");
+      
+      // Check if token was already sold externally
+      const isAlreadySoldError =
+        errorMessage.includes("don't have this token") ||
+        errorMessage.includes("already been sold") ||
+        errorMessage.includes("REQ_INPUT");
 
-      if (shouldOfferForceClose) {
+      if (isNoRouteError) {
+        // Jupiter failed with NO_ROUTE - try Raydium as fallback
+        addBotLog({
+          level: 'warning',
+          category: 'exit',
+          message: `Jupiter has no route for ${position.token_symbol}, trying Raydium...`,
+          tokenSymbol: position.token_symbol,
+        });
+
+        try {
+          // Try Raydium swap directly
+          const raydiumResult = await tryRaydiumSwap(position, tokenAmountToSell);
+          
+          if (raydiumResult.success && raydiumResult.signature) {
+            // Raydium swap succeeded!
+            addBotLog({
+              level: 'success',
+              category: 'exit',
+              message: `✅ Sold ${position.token_symbol} via Raydium fallback`,
+              tokenSymbol: position.token_symbol,
+              details: `TX: ${raydiumResult.signature}`,
+            });
+
+            const closed = await markPositionClosed(positionId, safeExitPrice, raydiumResult.signature);
+            if (closed) {
+              toast({
+                title: '💰 Position Closed via Raydium',
+                description: `${position.token_symbol} sold successfully using Raydium fallback`,
+              });
+
+              // Log to trade_history
+              try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                  await supabase.from('trade_history').insert({
+                    user_id: user.id,
+                    token_address: position.token_address,
+                    token_symbol: position.token_symbol,
+                    token_name: position.token_name,
+                    trade_type: 'sell',
+                    amount: tokenAmountToSell,
+                    price_sol: null,
+                    price_usd: safeExitPrice,
+                    status: 'confirmed',
+                    tx_hash: raydiumResult.signature,
+                  });
+                }
+              } catch (historyErr) {
+                console.error('Failed to log Raydium sell to trade_history:', historyErr);
+              }
+            }
+            
+            await fetchPositions(true);
+            refreshBalance();
+            return;
+          }
+        } catch (raydiumErr) {
+          console.log('[Exit] Raydium fallback also failed:', raydiumErr);
+        }
+
+        // Both Jupiter and Raydium failed - show the WAITING_FOR_LIQUIDITY modal
+        addBotLog({
+          level: 'warning',
+          category: 'exit',
+          message: `❌ No swap route available for ${position.token_symbol}`,
+          tokenSymbol: position.token_symbol,
+          details: 'Neither Jupiter nor Raydium can trade this token. Offering to move to Waiting Pool.',
+        });
+
+        setNoRoutePosition(position);
+        setShowNoRouteModal(true);
+      } else if (isAlreadySoldError) {
         showForceCloseToast(
-          "Token Not Found or No Route",
-          "This position may have been sold externally or has no liquidity. Mark it as closed?"
+          "Token Not Found",
+          "This position may have been sold externally. Mark it as closed?"
         );
       } else {
         toast({
@@ -443,18 +606,25 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const shouldOfferForceClose =
-        message.includes("don't have this token") ||
-        message.includes("already been sold") ||
-        message.includes("REQ_INPUT") ||
+      
+      const isNoRouteError =
         message.includes("NO_ROUTE") ||
         message.toLowerCase().includes("no route") ||
         message.toLowerCase().includes("no liquidity");
+      
+      const isAlreadySoldError =
+        message.includes("don't have this token") ||
+        message.includes("already been sold") ||
+        message.includes("REQ_INPUT");
 
-      if (shouldOfferForceClose) {
+      if (isNoRouteError) {
+        // Show the waiting for liquidity modal
+        setNoRoutePosition(position);
+        setShowNoRouteModal(true);
+      } else if (isAlreadySoldError) {
         showForceCloseToast(
-          "Token Not Found or No Route",
-          "This position may have been sold externally or has no liquidity. Mark it as closed?"
+          "Token Not Found",
+          "This position may have been sold externally. Mark it as closed?"
         );
       } else {
         toast({
@@ -473,6 +643,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     refreshBalance,
     markPositionClosed,
     toast,
+    tryRaydiumSwap,
   ]);
 
   // Calculate stats based on mode
