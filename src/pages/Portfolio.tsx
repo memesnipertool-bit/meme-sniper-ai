@@ -243,6 +243,7 @@ function Portfolio() {
     
     return {
       openValue,
+      openEntryValue, // Added for Invested card
       openPnL,
       closedPnL,
       totalPnL,
@@ -299,7 +300,19 @@ function Portfolio() {
         </div>
 
         {/* Stats Overview - Comprehensive Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+          {/* Invested Card - Total Entry Value */}
+          <Card className="bg-gradient-to-br from-blue-500/10 to-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <DollarSign className="w-4 h-4 text-blue-500" />
+                <span className="text-xs text-muted-foreground">Invested</span>
+              </div>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue).secondary}</p>
+            </CardContent>
+          </Card>
+
           <Card className="bg-gradient-to-br from-card to-card/80">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
