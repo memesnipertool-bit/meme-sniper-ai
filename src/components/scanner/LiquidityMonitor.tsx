@@ -631,7 +631,13 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
       
       {isExpanded && (
         <CardContent className="p-0">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={(val) => {
+            setActiveTab(val);
+            // Trigger wallet refresh when switching to waiting tab
+            if (val === 'waiting' && onRefreshWalletTokens) {
+              onRefreshWalletTokens();
+            }
+          }}>
             <div className="px-4 pb-2">
               <TabsList className="w-full bg-secondary/60 h-9">
                 <TabsTrigger 
@@ -779,6 +785,7 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
                 onMoveBack={onMoveBackFromWaiting || (() => {})}
                 onManualSell={onManualSellWaiting || (() => {})}
                 onRefreshWalletTokens={onRefreshWalletTokens}
+                isTabActive={activeTab === 'waiting'}
               />
             </TabsContent>
           </Tabs>
