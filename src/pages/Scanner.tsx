@@ -39,7 +39,7 @@ import { useSolPrice } from "@/hooks/useSolPrice";
 import { reconcilePositionsWithPools } from "@/lib/positionMetadataReconciler";
 import { fetchDexScreenerTokenMetadata } from "@/lib/dexscreener";
 import { isPlaceholderText } from "@/lib/formatters";
-import { Wallet, TrendingUp, Zap, Activity, AlertTriangle, X, FlaskConical, Coins, RotateCcw } from "lucide-react";
+import { Wallet, TrendingUp, Zap, Activity, AlertTriangle, X, FlaskConical, Coins, RotateCcw, DollarSign } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ToastAction } from "@/components/ui/toast";
@@ -477,13 +477,20 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     return realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value || 0), 0);
   }, [isDemo, demoTotalPnL, realOpenPositions]);
   
+  // Calculate total invested (entry value) for active positions
+  const totalInvested = useMemo(() => {
+    if (isDemo) {
+      return openDemoPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
+    }
+    return realOpenPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
+  }, [isDemo, openDemoPositions, realOpenPositions]);
+  
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {
       return demoTotalPnLPercent;
     }
-    const entryTotal = realOpenPositions.reduce((sum, p) => sum + p.entry_value, 0);
-    return entryTotal > 0 ? (totalPnL / entryTotal) * 100 : 0;
-  }, [isDemo, demoTotalPnLPercent, realOpenPositions, totalPnL]);
+    return totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+  }, [isDemo, demoTotalPnLPercent, totalInvested, totalPnL]);
 
   // Resume monitors when navigating back to Scanner with bot still active
   // CRITICAL: Also start auto-exit when there are open positions in live mode
@@ -1516,10 +1523,17 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             </Alert>
           )}
 
-          {/* Stats Row - Mobile optimized with 2x2 grid */}
-          <div className="grid grid-cols-2 gap-2 md:gap-4 lg:grid-cols-4">
+          {/* Stats Row - Mobile optimized with 2x3 grid, 5 cols on desktop */}
+          <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
             <StatsCard
-              title={isDemo ? "Demo Balance" : "Portfolio"}
+              title="Invested"
+              value={`$${totalInvested.toFixed(2)}`}
+              change={`${openPositions.length} active`}
+              changeType="neutral"
+              icon={DollarSign}
+            />
+            <StatsCard
+              title={isDemo ? "Open Value" : "Open Value"}
               value={isDemo ? `${demoBalance.toFixed(0)} SOL` : `$${totalValue.toFixed(2)}`}
               change={`${totalPnLPercent >= 0 ? '+' : ''}${totalPnLPercent.toFixed(1)}%`}
               changeType={totalPnLPercent >= 0 ? 'positive' : 'negative'}
