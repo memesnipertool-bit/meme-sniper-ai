@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { validateAutoExitInput } from "../_shared/validation.ts";
+import { fetchJupiterQuoteWithRetry } from "../_shared/jupiter-retry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -291,36 +292,28 @@ async function executeJupiterSell(
 
     const amountInSmallestUnit = toBaseUnits(tokenAmountUi, decimals);
     
-    // Use lite-api.jup.ag which is the recommended public endpoint
-    // See: https://station.jup.ag/docs/apis/price-api
-    const quoteUrl = `https://lite-api.jup.ag/v6/quote?inputMint=${position.token_address}&outputMint=${SOL_MINT}&amount=${amountInSmallestUnit}&slippageBps=1500`;
-    
-    console.log(`[AutoExit] Fetching Jupiter quote...`);
-    const quoteResponse = await fetch(quoteUrl, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
+    // Use retry-enabled Jupiter quote fetcher for rate limit resilience
+    console.log(`[AutoExit] Fetching Jupiter quote with retry...`);
+    const quoteResult = await fetchJupiterQuoteWithRetry({
+      inputMint: position.token_address,
+      outputMint: SOL_MINT,
+      amount: amountInSmallestUnit,
+      slippageBps: 1500,
     });
     
-    if (!quoteResponse.ok) {
-      const errorText = await quoteResponse.text();
-      console.error(`[AutoExit] Jupiter quote failed:`, quoteResponse.status, errorText);
+    if (quoteResult.ok === false) {
+      console.error(`[AutoExit] Jupiter quote failed:`, quoteResult.kind, quoteResult.message);
       
-      // If 400/404 = token not indexed or no route
-      if (quoteResponse.status === 400 || quoteResponse.status === 404) {
+      if (quoteResult.kind === 'NO_ROUTE') {
         return { success: false, error: 'No Jupiter route available - token may not be indexed or has no liquidity' };
       }
-      return { success: false, error: `Jupiter quote failed: ${quoteResponse.status}` };
+      if (quoteResult.kind === 'RATE_LIMITED') {
+        return { success: false, error: 'Jupiter rate limited - will retry on next cycle' };
+      }
+      return { success: false, error: quoteResult.message || 'Jupiter quote failed' };
     }
     
-    const quoteData = await quoteResponse.json();
-    
-    if (!quoteData || quoteData.error) {
-      console.error(`[AutoExit] Jupiter quote error:`, quoteData?.error || 'No route');
-      return { success: false, error: quoteData?.error || 'No route available for sell' };
-    }
-    
+    const quoteData = quoteResult.quote;
     console.log(`[AutoExit] Jupiter quote received - Output: ${quoteData.outAmount} lamports`);
     
     // Return quote data for building transaction

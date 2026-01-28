@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { validateAutoSniperInput, type TokenData as ValidatedTokenData } from "../_shared/validation.ts";
+import { fetchJupiterQuoteWithRetry } from "../_shared/jupiter-retry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -337,26 +338,27 @@ async function checkTradeRoute(token: TokenData): Promise<{ passed: boolean; rea
   
   // Check both in parallel
   const routeChecks = await Promise.allSettled([
-    // Jupiter check
+    // Jupiter check with retry logic
     (async () => {
-      const jupiterParams = new URLSearchParams({
+      const quoteResult = await fetchJupiterQuoteWithRetry({
         inputMint: SOL_MINT,
         outputMint: token.address,
         amount: testAmount,
-        slippageBps: "500",
-        swapMode: "ExactIn",
+        slippageBps: 500,
+        timeoutMs: 8000,
       });
 
-      const response = await fetch(`${JUPITER_QUOTE_API}?${jupiterParams}`, {
-        signal: AbortSignal.timeout(8000),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (!data.error && data.outAmount) {
-          return { source: 'jupiter', outputAmount: data.outAmount, networkError: false };
-        }
+      if (quoteResult.ok === true && quoteResult.quote.outAmount) {
+        return { source: 'jupiter', outputAmount: quoteResult.quote.outAmount, networkError: false };
       }
+      
+      // Handle rate limit as network error so it can fallback
+      if (quoteResult.ok === false && quoteResult.kind === 'RATE_LIMITED') {
+        const err = new Error('Jupiter rate limited');
+        (err as any).isNetworkError = true;
+        throw err;
+      }
+      
       throw new Error('No Jupiter route');
     })(),
     

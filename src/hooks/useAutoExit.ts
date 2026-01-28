@@ -4,6 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWallet } from '@/hooks/useWallet';
 import { addBotLog } from '@/components/scanner/BotActivityLog';
+import { fetchJupiterQuote } from '@/lib/jupiterQuote';
 
 export interface ExitResult {
   positionId: string;
@@ -106,30 +107,41 @@ export function useAutoExit() {
 
       const amountInSmallestUnit = toBaseUnits(tokenAmountToSell, tokenDecimals);
       
-      // Get Jupiter quote - using lite-api endpoint (public, no auth required)
+      // Get Jupiter quote with automatic retry on rate limits
       // Exit slippage is intentionally higher (15%) to ensure positions can close
-      const EXIT_SLIPPAGE_BPS = '1500'; // 15% - higher for exits to ensure execution
-      const quoteUrl = `https://lite-api.jup.ag/v6/quote?inputMint=${position.token_address}&outputMint=${SOL_MINT}&amount=${amountInSmallestUnit}&slippageBps=${EXIT_SLIPPAGE_BPS}`;
+      const EXIT_SLIPPAGE_BPS = 1500; // 15% - higher for exits to ensure execution
+      
+      const quoteResult = await fetchJupiterQuote({
+        inputMint: position.token_address,
+        outputMint: SOL_MINT,
+        amount: amountInSmallestUnit,
+        slippageBps: EXIT_SLIPPAGE_BPS,
+      });
 
-      const quoteRes = await fetch(quoteUrl);
-      if (!quoteRes.ok) {
-        toast({
-          title: 'Exit Failed',
-          description: 'Could not get Jupiter quote for sell',
-          variant: 'destructive',
-        });
+      if (quoteResult.ok === false) {
+        if (quoteResult.kind === 'NO_ROUTE') {
+          toast({
+            title: 'No Route Available',
+            description: `Cannot sell ${result.symbol} - no Jupiter route`,
+            variant: 'destructive',
+          });
+        } else if (quoteResult.kind === 'RATE_LIMITED') {
+          toast({
+            title: 'Rate Limited',
+            description: 'Jupiter API is busy. Auto-retry in next cycle.',
+            variant: 'destructive',
+          });
+        } else {
+          toast({
+            title: 'Exit Failed',
+            description: quoteResult.message || 'Could not get Jupiter quote for sell',
+            variant: 'destructive',
+          });
+        }
         return false;
       }
 
-      const quote = await quoteRes.json();
-      if (!quote || quote.error) {
-        toast({
-          title: 'No Route Available',
-          description: `Cannot sell ${result.symbol} - no Jupiter route`,
-          variant: 'destructive',
-        });
-        return false;
-      }
+      const quote = quoteResult.quote;
 
       // Build swap transaction
       const swapRes = await fetch('https://lite-api.jup.ag/swap/v1/swap', {
