@@ -15,6 +15,8 @@ export type JupiterQuoteFetchResult =
     };
 
 const DEFAULT_TIMEOUT_MS = 15000;
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
 
 // Prefer the main quote API, fallback to lite quote.
 // Both return a quote object compatible with /swap/v1/swap.
@@ -23,6 +25,16 @@ const QUOTE_ENDPOINTS = [
   'https://lite-api.jup.ag/swap/v1/quote',
 ];
 
+/**
+ * Sleep helper for retry backoff
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch Jupiter quote with automatic retry and exponential backoff for rate limits
+ */
 export async function fetchJupiterQuote(params: {
   inputMint: string;
   outputMint: string;
@@ -39,6 +51,66 @@ export async function fetchJupiterQuote(params: {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     extra,
   } = params;
+
+  let lastError: JupiterQuoteFetchResult | null = null;
+
+  // Retry loop with exponential backoff
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      console.log(`[Jupiter] Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await sleep(delay);
+    }
+
+    const result = await attemptQuoteFetch({
+      inputMint,
+      outputMint,
+      amount,
+      slippageBps,
+      timeoutMs,
+      extra,
+    });
+
+    // Success - return immediately
+    if (result.ok === true) {
+      return result;
+    }
+
+    // Non-retryable error (NO_ROUTE) - return immediately
+    if (result.kind === 'NO_ROUTE') {
+      return result;
+    }
+
+    // Rate limited or network error - store and retry
+    lastError = result;
+    
+    // Only retry on rate limit
+    if (result.kind !== 'RATE_LIMITED') {
+      return result;
+    }
+  }
+
+  // All retries exhausted
+  return lastError || {
+    ok: false,
+    kind: 'RATE_LIMITED',
+    message: 'Jupiter rate limited after all retries. Please wait a moment and try again.',
+  };
+}
+
+/**
+ * Single attempt to fetch quote from all endpoints
+ */
+async function attemptQuoteFetch(params: {
+  inputMint: string;
+  outputMint: string;
+  amount: string;
+  slippageBps: number;
+  timeoutMs: number;
+  extra?: Record<string, string>;
+}): Promise<JupiterQuoteFetchResult> {
+  const { inputMint, outputMint, amount, slippageBps, timeoutMs, extra } = params;
 
   let sawRateLimit = false;
   let lastNetworkError: unknown = null;
@@ -103,7 +175,7 @@ export async function fetchJupiterQuote(params: {
     return {
       ok: false,
       kind: 'RATE_LIMITED',
-      message: 'Jupiter rate limited. Please try again shortly.',
+      message: 'Jupiter rate limited. Retrying...',
     };
   }
 
