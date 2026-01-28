@@ -26,6 +26,7 @@ interface Position {
   entry_price: number;
   entry_value?: number;
   current_price: number;
+  current_value?: number;
   profit_loss_percent: number | null;
   profit_loss_value: number | null;
   profit_take_percent?: number;
@@ -76,11 +77,18 @@ const PositionRow = memo(({
   const isPositive = pnlPercent >= 0;
   const progressWidth = Math.min(Math.abs(pnlPercent), 100);
 
-  // CRITICAL: Calculate ACTUAL current USD value (amount × current_price) like Phantom shows
-  const currentUsdValue = position.amount * position.current_price;
-  const entryUsdValue = position.amount * position.entry_price;
-  // P&L in USD = current value - entry value
-  const pnlUsdValue = currentUsdValue - entryUsdValue;
+  // CRITICAL: Use current_value from DB directly (it's already correct)
+  // Fall back to entry_value based calculation if current_value not available
+  const currentUsdValue = position.current_value || (
+    position.entry_value && position.entry_value > 0 && position.current_price > 0
+      ? (position.entry_value / position.entry_price) * position.current_price
+      : position.amount * position.current_price
+  );
+  
+  // Calculate actual token amount from current_value or entry_value
+  const actualTokenAmount = position.current_price > 0 
+    ? currentUsdValue / position.current_price 
+    : position.amount;
 
   // Use actual token name/symbol, fallback to formatted address
   const displaySymbol = getTokenDisplaySymbol(position.token_symbol, position.token_address || '');
@@ -112,9 +120,9 @@ const PositionRow = memo(({
               <span className="font-semibold text-sm text-foreground truncate">{displayName}</span>
               <span className="text-xs text-muted-foreground">{displaySymbol}</span>
             </div>
-            {/* Token quantity like Phantom shows */}
+            {/* Token quantity + current market price */}
             <p className="text-xs text-muted-foreground tabular-nums">
-              {formatTokenAmount(position.amount)} {displaySymbol}
+              {formatTokenAmount(actualTokenAmount)} {displaySymbol} • Now: {formatPrice(position.current_price)}
             </p>
           </div>
         </div>
@@ -128,17 +136,18 @@ const PositionRow = memo(({
                 <div className="font-bold text-sm tabular-nums text-foreground">
                   ${currentUsdValue >= 1000 ? currentUsdValue.toFixed(0) : currentUsdValue >= 1 ? currentUsdValue.toFixed(2) : currentUsdValue.toFixed(4)}
                 </div>
-                {/* P&L change below */}
+                {/* Simple P&L percentage */}
                 <p className={cn(
                   "text-xs tabular-nums font-medium transition-all duration-300",
                   isPositive ? 'text-success' : 'text-destructive'
                 )}>
-                  {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}% ({isPositive ? '+' : ''}${Math.abs(pnlUsdValue) < 0.01 ? '<0.01' : pnlUsdValue.toFixed(2)})
+                  {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}%
                 </p>
               </div>
             </TooltipTrigger>
             <TooltipContent side="left" className="bg-popover border-border text-xs">
               <div className="space-y-1">
+                <p className="tabular-nums">Tokens: {formatTokenAmount(actualTokenAmount)} {displaySymbol}</p>
                 <p className="tabular-nums">Entry: {formatPrice(position.entry_price)}</p>
                 <p className="tabular-nums">Current: {formatPrice(position.current_price)}</p>
                 <p className="tabular-nums">Value: ${currentUsdValue.toFixed(2)}</p>
@@ -231,6 +240,7 @@ const PositionRow = memo(({
   return (
     prevProps.position.id === nextProps.position.id &&
     prevProps.position.current_price === nextProps.position.current_price &&
+    prevProps.position.current_value === nextProps.position.current_value &&
     prevProps.position.profit_loss_percent === nextProps.position.profit_loss_percent &&
     prevProps.position.profit_loss_value === nextProps.position.profit_loss_value &&
     prevProps.position.token_name === nextProps.position.token_name &&
