@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState, useEffect } from "react";
+import { memo, useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Clock, RefreshCw, ArrowLeft, Zap, Wallet, ChevronDown, ChevronUp, ExternalLink, Check, X, AlertCircle } from "lucide-react";
@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import type { WaitingPosition } from "@/hooks/useLiquidityRetryWorker";
 import type { WalletToken } from "@/hooks/useWalletTokens";
+import { fetchDexScreenerTokenMetadata, isPlaceholderTokenText } from "@/lib/dexscreener";
 
 export interface CombinedWaitingItem {
   id: string;
@@ -152,9 +153,19 @@ const WaitingPositionRow = memo(({
 }) => {
   const [expanded, setExpanded] = useState(false);
   
-  const displaySymbol = item.token_symbol || shortAddress(item.token_address);
-  const displayName = item.token_name || `Token ${shortAddress(item.token_address)}`;
-  const initials = displaySymbol.slice(0, 2).toUpperCase();
+  // Better display logic - prioritize actual names over placeholders
+  const hasRealSymbol = item.token_symbol && 
+                        !item.token_symbol.includes('...') && 
+                        !isPlaceholderTokenText(item.token_symbol);
+  const hasRealName = item.token_name && 
+                      !item.token_name.startsWith('Token ') && 
+                      !isPlaceholderTokenText(item.token_name);
+  
+  const displaySymbol = hasRealSymbol ? item.token_symbol! : shortAddress(item.token_address);
+  const displayName = hasRealName ? item.token_name! : (hasRealSymbol ? item.token_symbol! : shortAddress(item.token_address));
+  const initials = hasRealSymbol 
+    ? item.token_symbol!.slice(0, 2).toUpperCase() 
+    : item.token_address.slice(0, 2).toUpperCase();
   const avatarClass = avatarColors[colorIndex % avatarColors.length];
 
   const waitingSince = item.waiting_for_liquidity_since 
@@ -196,23 +207,28 @@ const WaitingPositionRow = memo(({
         
         {/* Token Info */}
         <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
-            <span className="text-muted-foreground text-xs">{displaySymbol}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-foreground text-sm truncate max-w-[180px]">{displayName}</span>
+            {hasRealSymbol && displayName !== displaySymbol && (
+              <span className="text-muted-foreground text-xs">${displaySymbol}</span>
+            )}
+            {!hasRealSymbol && (
+              <span className="text-muted-foreground text-xs font-mono">{shortAddress(item.token_address)}</span>
+            )}
             {item.isWalletToken ? (
-              <Badge variant="outline" className="bg-blue-500/10 border-blue-500/30 text-blue-400 text-[9px] px-1.5">
+              <Badge variant="outline" className="bg-blue-500/10 border-blue-500/30 text-blue-400 text-[9px] px-1.5 shrink-0">
                 <Wallet className="w-3 h-3 mr-1" />
                 Wallet
               </Badge>
             ) : (
-              <Badge variant="outline" className="bg-warning/10 border-warning/30 text-warning text-[9px] px-1.5">
+              <Badge variant="outline" className="bg-warning/10 border-warning/30 text-warning text-[9px] px-1.5 shrink-0">
                 <Clock className="w-3 h-3 mr-1" />
                 Waiting
               </Badge>
             )}
             {/* Route status indicator */}
             {hasRoute && (
-              <Badge variant="outline" className="bg-success/10 border-success/30 text-success text-[9px] px-1.5">
+              <Badge variant="outline" className="bg-success/10 border-success/30 text-success text-[9px] px-1.5 shrink-0">
                 <Check className="w-3 h-3 mr-1" />
                 Route
               </Badge>
@@ -220,8 +236,14 @@ const WaitingPositionRow = memo(({
           </div>
           
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>Balance: {formatAmount(item.amount)}</span>
-            {item.valueUsd !== null && (
+            <span>{formatAmount(item.amount)} tokens</span>
+            {item.current_price > 0 && (
+              <>
+                <span className="text-muted-foreground/40">•</span>
+                <span>{formatPrice(item.current_price)}</span>
+              </>
+            )}
+            {item.valueUsd !== null && item.valueUsd > 0 && (
               <>
                 <span className="text-muted-foreground/40">•</span>
                 <span className="text-foreground font-medium">{formatValue(item.valueUsd)}</span>
@@ -230,7 +252,7 @@ const WaitingPositionRow = memo(({
             {!item.isWalletToken && waitingSince && (
               <>
                 <span className="text-muted-foreground/40">•</span>
-                <span>Waiting {waitingSince}</span>
+                <span className="text-warning/70">Waiting {waitingSince}</span>
               </>
             )}
           </div>
@@ -377,6 +399,18 @@ const WaitingPositionRow = memo(({
       )}
     </div>
   );
+}, (prevProps, nextProps) => {
+  // Custom comparison - ensure re-render when token metadata changes
+  if (prevProps.item.id !== nextProps.item.id) return false;
+  if (prevProps.item.token_name !== nextProps.item.token_name) return false;
+  if (prevProps.item.token_symbol !== nextProps.item.token_symbol) return false;
+  if (prevProps.item.amount !== nextProps.item.amount) return false;
+  if (prevProps.item.current_price !== nextProps.item.current_price) return false;
+  if (prevProps.item.valueUsd !== nextProps.item.valueUsd) return false;
+  if (prevProps.routeStatus.jupiter !== nextProps.routeStatus.jupiter) return false;
+  if (prevProps.routeStatus.raydium !== nextProps.routeStatus.raydium) return false;
+  if (prevProps.colorIndex !== nextProps.colorIndex) return false;
+  return true;
 });
 
 WaitingPositionRow.displayName = 'WaitingPositionRow';
@@ -397,6 +431,10 @@ export default function WaitingLiquidityTab({
   // Track route status for each token
   const [routeStatuses, setRouteStatuses] = useState<Record<string, RouteStatus>>({});
   
+  // Track enriched metadata for tokens
+  const [enrichedMetadata, setEnrichedMetadata] = useState<Record<string, { name: string; symbol: string }>>({});
+  const enrichmentInProgressRef = useRef<Set<string>>(new Set());
+  
   // Combine waiting positions and wallet tokens, excluding active positions and duplicates
   const combinedItems = useMemo(() => {
     const items: CombinedWaitingItem[] = [];
@@ -410,11 +448,15 @@ export default function WaitingLiquidityTab({
       if (activeTokenAddresses.has(addr)) continue;
       
       seenAddresses.add(addr);
+      
+      // Use enriched metadata if available
+      const enriched = enrichedMetadata[pos.token_address];
+      
       items.push({
         id: pos.id,
         token_address: pos.token_address,
-        token_symbol: pos.token_symbol,
-        token_name: pos.token_name,
+        token_symbol: enriched?.symbol || pos.token_symbol,
+        token_name: enriched?.name || pos.token_name,
         amount: pos.amount,
         entry_price: pos.entry_price,
         current_price: pos.current_price,
@@ -437,11 +479,15 @@ export default function WaitingLiquidityTab({
       if (activeTokenAddresses.has(addr)) continue;
       
       seenAddresses.add(addr);
+      
+      // Use enriched metadata if available
+      const enriched = enrichedMetadata[token.mint];
+      
       items.push({
         id: `wallet-${token.mint}`,
         token_address: token.mint,
-        token_symbol: token.symbol,
-        token_name: token.name,
+        token_symbol: enriched?.symbol || token.symbol,
+        token_name: enriched?.name || token.name,
         amount: token.balance,
         entry_price: token.priceUsd || 0,
         current_price: token.priceUsd || 0,
@@ -467,7 +513,64 @@ export default function WaitingLiquidityTab({
     });
     
     return items;
-  }, [positions, walletTokens, activeTokenAddresses]);
+  }, [positions, walletTokens, activeTokenAddresses, enrichedMetadata]);
+  
+  // Enrich metadata for tokens with placeholder names
+  useEffect(() => {
+    if (!isTabActive) return;
+    
+    // Find tokens that need metadata enrichment
+    const needsEnrichment: string[] = [];
+    
+    for (const item of combinedItems) {
+      const addr = item.token_address;
+      // Skip if already enriched or enrichment in progress
+      if (enrichedMetadata[addr]) continue;
+      if (enrichmentInProgressRef.current.has(addr)) continue;
+      
+      // Check if name/symbol are placeholders
+      const needsName = isPlaceholderTokenText(item.token_name) || 
+                        (item.token_name?.startsWith('Token ') ?? true);
+      const needsSymbol = isPlaceholderTokenText(item.token_symbol) ||
+                          (item.token_symbol?.includes('...') ?? true);
+      
+      if (needsName || needsSymbol) {
+        needsEnrichment.push(addr);
+        enrichmentInProgressRef.current.add(addr);
+      }
+    }
+    
+    if (needsEnrichment.length === 0) return;
+    
+    // Fetch metadata from DexScreener
+    fetchDexScreenerTokenMetadata(needsEnrichment)
+      .then((metaMap) => {
+        const updates: Record<string, { name: string; symbol: string }> = {};
+        
+        for (const [addr, meta] of metaMap.entries()) {
+          if (meta.name && meta.symbol) {
+            updates[addr] = { name: meta.name, symbol: meta.symbol };
+          }
+          enrichmentInProgressRef.current.delete(addr);
+        }
+        
+        // Also clear addresses that weren't found
+        for (const addr of needsEnrichment) {
+          enrichmentInProgressRef.current.delete(addr);
+        }
+        
+        if (Object.keys(updates).length > 0) {
+          setEnrichedMetadata(prev => ({ ...prev, ...updates }));
+        }
+      })
+      .catch((err) => {
+        console.error('[WaitingLiquidityTab] Metadata enrichment error:', err);
+        // Clear in-progress state
+        for (const addr of needsEnrichment) {
+          enrichmentInProgressRef.current.delete(addr);
+        }
+      });
+  }, [combinedItems, isTabActive, enrichedMetadata]);
 
   // Check routes for a specific token
   const checkRoutesForToken = useCallback(async (tokenAddress: string) => {
