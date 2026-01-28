@@ -129,6 +129,7 @@ export function usePositions() {
       hasLoadedOnceRef.current = true;
 
       // Enrich missing/placeholder token metadata (prevents the UI from showing UNKNOWN everywhere)
+      // CRITICAL: Also persist enriched metadata back to database for consistency across tabs
       const addressesToFetch = Array.from(
         new Set(
           rawPositions
@@ -148,17 +149,51 @@ export function usePositions() {
         }
 
         if (metaMap.size > 0) {
+          // Track positions that need DB update
+          const positionsToUpdate: { id: string; symbol: string; name: string }[] = [];
+          
           setPositions((prev) =>
             prev.map((p) => {
               const meta = tokenMetaCacheRef.current.get(p.token_address);
               if (!meta) return p;
+              
+              const needsSymbol = isPlaceholderText(p.token_symbol);
+              const needsName = isPlaceholderText(p.token_name);
+              
+              if (needsSymbol || needsName) {
+                // Track for database persistence
+                positionsToUpdate.push({
+                  id: p.id,
+                  symbol: needsSymbol ? meta.symbol : (p.token_symbol || meta.symbol),
+                  name: needsName ? meta.name : (p.token_name || meta.name),
+                });
+              }
+              
               return {
                 ...p,
-                token_symbol: isPlaceholderText(p.token_symbol) ? meta.symbol : p.token_symbol,
-                token_name: isPlaceholderText(p.token_name) ? meta.name : p.token_name,
+                token_symbol: needsSymbol ? meta.symbol : p.token_symbol,
+                token_name: needsName ? meta.name : p.token_name,
               };
             })
           );
+          
+          // CRITICAL: Persist enriched metadata to database (fire and forget)
+          // This ensures all tabs show consistent token names
+          if (positionsToUpdate.length > 0) {
+            console.log(`[Positions] Persisting metadata for ${positionsToUpdate.length} positions`);
+            Promise.all(
+              positionsToUpdate.map(async ({ id, symbol, name }) => {
+                try {
+                  await supabase
+                    .from('positions')
+                    .update({ token_symbol: symbol, token_name: name })
+                    .eq('id', id);
+                } catch (err) {
+                  console.warn(`[Positions] Failed to persist metadata for ${id}:`, err);
+                }
+              })
+            ).catch((err) => console.warn('[Positions] Batch metadata persist error:', err));
+          }
         }
       }
     } catch (error: unknown) {

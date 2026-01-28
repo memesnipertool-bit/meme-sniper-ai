@@ -933,14 +933,93 @@ Deno.serve(async (req) => {
         const outputAmountDecimal = outputAmountLamports / Math.pow(10, outputDecimals);
         const entryPrice = inputAmountDecimal / outputAmountDecimal;
 
+        // CRITICAL: Fetch token metadata from DexScreener if not provided
+        // This ensures proper token names are stored in the database for all tabs
+        let finalTokenSymbol = body.tokenSymbol;
+        let finalTokenName = body.tokenName;
+        
+        // Check if provided values are placeholders or missing
+        const isPlaceholderSymbol = !finalTokenSymbol || 
+          /^(unknown|token|\?\?\?|n\/a)$/i.test(finalTokenSymbol.trim()) ||
+          /^[a-z0-9]{4}[….\-_][a-z0-9]{4}$/i.test(finalTokenSymbol.trim());
+        const isPlaceholderName = !finalTokenName ||
+          /^(unknown|token|\?\?\?|n\/a)/i.test(finalTokenName.trim()) ||
+          /^token\s+[a-z0-9]{4}/i.test(finalTokenName.trim());
+        
+        if ((isPlaceholderSymbol || isPlaceholderName) && body.outputMint) {
+          try {
+            console.log(`[Trade] Fetching metadata for token ${body.outputMint.slice(0, 8)}...`);
+            
+            // Try DexScreener first (most comprehensive)
+            const dexRes = await fetch(
+              `https://api.dexscreener.com/latest/dex/tokens/${body.outputMint}`,
+              { signal: AbortSignal.timeout(4000) }
+            );
+            
+            if (dexRes.ok) {
+              const dexData = await dexRes.json();
+              const pairs = dexData?.pairs || [];
+              // Find highest liquidity Solana pair
+              const bestPair = pairs
+                .filter((p: any) => p?.chainId === 'solana')
+                .sort((a: any, b: any) => (b?.liquidity?.usd || 0) - (a?.liquidity?.usd || 0))[0];
+              
+              if (bestPair?.baseToken) {
+                const symbol = String(bestPair.baseToken.symbol || '').trim();
+                const name = String(bestPair.baseToken.name || '').trim();
+                if (symbol && isPlaceholderSymbol) {
+                  finalTokenSymbol = symbol;
+                  console.log(`[Trade] Enriched symbol: ${symbol}`);
+                }
+                if (name && isPlaceholderName) {
+                  finalTokenName = name;
+                  console.log(`[Trade] Enriched name: ${name}`);
+                }
+              }
+            }
+            
+            // Fallback: Try Jupiter token list
+            if (isPlaceholderSymbol || isPlaceholderName) {
+              const jupRes = await fetch(
+                `https://lite-api.jup.ag/tokens/v1/${body.outputMint}`,
+                { signal: AbortSignal.timeout(3000) }
+              );
+              if (jupRes.ok) {
+                const jupData = await jupRes.json();
+                const symbol = String(jupData?.symbol || '').trim();
+                const name = String(jupData?.name || '').trim();
+                if (symbol && isPlaceholderSymbol && !finalTokenSymbol) {
+                  finalTokenSymbol = symbol;
+                  console.log(`[Trade] Jupiter enriched symbol: ${symbol}`);
+                }
+                if (name && isPlaceholderName && !finalTokenName) {
+                  finalTokenName = name;
+                  console.log(`[Trade] Jupiter enriched name: ${name}`);
+                }
+              }
+            }
+          } catch (metaError) {
+            console.log(`[Trade] Metadata enrichment failed (non-blocking): ${metaError}`);
+          }
+        }
+        
+        // Final fallback to short address format
+        if (!finalTokenSymbol || isPlaceholderSymbol) {
+          finalTokenSymbol = body.outputMint ? `${body.outputMint.slice(0, 4)}…${body.outputMint.slice(-4)}` : "TOKEN";
+        }
+        if (!finalTokenName || isPlaceholderName) {
+          finalTokenName = finalTokenSymbol !== body.outputMint?.slice(0, 4) 
+            ? finalTokenSymbol  // Use symbol as name if we have a real symbol
+            : (body.outputMint ? `Token ${body.outputMint.slice(0, 4)}…${body.outputMint.slice(-4)}` : "New Token");
+        }
+
         const { data: position, error: posError } = await supabase
           .from("positions")
           .insert({
             user_id: user.id,
             token_address: body.outputMint,
-            // Use short address format as fallback instead of "UNKNOWN"
-            token_symbol: body.tokenSymbol || (body.outputMint ? `${body.outputMint.slice(0, 4)}…${body.outputMint.slice(-4)}` : "TOKEN"),
-            token_name: body.tokenName || (body.outputMint ? `Token ${body.outputMint.slice(0, 4)}…${body.outputMint.slice(-4)}` : "New Token"),
+            token_symbol: finalTokenSymbol,
+            token_name: finalTokenName,
             chain: "solana",
             entry_price: entryPrice,
             current_price: entryPrice,
