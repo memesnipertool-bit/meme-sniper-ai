@@ -42,9 +42,19 @@ function chunk<T>(arr: T[], size: number): T[][] {
 const persistedMetadataCache = new Map<string, { symbol: string; name: string; persistedAt: number }>();
 const PERSISTED_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// Session-level cache to prevent repeated API calls for the same tokens
+// This cache survives across tab switches but resets on page refresh
+const jupiterMetaCache = new Map<string, { symbol: string; name: string; fetchedAt: number }>();
+const JUPITER_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+// Rate limit tracker for Jupiter
+let lastJupiterCallTime = 0;
+const MIN_JUPITER_CALL_INTERVAL_MS = 2000; // 2 seconds between calls
+
 /**
- * Fetch token metadata from Jupiter token list using BATCH endpoint to avoid rate limits.
- * Uses the /all-tokens endpoint with filtering instead of individual calls.
+ * Fetch token metadata from Jupiter token list.
+ * IMPORTANT: This is now ONLY used as a fallback when DexScreener fails.
+ * Uses aggressive caching and rate limiting to avoid 429 errors.
  */
 export async function fetchJupiterTokenMetadata(
   addresses: string[],
@@ -56,61 +66,60 @@ export async function fetchJupiterTokenMetadata(
   const unique = Array.from(new Set(addresses.filter((a) => isLikelyRealSolanaMint(a))));
   if (unique.length === 0) return result;
   
-  // Create a Set for fast lookup
-  const addressSet = new Set(unique);
+  const now = Date.now();
   
-  try {
-    // Use Jupiter's all-tokens endpoint which doesn't rate limit as aggressively
-    // Then filter client-side for the tokens we need
-    const res = await fetch('https://lite-api.jup.ag/tokens/v1/mints?include=address,name,symbol', {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: { 'Accept': 'application/json' },
-    });
-    
-    if (res.ok) {
-      const allTokens: { address: string; symbol?: string; name?: string }[] = await res.json();
-      
-      for (const token of allTokens) {
-        if (!token.address || !addressSet.has(token.address)) continue;
-        
-        const symbol = String(token.symbol || '').trim();
-        const name = String(token.name || '').trim();
-        
-        if (symbol && !isPlaceholderTokenText(symbol)) {
-          result.set(token.address, {
-            address: token.address,
-            symbol,
-            name: name || symbol,
-          });
-        }
-      }
-      
-      return result;
+  // Check cache first - return cached values and skip API call if all are cached
+  const stillNeeded: string[] = [];
+  for (const addr of unique) {
+    const cached = jupiterMetaCache.get(addr);
+    if (cached && now - cached.fetchedAt < JUPITER_CACHE_TTL_MS) {
+      result.set(addr, { address: addr, symbol: cached.symbol, name: cached.name });
+    } else {
+      stillNeeded.push(addr);
     }
-  } catch {
-    // Fallback: try individual fetches with delays if batch fails
   }
   
-  // FALLBACK: Individual fetches with rate limiting (max 2 per second)
-  const RATE_LIMIT_DELAY = 500;
-  for (let i = 0; i < unique.length && i < 5; i++) { // Limit to first 5 to avoid rate limits
-    const addr = unique[i];
+  // If all addresses are cached, return immediately
+  if (stillNeeded.length === 0) return result;
+  
+  // RATE LIMITING: Enforce minimum interval between Jupiter API calls
+  const timeSinceLastCall = now - lastJupiterCallTime;
+  if (timeSinceLastCall < MIN_JUPITER_CALL_INTERVAL_MS) {
+    console.log(`[Jupiter] Rate limiting: waiting ${MIN_JUPITER_CALL_INTERVAL_MS - timeSinceLastCall}ms`);
+    await new Promise(r => setTimeout(r, MIN_JUPITER_CALL_INTERVAL_MS - timeSinceLastCall));
+  }
+  lastJupiterCallTime = Date.now();
+  
+  // Limit to max 10 individual fetches to avoid hammering the API
+  const toFetch = stillNeeded.slice(0, 10);
+  
+  // Individual fetches with delays (the batch endpoint also rate limits)
+  for (let i = 0; i < toFetch.length; i++) {
+    const addr = toFetch[i];
     try {
-      if (i > 0) await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY));
+      // Add delay between individual requests
+      if (i > 0) await new Promise(r => setTimeout(r, 500));
       
       const res = await fetch(`https://lite-api.jup.ag/tokens/v1/${addr}`, {
         signal: AbortSignal.timeout(3000),
       });
+      
+      if (res.status === 429) {
+        console.log('[Jupiter] Rate limited on individual fetch, stopping');
+        break; // Stop fetching more tokens if rate limited
+      }
+      
       if (!res.ok) continue;
+      
       const data = await res.json();
       const symbol = String(data?.symbol || '').trim();
       const name = String(data?.name || '').trim();
+      
       if (symbol && !isPlaceholderTokenText(symbol)) {
-        result.set(addr, {
-          address: addr,
-          symbol,
-          name: name || symbol,
-        });
+        const meta = { address: addr, symbol, name: name || symbol };
+        result.set(addr, meta);
+        // Cache it
+        jupiterMetaCache.set(addr, { symbol: meta.symbol, name: meta.name, fetchedAt: Date.now() });
       }
     } catch {
       // Ignore: best-effort
@@ -121,7 +130,8 @@ export async function fetchJupiterTokenMetadata(
 }
 
 /**
- * Best-effort metadata lookup via DexScreener FIRST, then Jupiter fallback.
+ * Best-effort metadata lookup via DexScreener ONLY - NO Jupiter fallback.
+ * Jupiter's API is heavily rate limited and causes 429 errors.
  * Uses the token endpoint which supports comma-separated addresses.
  * Results are cached to prevent repeated external calls.
  */
@@ -152,7 +162,7 @@ export async function fetchDexScreenerTokenMetadata(
   
   if (stillNeeded.length === 0) return result;
 
-  // 1. Try DexScreener first
+  // Use DexScreener ONLY - no Jupiter fallback (causes 429s)
   for (const batch of chunk(stillNeeded, chunkSize)) {
     try {
       const url = `https://api.dexscreener.com/latest/dex/tokens/${batch.join(',')}`;
@@ -195,13 +205,31 @@ export async function fetchDexScreenerTokenMetadata(
     }
   }
   
-  // 2. For addresses still missing, try Jupiter token list as fallback
+  // For addresses still missing after DexScreener, try Birdeye API (free, no rate limits)
   const stillMissing = stillNeeded.filter(a => !result.has(a));
   if (stillMissing.length > 0) {
-    const jupiterMeta = await fetchJupiterTokenMetadata(stillMissing, { timeoutMs: 3000 });
-    for (const [addr, meta] of jupiterMeta.entries()) {
-      result.set(addr, meta);
-      persistedMetadataCache.set(addr, { symbol: meta.symbol, name: meta.name, persistedAt: now });
+    try {
+      // Birdeye's token info endpoint (free tier, rate limited but not as aggressive)
+      for (const addr of stillMissing.slice(0, 5)) { // Limit to 5
+        const res = await fetch(`https://public-api.birdeye.so/public/tokeninfo?address=${addr}`, {
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const symbol = String(data?.data?.symbol || '').trim();
+          const name = String(data?.data?.name || '').trim();
+          if (symbol && !isPlaceholderTokenText(symbol)) {
+            const meta = { address: addr, symbol, name: name || symbol };
+            result.set(addr, meta);
+            persistedMetadataCache.set(addr, { symbol: meta.symbol, name: meta.name, persistedAt: now });
+          }
+        }
+        // Small delay between requests
+        await new Promise(r => setTimeout(r, 200));
+      }
+    } catch {
+      // Ignore Birdeye errors
     }
   }
 
