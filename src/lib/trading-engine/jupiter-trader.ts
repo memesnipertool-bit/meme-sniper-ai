@@ -4,6 +4,7 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { fetchJupiterQuote } from '@/lib/jupiterQuote';
 import type {
   TradingConfig,
   TradeMode,
@@ -319,38 +320,24 @@ async function getJupiterQuote(
   amount: number,
   slippage: number
 ): Promise<any | null> {
-  try {
-    const slippageBps = Math.floor(slippage * 10000);
-    
-    const quoteUrl = new URL(API_ENDPOINTS.jupiterQuote);
-    quoteUrl.searchParams.set('inputMint', inputMint);
-    quoteUrl.searchParams.set('outputMint', outputMint);
-    quoteUrl.searchParams.set('amount', amount.toString());
-    quoteUrl.searchParams.set('slippageBps', slippageBps.toString());
-    quoteUrl.searchParams.set('onlyDirectRoutes', 'false');
-    quoteUrl.searchParams.set('asLegacyTransaction', 'false');
-    
-    const response = await fetch(quoteUrl.toString(), {
-      signal: AbortSignal.timeout(15000),
-    });
-    
-    if (!response.ok) {
-      console.error('Jupiter quote failed:', response.status);
-      return null;
-    }
-    
-    const quote = await response.json();
-    
-    if (quote.error) {
-      console.error('Jupiter quote error:', quote.error);
-      return null;
-    }
-    
-    return quote;
-  } catch (error) {
-    console.error('Jupiter quote exception:', error);
-    return null;
+  const slippageBps = Math.floor(slippage * 10000);
+
+  const quoteResult = await fetchJupiterQuote({
+    inputMint,
+    outputMint,
+    amount: amount.toString(),
+    slippageBps,
+    timeoutMs: 15000,
+  });
+
+  if (!quoteResult.ok) {
+    // Only treat real no-route as "no route".
+    // Anything else should bubble up so callers can show a retryable error.
+    if (quoteResult.kind === 'NO_ROUTE') return null;
+    throw new Error(`${quoteResult.kind}: ${quoteResult.message}`);
   }
+
+  return quoteResult.quote;
 }
 
 /**
