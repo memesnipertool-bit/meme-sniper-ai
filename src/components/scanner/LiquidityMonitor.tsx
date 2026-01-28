@@ -348,21 +348,20 @@ import {
 const shortAddress = (address: string) => formatShortAddress(address);
 const isPlaceholder = (val: string | null | undefined) => isPlaceholderText(val);
 
-// Memoized Trade Row with improved visibility
+// Memoized Trade Row with improved visibility - shows accurate USD values like Phantom
 const TradeRow = memo(({ trade, colorIndex, onExit }: { 
   trade: ActiveTradePosition; 
   colorIndex: number; 
   onExit?: (id: string, price: number) => void 
 }) => {
   const pnlPercent = trade.profit_loss_percent || 0;
-  // CRITICAL FIX: Calculate P&L value properly when entry_value is available
-  const pnlValue = trade.profit_loss_value || calculatePnLValue(
-    trade.entry_value,
-    trade.profit_loss_percent,
-    trade.entry_price,
-    trade.amount
-  );
   const isPositive = pnlPercent >= 0;
+  
+  // CRITICAL: Calculate ACTUAL current USD value (amount × current_price) like Phantom shows
+  const currentUsdValue = trade.amount * trade.current_price;
+  const entryUsdValue = trade.amount * trade.entry_price;
+  // P&L in USD = current value - entry value
+  const pnlUsdValue = currentUsdValue - entryUsdValue;
   
   // Use actual token name/symbol, fallback to formatted address
   const displaySymbol = getTokenDisplaySymbol(trade.token_symbol, trade.token_address);
@@ -374,6 +373,15 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   const handleExit = useCallback(() => {
     onExit?.(trade.id, trade.current_price);
   }, [onExit, trade.id, trade.current_price]);
+  
+  // Format token amount with appropriate precision
+  const formatTokenAmount = (amount: number) => {
+    if (amount >= 1000000) return `${(amount / 1000000).toFixed(2)}M`;
+    if (amount >= 1000) return `${(amount / 1000).toFixed(2)}K`;
+    if (amount >= 1) return amount.toFixed(2);
+    if (amount >= 0.001) return amount.toFixed(5);
+    return amount.toFixed(8);
+  };
 
   return (
     <div className="grid grid-cols-[40px_1fr_auto_auto] items-center gap-3 px-3 py-2.5 border-b border-border/20 hover:bg-secondary/30 transition-colors">
@@ -385,37 +393,34 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
         {initials}
       </div>
       
-      {/* Token Info */}
+      {/* Token Info - Show amount prominently like Phantom */}
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
           <span className="text-muted-foreground text-xs">{displaySymbol}</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="tabular-nums">Entry: {formatPrice(trade.entry_price)}</span>
-          <span className="text-muted-foreground/40">→</span>
-          <span className={cn(
-            "tabular-nums font-medium transition-colors duration-300",
-            isPositive ? 'text-success' : 'text-destructive'
-          )}>
-            {formatPrice(trade.current_price)}
+          {/* Token quantity like Phantom shows */}
+          <span className="tabular-nums font-medium text-foreground/80">
+            {formatTokenAmount(trade.amount)} {displaySymbol}
           </span>
+          <span className="text-muted-foreground/40">•</span>
+          <span className="tabular-nums">Entry: {formatPrice(trade.entry_price)}</span>
         </div>
       </div>
       
-      {/* PnL - More visible */}
-      <div className="text-right min-w-[70px]">
-        <div className={cn(
-          "font-bold text-sm tabular-nums transition-all duration-300",
-          isPositive ? 'text-success' : 'text-destructive'
-        )}>
-          {formatPercentage(pnlPercent)}
+      {/* Current Value + P&L like Phantom wallet */}
+      <div className="text-right min-w-[80px]">
+        {/* Current USD value prominently */}
+        <div className="font-bold text-sm tabular-nums text-foreground">
+          ${currentUsdValue >= 1000 ? currentUsdValue.toFixed(0) : currentUsdValue >= 1 ? currentUsdValue.toFixed(2) : currentUsdValue.toFixed(4)}
         </div>
+        {/* P&L change below */}
         <div className={cn(
           "text-xs tabular-nums font-medium transition-all duration-300",
-          isPositive ? 'text-success/80' : 'text-destructive/80'
+          isPositive ? 'text-success' : 'text-destructive'
         )}>
-          {formatCurrencyValue(pnlValue)}
+          {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}% ({isPositive ? '+' : ''}${Math.abs(pnlUsdValue) < 0.01 ? '<0.01' : pnlUsdValue.toFixed(2)})
         </div>
       </div>
       
@@ -593,9 +598,13 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
     return count;
   }, [waitingPositions, walletTokens, activeTokenAddresses]);
 
-  // Memoize total P&L
+  // Memoize total P&L in actual USD (amount × current_price - amount × entry_price)
   const totalPnL = useMemo(() => 
-    openTrades.reduce((sum, t) => sum + (t.profit_loss_value || 0), 0),
+    openTrades.reduce((sum, t) => {
+      const currentVal = t.amount * t.current_price;
+      const entryVal = t.amount * t.entry_price;
+      return sum + (currentVal - entryVal);
+    }, 0),
     [openTrades]
   );
 
@@ -792,7 +801,7 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
                       "font-bold text-sm tabular-nums",
                       totalPnL >= 0 ? 'text-success' : 'text-destructive'
                     )}>
-                      {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
+                      {totalPnL >= 0 ? '+' : ''}{Math.abs(totalPnL) < 0.01 ? '<$0.01' : `$${totalPnL.toFixed(2)}`}
                     </span>
                   </div>
                 </div>
