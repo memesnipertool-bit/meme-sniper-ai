@@ -84,8 +84,10 @@ export function usePositions() {
   const lastServerSignatureRef = useRef<string>('');
   // Force next fetch to always update state (used after close/create operations)
   const forceNextFetchRef = useRef(false);
-  // Flag to temporarily block realtime updates during optimistic operations
-  const blockRealtimeUntilRef = useRef<number>(0);
+  // Version counter to prevent race conditions during optimistic updates
+  // Incremented on every optimistic operation, checked in realtime handler
+  const optimisticVersionRef = useRef<number>(0);
+  const lastCommittedVersionRef = useRef<number>(0);
 
 
   // Fetch positions (forceUpdate bypasses signature check for explicit refreshes)
@@ -371,11 +373,11 @@ export function usePositions() {
 
     // OPTIMISTIC UPDATE: immediately hide from UI
     const previousPositions = [...snapshot];
+    
+    // Increment version to signal in-flight optimistic operation
+    const operationVersion = ++optimisticVersionRef.current;
 
     try {
-      // Block realtime updates for 2 seconds to prevent stale data from overwriting
-      blockRealtimeUntilRef.current = Date.now() + 2000;
-
       setPositions(prev => prev.map(p =>
         p.id === positionId ? { ...p, status: 'closed' as const } : p
       ));
@@ -424,6 +426,9 @@ export function usePositions() {
           return `${p.id}:${updatedAt}:closed`;
         })
         .join('|');
+      
+      // Mark this version as committed - realtime can now proceed
+      lastCommittedVersionRef.current = operationVersion;
 
       // Log activity (fire-and-forget)
       const { data: { user } } = await supabase.auth.getUser();
@@ -639,9 +644,12 @@ export function usePositions() {
           filter: `user_id=eq.${user.id}`,
         },
         () => {
-          // Skip realtime updates during optimistic update window
-          // This prevents stale data from overwriting our immediate UI update
-          if (Date.now() < blockRealtimeUntilRef.current) return;
+          // RACE CONDITION FIX: Skip realtime updates while optimistic operations are in-flight
+          // Only process if all optimistic operations have been committed to DB
+          if (optimisticVersionRef.current > lastCommittedVersionRef.current) {
+            console.log('[Positions] Skipping realtime update - optimistic operation in progress');
+            return;
+          }
 
           forceNextFetchRef.current = true;
           fetchPositions(true);

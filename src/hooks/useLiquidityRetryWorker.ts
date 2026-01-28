@@ -366,7 +366,7 @@ export function useLiquidityRetryWorker() {
     }
   }, [wallet, signAndSendTransaction, refreshBalance, toast]);
 
-  // Run the retry worker once
+  // Run the retry worker once with parallel processing
   const runRetryCheck = useCallback(async () => {
     if (checking) return;
     if (!wallet.isConnected) return;
@@ -380,12 +380,28 @@ export function useLiquidityRetryWorker() {
         return;
       }
 
-      console.log(`[LiquidityRetry] Checking ${positions.length} waiting positions`);
+      console.log(`[LiquidityRetry] Checking ${positions.length} waiting positions in parallel`);
 
-      for (const position of positions) {
-        await checkAndExecutePosition(position);
-        // Small delay between checks
-        await new Promise(r => setTimeout(r, 2000));
+      // PARALLEL PROCESSING: Process up to 3 positions concurrently
+      const CONCURRENCY_LIMIT = 3;
+      const results: boolean[] = [];
+      
+      for (let i = 0; i < positions.length; i += CONCURRENCY_LIMIT) {
+        const batch = positions.slice(i, i + CONCURRENCY_LIMIT);
+        const batchResults = await Promise.all(
+          batch.map(position => checkAndExecutePosition(position))
+        );
+        results.push(...batchResults);
+        
+        // Small delay between batches to avoid overwhelming APIs
+        if (i + CONCURRENCY_LIMIT < positions.length) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+      
+      const successCount = results.filter(Boolean).length;
+      if (successCount > 0) {
+        console.log(`[LiquidityRetry] ${successCount}/${positions.length} positions sold successfully`);
       }
 
       // Refresh the list
