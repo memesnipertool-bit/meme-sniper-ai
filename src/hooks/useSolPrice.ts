@@ -43,53 +43,95 @@ export function useSolPrice(refreshInterval = 60000) {
     setLoading(true);
     setError(null);
 
-    try {
-      // Use CoinGecko API (free, no API key required)
-      const response = await fetch(
-        'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd',
-        { 
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-        }
-      );
+    // Try multiple price sources for resilience
+    const priceSources = [
+      // Primary: CoinGecko (most reliable, no API key)
+      async (): Promise<number | null> => {
+        const response = await fetch(
+          'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd',
+          { 
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(5000),
+          }
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data?.solana?.usd ?? null;
+      },
+      // Fallback 1: Jupiter Price API (fast, Solana-native)
+      async (): Promise<number | null> => {
+        const response = await fetch(
+          'https://price.jup.ag/v6/price?ids=So11111111111111111111111111111111111111112',
+          { 
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(5000),
+          }
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data?.data?.['So11111111111111111111111111111111111111112']?.price ?? null;
+      },
+      // Fallback 2: Binance public API
+      async (): Promise<number | null> => {
+        const response = await fetch(
+          'https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT',
+          { 
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(5000),
+          }
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data?.price ? parseFloat(data.price) : null;
+      },
+    ];
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      const newPrice = data?.solana?.usd;
-
-      if (typeof newPrice === 'number' && newPrice > 0) {
-        setPrice(newPrice);
-        
-        // Cache the price
-        const cache: SolPriceCache = { price: newPrice, timestamp: Date.now() };
-        localStorage.setItem(SOL_PRICE_CACHE_KEY, JSON.stringify(cache));
-        
-        return newPrice;
-      } else {
-        throw new Error('Invalid price data');
-      }
-    } catch (err: any) {
-      console.error('Failed to fetch SOL price:', err);
-      setError(err.message || 'Failed to fetch price');
-      
-      // Try to use cached price on error
+    let newPrice: number | null = null;
+    
+    for (const fetchSource of priceSources) {
       try {
-        const cached = localStorage.getItem(SOL_PRICE_CACHE_KEY);
-        if (cached) {
-          const { price: cachedPrice } = JSON.parse(cached) as SolPriceCache;
-          return cachedPrice;
+        const result = await fetchSource();
+        if (typeof result === 'number' && result > 0 && Number.isFinite(result)) {
+          newPrice = result;
+          break; // Success - stop trying other sources
         }
       } catch {
-        // Ignore cache errors
+        // Try next source
+        continue;
       }
-      
-      return price; // Return current price on failure
-    } finally {
-      setLoading(false);
     }
+
+    if (newPrice !== null) {
+      setPrice(newPrice);
+      
+      // Cache the price
+      const cache: SolPriceCache = { price: newPrice, timestamp: Date.now() };
+      localStorage.setItem(SOL_PRICE_CACHE_KEY, JSON.stringify(cache));
+      
+      setLoading(false);
+      return newPrice;
+    }
+    
+    // All sources failed - try cache
+    console.warn('All SOL price sources failed, using cache');
+    setError('All price sources unavailable');
+    
+    try {
+      const cached = localStorage.getItem(SOL_PRICE_CACHE_KEY);
+      if (cached) {
+        const { price: cachedPrice } = JSON.parse(cached) as SolPriceCache;
+        setLoading(false);
+        return cachedPrice;
+      }
+    } catch {
+      // Ignore cache errors
+    }
+    
+    setLoading(false);
+    return price; // Return current price on total failure
   }, [price]);
 
   // Initial fetch
