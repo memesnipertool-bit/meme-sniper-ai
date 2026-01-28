@@ -43,23 +43,63 @@ const persistedMetadataCache = new Map<string, { symbol: string; name: string; p
 const PERSISTED_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Fetch token metadata from Jupiter token list (public, fast, consistent with Phantom)
+ * Fetch token metadata from Jupiter token list using BATCH endpoint to avoid rate limits.
+ * Uses the /all-tokens endpoint with filtering instead of individual calls.
  */
 export async function fetchJupiterTokenMetadata(
   addresses: string[],
   opts?: { timeoutMs?: number }
 ): Promise<Map<string, DexTokenMetadata>> {
-  const timeoutMs = opts?.timeoutMs ?? 3000;
+  const timeoutMs = opts?.timeoutMs ?? 5000;
   const result = new Map<string, DexTokenMetadata>();
   
   const unique = Array.from(new Set(addresses.filter((a) => isLikelyRealSolanaMint(a))));
   if (unique.length === 0) return result;
   
-  // Jupiter's lite-api supports individual token lookups
-  for (const addr of unique) {
+  // Create a Set for fast lookup
+  const addressSet = new Set(unique);
+  
+  try {
+    // Use Jupiter's all-tokens endpoint which doesn't rate limit as aggressively
+    // Then filter client-side for the tokens we need
+    const res = await fetch('https://lite-api.jup.ag/tokens/v1/mints?include=address,name,symbol', {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { 'Accept': 'application/json' },
+    });
+    
+    if (res.ok) {
+      const allTokens: { address: string; symbol?: string; name?: string }[] = await res.json();
+      
+      for (const token of allTokens) {
+        if (!token.address || !addressSet.has(token.address)) continue;
+        
+        const symbol = String(token.symbol || '').trim();
+        const name = String(token.name || '').trim();
+        
+        if (symbol && !isPlaceholderTokenText(symbol)) {
+          result.set(token.address, {
+            address: token.address,
+            symbol,
+            name: name || symbol,
+          });
+        }
+      }
+      
+      return result;
+    }
+  } catch {
+    // Fallback: try individual fetches with delays if batch fails
+  }
+  
+  // FALLBACK: Individual fetches with rate limiting (max 2 per second)
+  const RATE_LIMIT_DELAY = 500;
+  for (let i = 0; i < unique.length && i < 5; i++) { // Limit to first 5 to avoid rate limits
+    const addr = unique[i];
     try {
+      if (i > 0) await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY));
+      
       const res = await fetch(`https://lite-api.jup.ag/tokens/v1/${addr}`, {
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(3000),
       });
       if (!res.ok) continue;
       const data = await res.json();

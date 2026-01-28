@@ -515,11 +515,12 @@ export default function WaitingLiquidityTab({
     return items;
   }, [positions, walletTokens, activeTokenAddresses, enrichedMetadata]);
   
-  // Enrich metadata for tokens with placeholder names
+  // Enrich metadata for tokens with placeholder names - runs once per token per session
   useEffect(() => {
     if (!isTabActive) return;
+    if (combinedItems.length === 0) return;
     
-    // Find tokens that need metadata enrichment
+    // Find tokens that need metadata enrichment (batch all at once)
     const needsEnrichment: string[] = [];
     
     for (const item of combinedItems) {
@@ -542,19 +543,25 @@ export default function WaitingLiquidityTab({
     
     if (needsEnrichment.length === 0) return;
     
-    // Fetch metadata from DexScreener
-    fetchDexScreenerTokenMetadata(needsEnrichment)
+    console.log(`[WaitingLiquidityTab] Enriching metadata for ${needsEnrichment.length} tokens`);
+    
+    // Fetch metadata from DexScreener (includes Jupiter fallback internally)
+    // Use a single batch call - DexScreener handles up to 30 tokens per request
+    fetchDexScreenerTokenMetadata(needsEnrichment, { timeoutMs: 8000, chunkSize: 30 })
       .then((metaMap) => {
         const updates: Record<string, { name: string; symbol: string }> = {};
         
         for (const [addr, meta] of metaMap.entries()) {
-          if (meta.name && meta.symbol) {
+          if (meta.name && meta.symbol && 
+              !isPlaceholderTokenText(meta.symbol) && 
+              !isPlaceholderTokenText(meta.name)) {
             updates[addr] = { name: meta.name, symbol: meta.symbol };
+            console.log(`[WaitingLiquidityTab] Enriched: ${addr.slice(0, 8)} -> ${meta.symbol}`);
           }
           enrichmentInProgressRef.current.delete(addr);
         }
         
-        // Also clear addresses that weren't found
+        // Also clear addresses that weren't found from DexScreener
         for (const addr of needsEnrichment) {
           enrichmentInProgressRef.current.delete(addr);
         }
