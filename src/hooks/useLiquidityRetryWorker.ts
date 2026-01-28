@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useWallet } from '@/hooks/useWallet';
 import { addBotLog } from '@/components/scanner/BotActivityLog';
+import { fetchJupiterQuote } from '@/lib/jupiterQuote';
 
 export interface WaitingPosition {
   id: string;
@@ -65,22 +66,19 @@ export function useLiquidityRetryWorker() {
   // Check if Jupiter has a route for the token
   const checkJupiterRoute = async (tokenAddress: string, amount: string): Promise<{ hasRoute: boolean; quote?: any }> => {
     try {
-      const quoteUrl = `https://lite-api.jup.ag/v6/quote?inputMint=${tokenAddress}&outputMint=${SOL_MINT}&amount=${amount}&slippageBps=1500`;
-      
-      const response = await fetch(quoteUrl, {
-        signal: AbortSignal.timeout(10000),
+      const quoteResult = await fetchJupiterQuote({
+        inputMint: tokenAddress,
+        outputMint: SOL_MINT,
+        amount,
+        slippageBps: 1500,
+        timeoutMs: 10000,
       });
 
-      if (!response.ok) {
+      if (!quoteResult.ok) {
         return { hasRoute: false };
       }
 
-      const quote = await response.json();
-      if (!quote || quote.error) {
-        return { hasRoute: false };
-      }
-
-      return { hasRoute: true, quote };
+      return { hasRoute: true, quote: quoteResult.quote };
     } catch {
       return { hasRoute: false };
     }
