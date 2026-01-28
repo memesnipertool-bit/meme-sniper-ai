@@ -301,8 +301,13 @@ export function useAutoExit() {
         // ignore
       }
 
+      // FIXED: Use percentage-based threshold to avoid false "Partial Exit" scenarios
+      // Close position if remaining is <1% of original (accounts for rounding errors)
       const DUST = 1e-6;
-      const shouldClose = remainingBalance === null ? true : remainingBalance <= DUST;
+      const remainingPercent = tokenAmountToSell > 0 && remainingBalance !== null 
+        ? (remainingBalance / tokenAmountToSell) * 100 
+        : 0;
+      const shouldClose = remainingBalance === null || remainingBalance <= DUST || remainingPercent <= 1;
 
       await supabase
         .from('positions')

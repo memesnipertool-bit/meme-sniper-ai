@@ -422,8 +422,16 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           // ignore
         }
 
+        // FIXED: Use percentage-based threshold to avoid false "Partial Exit" notifications
+        // A partial sell is only meaningful if remaining balance is >1% of original amount
+        // This prevents rounding errors from triggering misleading notifications
         const DUST = 1e-6;
-        if (remainingBalance !== null && remainingBalance > DUST) {
+        const remainingPercent = tokenAmountToSell > 0 && remainingBalance !== null 
+          ? (remainingBalance / tokenAmountToSell) * 100 
+          : 0;
+        const isSignificantRemaining = remainingBalance !== null && remainingBalance > DUST && remainingPercent > 1;
+        
+        if (isSignificantRemaining) {
           // Update position with remaining balance
           await supabase
             .from('positions')
