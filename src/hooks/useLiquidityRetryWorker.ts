@@ -253,24 +253,31 @@ export function useLiquidityRetryWorker() {
       return false;
     }
 
+    // CRITICAL: Detect if this is a wallet token (not a DB position)
+    // Wallet tokens have synthetic IDs starting with "wallet-" which are NOT valid UUIDs
+    const isWalletToken = typeof position.id === 'string' && position.id.startsWith('wallet-');
+
     addBotLog({
       level: 'info',
       category: 'exit',
       message: `🔄 Checking liquidity: ${position.token_symbol}`,
       tokenSymbol: position.token_symbol,
-      details: `Check #${(position.liquidity_check_count || 0) + 1}`,
+      details: isWalletToken ? 'Wallet token (no DB record)' : `Check #${(position.liquidity_check_count || 0) + 1}`,
     });
 
     const routeResult = await checkRoutes(position);
 
-    // Update check timestamp and count
-    await supabase
-      .from('positions')
-      .update({
-        liquidity_last_checked_at: new Date().toISOString(),
-        liquidity_check_count: (position.liquidity_check_count || 0) + 1,
-      })
-      .eq('id', position.id);
+    // Only update DB for real positions (valid UUID IDs)
+    // Wallet tokens have synthetic IDs like "wallet-<mint>" which would cause UUID parse errors
+    if (!isWalletToken) {
+      await supabase
+        .from('positions')
+        .update({
+          liquidity_last_checked_at: new Date().toISOString(),
+          liquidity_check_count: (position.liquidity_check_count || 0) + 1,
+        })
+        .eq('id', position.id);
+    }
 
     if (!routeResult.hasJupiterRoute && !routeResult.hasRaydiumRoute) {
       addBotLog({
@@ -301,18 +308,22 @@ export function useLiquidityRetryWorker() {
       : await executeRaydiumSwap(routeResult.quote);
 
     if (swapResult.success && swapResult.signature) {
-      // Close the position
-      await supabase
-        .from('positions')
-        .update({
-          status: 'closed',
-          closed_at: new Date().toISOString(),
-          exit_tx_id: swapResult.signature,
-          exit_reason: 'liquidity_retry_success',
-        })
-        .eq('id', position.id);
+      // CRITICAL: Only update DB for real positions (not wallet tokens)
+      // Wallet tokens have synthetic IDs like "wallet-<mint>" which are not valid UUIDs
+      if (!isWalletToken) {
+        // Close the position in DB
+        await supabase
+          .from('positions')
+          .update({
+            status: 'closed',
+            closed_at: new Date().toISOString(),
+            exit_tx_id: swapResult.signature,
+            exit_reason: 'liquidity_retry_success',
+          })
+          .eq('id', position.id);
+      }
 
-      // Log to trade_history
+      // Log to trade_history (always - uses user.id not position.id)
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         await supabase.from('trade_history').insert({
