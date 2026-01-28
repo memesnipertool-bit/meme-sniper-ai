@@ -1,12 +1,12 @@
 import { memo, useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Clock, RefreshCw, ArrowLeft, Zap, Wallet, ChevronDown, ChevronUp, ExternalLink, Check, X, AlertCircle } from "lucide-react";
+import { Loader2, Clock, RefreshCw, ArrowLeft, Zap, Wallet, ChevronDown, ChevronUp, ExternalLink, Check, X, AlertCircle, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import type { WaitingPosition } from "@/hooks/useLiquidityRetryWorker";
 import type { WalletToken } from "@/hooks/useWalletTokens";
-import { fetchDexScreenerTokenMetadata, isPlaceholderTokenText } from "@/lib/dexscreener";
+import { fetchDexScreenerTokenMetadata, fetchDexScreenerPrices, isPlaceholderTokenText } from "@/lib/dexscreener";
 
 export interface CombinedWaitingItem {
   id: string;
@@ -17,6 +17,7 @@ export interface CombinedWaitingItem {
   entry_price: number;
   current_price: number;
   profit_loss_percent: number | null;
+  priceChange24h: number | null; // NEW: 24h price change from DexScreener
   liquidity_last_checked_at: string | null;
   liquidity_check_count: number;
   waiting_for_liquidity_since: string | null;
@@ -243,6 +244,23 @@ const WaitingPositionRow = memo(({
                 <span>{formatPrice(item.current_price)}</span>
               </>
             )}
+            {/* 24h Price Change - show accurate data like Phantom */}
+            {item.priceChange24h !== null && (
+              <>
+                <span className="text-muted-foreground/40">•</span>
+                <span className={cn(
+                  "flex items-center gap-0.5 font-medium",
+                  item.priceChange24h >= 0 ? "text-success" : "text-destructive"
+                )}>
+                  {item.priceChange24h >= 0 ? (
+                    <TrendingUp className="w-3 h-3" />
+                  ) : (
+                    <TrendingDown className="w-3 h-3" />
+                  )}
+                  {item.priceChange24h >= 0 ? '+' : ''}{item.priceChange24h.toFixed(2)}%
+                </span>
+              </>
+            )}
             {item.valueUsd !== null && item.valueUsd > 0 && (
               <>
                 <span className="text-muted-foreground/40">•</span>
@@ -431,8 +449,13 @@ export default function WaitingLiquidityTab({
   // Track route status for each token
   const [routeStatuses, setRouteStatuses] = useState<Record<string, RouteStatus>>({});
   
-  // Track enriched metadata for tokens
-  const [enrichedMetadata, setEnrichedMetadata] = useState<Record<string, { name: string; symbol: string }>>({});
+  // Track enriched metadata for tokens (name, symbol, priceChange24h)
+  const [enrichedMetadata, setEnrichedMetadata] = useState<Record<string, { 
+    name: string; 
+    symbol: string; 
+    priceChange24h?: number;
+    priceUsd?: number;
+  }>>({});
   const enrichmentInProgressRef = useRef<Set<string>>(new Set());
   
   // Combine waiting positions and wallet tokens, excluding active positions and duplicates
@@ -459,14 +482,15 @@ export default function WaitingLiquidityTab({
         token_name: enriched?.name || pos.token_name,
         amount: pos.amount,
         entry_price: pos.entry_price,
-        current_price: pos.current_price,
+        current_price: enriched?.priceUsd ?? pos.current_price,
         profit_loss_percent: pos.profit_loss_percent,
+        priceChange24h: enriched?.priceChange24h ?? null,
         liquidity_last_checked_at: pos.liquidity_last_checked_at,
         liquidity_check_count: pos.liquidity_check_count,
         waiting_for_liquidity_since: pos.waiting_for_liquidity_since,
         status: pos.status,
         isWalletToken: false,
-        valueUsd: pos.current_price * pos.amount,
+        valueUsd: (enriched?.priceUsd ?? pos.current_price) * pos.amount,
       });
     }
     
@@ -490,14 +514,15 @@ export default function WaitingLiquidityTab({
         token_name: enriched?.name || token.name,
         amount: token.balance,
         entry_price: token.priceUsd || 0,
-        current_price: token.priceUsd || 0,
+        current_price: enriched?.priceUsd ?? (token.priceUsd || 0),
         profit_loss_percent: null,
+        priceChange24h: enriched?.priceChange24h ?? null,
         liquidity_last_checked_at: null,
         liquidity_check_count: 0,
         waiting_for_liquidity_since: null,
         status: 'wallet',
         isWalletToken: true,
-        valueUsd: token.valueUsd,
+        valueUsd: enriched?.priceUsd ? (enriched.priceUsd * token.balance) : token.valueUsd,
       });
     }
     
@@ -515,53 +540,55 @@ export default function WaitingLiquidityTab({
     return items;
   }, [positions, walletTokens, activeTokenAddresses, enrichedMetadata]);
   
-  // Enrich metadata for tokens with placeholder names - runs once per token per session
+  // Enrich metadata AND prices for tokens - runs once per token per session
   useEffect(() => {
     if (!isTabActive) return;
     if (combinedItems.length === 0) return;
     
-    // Find tokens that need metadata enrichment (batch all at once)
-    const needsEnrichment: string[] = [];
-    
-    for (const item of combinedItems) {
-      const addr = item.token_address;
-      // Skip if already enriched or enrichment in progress
-      if (enrichedMetadata[addr]) continue;
-      if (enrichmentInProgressRef.current.has(addr)) continue;
-      
-      // Check if name/symbol are placeholders
-      const needsName = isPlaceholderTokenText(item.token_name) || 
-                        (item.token_name?.startsWith('Token ') ?? true);
-      const needsSymbol = isPlaceholderTokenText(item.token_symbol) ||
-                          (item.token_symbol?.includes('...') ?? true);
-      
-      if (needsName || needsSymbol) {
-        needsEnrichment.push(addr);
-        enrichmentInProgressRef.current.add(addr);
-      }
-    }
+    // Find all token addresses that need enrichment (metadata or prices)
+    const allAddresses = combinedItems.map(item => item.token_address);
+    const needsEnrichment = allAddresses.filter(addr => {
+      // Skip if already fully enriched (has name, symbol, and price data)
+      if (enrichedMetadata[addr]?.priceChange24h !== undefined) return false;
+      if (enrichmentInProgressRef.current.has(addr)) return false;
+      return true;
+    });
     
     if (needsEnrichment.length === 0) return;
     
-    console.log(`[WaitingLiquidityTab] Enriching metadata for ${needsEnrichment.length} tokens`);
+    // Mark all as in progress
+    needsEnrichment.forEach(addr => enrichmentInProgressRef.current.add(addr));
     
-    // Fetch metadata from DexScreener (includes Jupiter fallback internally)
-    // Use a single batch call - DexScreener handles up to 30 tokens per request
-    fetchDexScreenerTokenMetadata(needsEnrichment, { timeoutMs: 8000, chunkSize: 30 })
-      .then((metaMap) => {
-        const updates: Record<string, { name: string; symbol: string }> = {};
+    console.log(`[WaitingLiquidityTab] Enriching ${needsEnrichment.length} tokens with DexScreener`);
+    
+    // Use DexScreener prices API (returns metadata + 24h change + price in one call)
+    fetchDexScreenerPrices(needsEnrichment, { timeoutMs: 8000, chunkSize: 30 })
+      .then((priceMap) => {
+        const updates: Record<string, { 
+          name: string; 
+          symbol: string; 
+          priceChange24h?: number;
+          priceUsd?: number;
+        }> = {};
         
-        for (const [addr, meta] of metaMap.entries()) {
-          if (meta.name && meta.symbol && 
-              !isPlaceholderTokenText(meta.symbol) && 
-              !isPlaceholderTokenText(meta.name)) {
-            updates[addr] = { name: meta.name, symbol: meta.symbol };
-            console.log(`[WaitingLiquidityTab] Enriched: ${addr.slice(0, 8)} -> ${meta.symbol}`);
+        for (const [addr, priceData] of priceMap.entries()) {
+          const symbol = priceData.symbol || '';
+          const name = priceData.name || '';
+          
+          // Only include if we got valid data
+          if (symbol && !isPlaceholderTokenText(symbol)) {
+            updates[addr] = { 
+              name: name || symbol, 
+              symbol,
+              priceChange24h: priceData.priceChange24h,
+              priceUsd: priceData.priceUsd,
+            };
+            console.log(`[WaitingLiquidityTab] Enriched: ${addr.slice(0, 8)} -> ${symbol} (${priceData.priceChange24h >= 0 ? '+' : ''}${priceData.priceChange24h?.toFixed(2)}%)`);
           }
           enrichmentInProgressRef.current.delete(addr);
         }
         
-        // Also clear addresses that weren't found from DexScreener
+        // Clear remaining addresses
         for (const addr of needsEnrichment) {
           enrichmentInProgressRef.current.delete(addr);
         }
@@ -571,7 +598,7 @@ export default function WaitingLiquidityTab({
         }
       })
       .catch((err) => {
-        console.error('[WaitingLiquidityTab] Metadata enrichment error:', err);
+        console.error('[WaitingLiquidityTab] DexScreener enrichment error:', err);
         // Clear in-progress state
         for (const addr of needsEnrichment) {
           enrichmentInProgressRef.current.delete(addr);

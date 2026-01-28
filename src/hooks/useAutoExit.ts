@@ -111,6 +111,10 @@ export function useAutoExit() {
       // Exit slippage is intentionally higher (15%) to ensure positions can close
       const EXIT_SLIPPAGE_BPS = 1500; // 15% - higher for exits to ensure execution
       
+      let quote: any = null;
+      let swapSource: 'jupiter' | 'raydium' = 'jupiter';
+      
+      // Try Jupiter first
       const quoteResult = await fetchJupiterQuote({
         inputMint: position.token_address,
         outputMint: SOL_MINT,
@@ -118,67 +122,145 @@ export function useAutoExit() {
         slippageBps: EXIT_SLIPPAGE_BPS,
       });
 
-      if (quoteResult.ok === false) {
-        if (quoteResult.kind === 'NO_ROUTE') {
-          toast({
-            title: 'No Route Available',
-            description: `Cannot sell ${result.symbol} - no Jupiter route`,
-            variant: 'destructive',
-          });
-        } else if (quoteResult.kind === 'RATE_LIMITED') {
-          toast({
-            title: 'Rate Limited',
-            description: 'Jupiter API is busy. Auto-retry in next cycle.',
-            variant: 'destructive',
-          });
-        } else {
-          toast({
-            title: 'Exit Failed',
-            description: quoteResult.message || 'Could not get Jupiter quote for sell',
-            variant: 'destructive',
-          });
+      if (quoteResult.ok === true) {
+        quote = quoteResult.quote;
+        swapSource = 'jupiter';
+      } else {
+        // Jupiter failed - try Raydium as fallback
+        addBotLog({
+          level: 'info',
+          category: 'exit',
+          message: `⚡ Jupiter unavailable for ${result.symbol}, trying Raydium...`,
+          tokenSymbol: result.symbol,
+          details: quoteResult.kind === 'RATE_LIMITED' ? 'Jupiter rate limited' : 'No Jupiter route',
+        });
+        
+        try {
+          const raydiumUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${position.token_address}&outputMint=${SOL_MINT}&amount=${amountInSmallestUnit}&slippageBps=${EXIT_SLIPPAGE_BPS}&txVersion=V0`;
+          const raydiumRes = await fetch(raydiumUrl, { signal: AbortSignal.timeout(10000) });
+          
+          if (raydiumRes.ok) {
+            const raydiumData = await raydiumRes.json();
+            if (raydiumData?.success) {
+              quote = raydiumData;
+              swapSource = 'raydium';
+              addBotLog({
+                level: 'success',
+                category: 'exit',
+                message: `✅ Raydium route found for ${result.symbol}`,
+                tokenSymbol: result.symbol,
+              });
+            }
+          }
+        } catch (raydiumErr) {
+          console.error('[AutoExit] Raydium fallback error:', raydiumErr);
+        }
+      }
+      
+      // If still no quote, report failure
+      if (!quote) {
+        if (quoteResult.ok === false) {
+          if (quoteResult.kind === 'NO_ROUTE') {
+            toast({
+              title: 'No Route Available',
+              description: `Cannot sell ${result.symbol} - no Jupiter or Raydium route`,
+              variant: 'destructive',
+            });
+          } else if (quoteResult.kind === 'RATE_LIMITED') {
+            toast({
+              title: 'Rate Limited',
+              description: 'Jupiter API is busy. Auto-retry in next cycle.',
+              variant: 'destructive',
+            });
+          } else {
+            toast({
+              title: 'Exit Failed',
+              description: quoteResult.message || 'Could not get quote for sell',
+              variant: 'destructive',
+            });
+          }
         }
         return false;
       }
 
-      const quote = quoteResult.quote;
-
-      // Build swap transaction
-      const swapRes = await fetch('https://lite-api.jup.ag/swap/v1/swap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          quoteResponse: quote,
-          userPublicKey: wallet.address,
-          wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true,
-          dynamicSlippage: true,
-          priorityLevelWithMaxLamports: { maxLamports: 5000000, priorityLevel: 'high' },
-        }),
-      });
-
-      if (!swapRes.ok) {
-        toast({
-          title: 'Swap Build Failed',
-          description: 'Could not build Jupiter swap transaction',
-          variant: 'destructive',
-        });
-        return false;
-      }
-
-      const swapData = await swapRes.json();
+      // Build swap transaction based on source
+      let txBytes: Uint8Array;
       
-      if (!swapData.swapTransaction) {
-        toast({
-          title: 'Transaction Error',
-          description: 'Jupiter did not return transaction data',
-          variant: 'destructive',
+      if (swapSource === 'jupiter') {
+        // Jupiter swap
+        const swapRes = await fetch('https://lite-api.jup.ag/swap/v1/swap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            quoteResponse: quote,
+            userPublicKey: wallet.address,
+            wrapAndUnwrapSol: true,
+            dynamicComputeUnitLimit: true,
+            dynamicSlippage: true,
+            priorityLevelWithMaxLamports: { maxLamports: 5000000, priorityLevel: 'high' },
+          }),
         });
-        return false;
+
+        if (!swapRes.ok) {
+          toast({
+            title: 'Swap Build Failed',
+            description: 'Could not build Jupiter swap transaction',
+            variant: 'destructive',
+          });
+          return false;
+        }
+
+        const swapData = await swapRes.json();
+        
+        if (!swapData.swapTransaction) {
+          toast({
+            title: 'Transaction Error',
+            description: 'Jupiter did not return transaction data',
+            variant: 'destructive',
+          });
+          return false;
+        }
+        
+        txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+      } else {
+        // Raydium swap
+        const swapRes = await fetch('https://transaction-v1.raydium.io/transaction/swap-base-in', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            swapResponse: quote,
+            wallet: wallet.address,
+            txVersion: 'V0',
+            wrapSol: false,
+            unwrapSol: true,
+            computeUnitPriceMicroLamports: '500000',
+          }),
+        });
+
+        if (!swapRes.ok) {
+          toast({
+            title: 'Swap Build Failed',
+            description: 'Could not build Raydium swap transaction',
+            variant: 'destructive',
+          });
+          return false;
+        }
+
+        const swapData = await swapRes.json();
+        
+        if (!swapData.success || !swapData.data?.transaction) {
+          toast({
+            title: 'Transaction Error',
+            description: swapData.msg || 'Raydium did not return transaction data',
+            variant: 'destructive',
+          });
+          return false;
+        }
+        
+        txBytes = Uint8Array.from(atob(swapData.data.transaction), c => c.charCodeAt(0));
       }
 
       // Decode and sign transaction
-      const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
       const { VersionedTransaction } = await import('@solana/web3.js');
       const transaction = VersionedTransaction.deserialize(txBytes);
 
