@@ -330,7 +330,7 @@ async function getJupiterQuote(
     timeoutMs: 15000,
   });
 
-  if (!quoteResult.ok) {
+  if (quoteResult.ok === false) {
     // Only treat real no-route as "no route".
     // Anything else should bubble up so callers can show a retryable error.
     if (quoteResult.kind === 'NO_ROUTE') return null;
