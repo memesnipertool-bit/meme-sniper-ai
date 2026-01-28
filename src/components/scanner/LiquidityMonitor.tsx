@@ -357,11 +357,12 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   const pnlPercent = trade.profit_loss_percent || 0;
   const isPositive = pnlPercent >= 0;
   
-  // CRITICAL: Calculate ACTUAL current USD value (amount × current_price) like Phantom shows
-  const currentUsdValue = trade.amount * trade.current_price;
-  const entryUsdValue = trade.amount * trade.entry_price;
-  // P&L in USD = current value - entry value
-  const pnlUsdValue = currentUsdValue - entryUsdValue;
+  // CRITICAL: Use current_value from DB directly (it's already correct)
+  // Calculate actual token amount from current_value / current_price
+  const currentUsdValue = trade.current_value || (trade.amount * trade.current_price);
+  const actualTokenAmount = trade.current_price > 0 
+    ? currentUsdValue / trade.current_price 
+    : trade.amount;
   
   // Use actual token name/symbol, fallback to formatted address
   const displaySymbol = getTokenDisplaySymbol(trade.token_symbol, trade.token_address);
@@ -378,8 +379,8 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   const formatTokenAmount = (amount: number) => {
     if (amount >= 1000000) return `${(amount / 1000000).toFixed(2)}M`;
     if (amount >= 1000) return `${(amount / 1000).toFixed(2)}K`;
-    if (amount >= 1) return amount.toFixed(2);
-    if (amount >= 0.001) return amount.toFixed(5);
+    if (amount >= 1) return amount.toFixed(5);
+    if (amount >= 0.001) return amount.toFixed(6);
     return amount.toFixed(8);
   };
 
@@ -402,10 +403,10 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {/* Token quantity like Phantom shows */}
           <span className="tabular-nums font-medium text-foreground/80">
-            {formatTokenAmount(trade.amount)} {displaySymbol}
+            {formatTokenAmount(actualTokenAmount)} {displaySymbol}
           </span>
           <span className="text-muted-foreground/40">•</span>
-          <span className="tabular-nums">Entry: {formatPrice(trade.entry_price)}</span>
+          <span className="tabular-nums">Now: {formatPrice(trade.current_price)}</span>
         </div>
       </div>
       
@@ -415,12 +416,12 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
         <div className="font-bold text-sm tabular-nums text-foreground">
           ${currentUsdValue >= 1000 ? currentUsdValue.toFixed(0) : currentUsdValue >= 1 ? currentUsdValue.toFixed(2) : currentUsdValue.toFixed(4)}
         </div>
-        {/* P&L change below */}
+        {/* Simple P&L percentage only */}
         <div className={cn(
           "text-xs tabular-nums font-medium transition-all duration-300",
           isPositive ? 'text-success' : 'text-destructive'
         )}>
-          {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}% ({isPositive ? '+' : ''}${Math.abs(pnlUsdValue) < 0.01 ? '<0.01' : pnlUsdValue.toFixed(2)})
+          {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}%
         </div>
       </div>
       
@@ -440,6 +441,7 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   return (
     prevProps.trade.id === nextProps.trade.id &&
     prevProps.trade.current_price === nextProps.trade.current_price &&
+    prevProps.trade.current_value === nextProps.trade.current_value &&
     prevProps.trade.profit_loss_percent === nextProps.trade.profit_loss_percent &&
     prevProps.trade.profit_loss_value === nextProps.trade.profit_loss_value &&
     prevProps.trade.token_name === nextProps.trade.token_name &&
