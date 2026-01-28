@@ -58,6 +58,16 @@ export function useTradeHistory(limit: number = 1000) {
   const backfillFromPositions = useCallback(async () => {
     if (!user) return 0;
 
+    // First, get existing trade_history entries to avoid duplicates
+    const { data: existingTrades } = await supabase
+      .from('trade_history')
+      .select('token_address, trade_type, created_at')
+      .eq('user_id', user.id);
+
+    const existingSet = new Set(
+      (existingTrades || []).map(t => `${t.token_address}-${t.trade_type}-${t.created_at}`)
+    );
+
     const { data: positionsData, error: positionsError } = await supabase
       .from('positions')
       .select(
@@ -71,23 +81,26 @@ export function useTradeHistory(limit: number = 1000) {
     const positions = ((positionsData || []) as unknown as PositionBackfillRow[]).map((p) => ({ ...p }));
     if (positions.length === 0) return 0;
 
-    // Use 'confirmed' to match the database check constraint
-    const buyRows = positions.map((p) => ({
-      user_id: user.id,
-      token_address: p.token_address,
-      token_symbol: p.token_symbol,
-      token_name: p.token_name,
-      trade_type: 'buy' as const,
-      amount: Number(p.amount),
-      price_sol: p.entry_price ?? null,
-      price_usd: p.entry_price_usd ?? null,
-      status: 'confirmed',
-      tx_hash: null,
-      created_at: p.created_at,
-    }));
+    // Filter out positions that already exist in trade_history
+    const buyRows = positions
+      .filter((p) => !existingSet.has(`${p.token_address}-buy-${p.created_at}`))
+      .map((p) => ({
+        user_id: user.id,
+        token_address: p.token_address,
+        token_symbol: p.token_symbol,
+        token_name: p.token_name,
+        trade_type: 'buy' as const,
+        amount: Number(p.amount),
+        price_sol: p.entry_price ?? null,
+        price_usd: p.entry_price_usd ?? null,
+        status: 'confirmed',
+        tx_hash: null,
+        created_at: p.created_at,
+      }));
 
     const sellRows = positions
       .filter((p) => (p.status || '').toLowerCase() === 'closed')
+      .filter((p) => !existingSet.has(`${p.token_address}-sell-${p.closed_at ?? p.created_at}`))
       .map((p) => ({
         user_id: user.id,
         token_address: p.token_address,
@@ -233,9 +246,51 @@ export function useTradeHistory(limit: number = 1000) {
     };
   }, [user, fetchTrades]);
 
+  // Force sync - runs backfill regardless of previous attempts
+  const forceSync = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      setLoading(true);
+      const inserted = await backfillFromPositions();
+      
+      // Refetch after sync
+      const { data } = await supabase
+        .from('trade_history')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      
+      setTrades((data || []) as TradeHistoryEntry[]);
+      
+      if (inserted > 0) {
+        toast({
+          title: 'Sync Complete',
+          description: `Added ${inserted} missing transactions from positions`,
+        });
+      } else {
+        toast({
+          title: 'Already in sync',
+          description: 'Transaction history is up to date',
+        });
+      }
+    } catch (error: any) {
+      console.error('Force sync failed:', error);
+      toast({
+        title: 'Sync Failed',
+        description: error.message || 'Failed to sync transaction history',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [user, backfillFromPositions, limit, toast]);
+
   return {
     trades,
     loading,
     refetch: fetchTrades,
+    forceSync,
   };
 }

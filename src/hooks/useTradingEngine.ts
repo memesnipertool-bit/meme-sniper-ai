@@ -323,7 +323,7 @@ export function useTradingEngine() {
                 amount: position.tokenAmount,
                 price_sol: position.entryPrice,
                 price_usd: entryPriceUsd,
-                status: 'completed',
+                status: 'confirmed',
                 tx_hash: position.entryTxHash,
               });
 
