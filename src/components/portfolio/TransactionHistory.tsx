@@ -39,6 +39,7 @@ import {
   FileJson,
   Search,
   X,
+  RefreshCcw,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -57,20 +58,32 @@ interface TransactionHistoryProps {
   trades: TradeHistoryEntry[];
   loading: boolean;
   onRefetch: () => void;
+  onForceSync?: () => void;
 }
 
 type DatePreset = 'all' | 'today' | 'week' | 'month' | 'year' | 'custom';
 type TradeTypeFilter = 'all' | 'buy' | 'sell';
-type StatusFilter = 'all' | 'completed' | 'pending' | 'failed';
+type StatusFilter = 'all' | 'confirmed' | 'pending' | 'failed';
 
 const shortAddress = (address: string) =>
   address && address.length > 10
     ? `${address.slice(0, 4)}…${address.slice(-4)}`
     : address || 'Token';
 
-export function TransactionHistory({ trades, loading, onRefetch }: TransactionHistoryProps) {
+export function TransactionHistory({ trades, loading, onRefetch, onForceSync }: TransactionHistoryProps) {
   const { formatPrimaryValue, formatDualValue } = useDisplayUnit();
   const [exporting, setExporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleForceSync = async () => {
+    if (!onForceSync) return;
+    setSyncing(true);
+    try {
+      await onForceSync();
+    } finally {
+      setSyncing(false);
+    }
+  };
   
   // Filter states
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
@@ -137,7 +150,7 @@ export function TransactionHistory({ trades, loading, onRefetch }: TransactionHi
   const stats = useMemo(() => {
     const buys = filteredTrades.filter(t => t.trade_type === 'buy');
     const sells = filteredTrades.filter(t => t.trade_type === 'sell');
-    const completed = filteredTrades.filter(t => t.status === 'completed');
+    const completed = filteredTrades.filter(t => t.status === 'confirmed');
     const totalVolumeSol = filteredTrades.reduce((sum, t) => sum + (t.price_sol || 0), 0);
     
     return {
@@ -397,6 +410,21 @@ export function TransactionHistory({ trades, loading, onRefetch }: TransactionHi
                 )}
               </Button>
 
+              {/* Force Sync */}
+              {onForceSync && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleForceSync} 
+                  disabled={loading || syncing}
+                  className="border-primary/50 text-primary hover:bg-primary/10"
+                  title="Sync missing transactions from positions"
+                >
+                  {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+                  <span className="hidden sm:inline ml-2">Force Sync</span>
+                </Button>
+              )}
+
               {/* Refresh */}
               <Button variant="outline" size="sm" onClick={onRefetch} disabled={loading}>
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -453,7 +481,7 @@ export function TransactionHistory({ trades, loading, onRefetch }: TransactionHi
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
                   <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="confirmed">Confirmed</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="failed">Failed</SelectItem>
                 </SelectContent>

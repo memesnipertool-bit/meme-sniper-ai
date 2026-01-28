@@ -334,7 +334,7 @@ export function useLiquidityRetryWorker() {
           trade_type: 'sell',
           amount: position.amount,
           price_sol: position.current_price,
-          status: 'completed',
+          status: 'confirmed',
           tx_hash: swapResult.signature,
         });
       }

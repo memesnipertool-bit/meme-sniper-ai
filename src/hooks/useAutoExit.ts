@@ -342,7 +342,7 @@ export function useAutoExit() {
             amount: tokenAmountToSell,
             price_sol: result.currentPrice,
             price_usd: null,
-            status: 'completed',
+            status: 'confirmed',
             tx_hash: signResult.signature,
           });
       }
