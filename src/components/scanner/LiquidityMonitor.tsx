@@ -354,20 +354,19 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   colorIndex: number; 
   onExit?: (id: string, price: number) => void 
 }) => {
-  // CRITICAL: Use entry_value and current_value for accurate P&L (matches Phantom wallet)
+  // CRITICAL: Use pre-calculated values from usePositions hook - DO NOT RECALCULATE
+  // The hook already computes accurate P&L using entry_price_usd vs current_price (USD to USD)
+  // Recalculating here with entry_value/current_value causes mismatches because
+  // entry_value is in SOL but current_value is in USD
   const entryUsdValue = trade.entry_value || 0;
-  const currentUsdValue = trade.current_value || (trade.amount * trade.current_price);
+  const currentUsdValue = trade.current_value || 0;
   
-  // P&L % calculated from actual USD values - THIS IS WHAT PHANTOM SHOWS
-  const pnlPercent = entryUsdValue > 0 
-    ? ((currentUsdValue - entryUsdValue) / entryUsdValue) * 100 
-    : (trade.profit_loss_percent || 0);
+  // USE the pre-calculated P&L from the hook - this is the source of truth
+  const pnlPercent = trade.profit_loss_percent ?? 0;
   const isPositive = pnlPercent >= 0;
   
-  // Calculate actual token amount from current_value / current_price
-  const actualTokenAmount = trade.current_price > 0 
-    ? currentUsdValue / trade.current_price 
-    : trade.amount;
+  // Use the actual token amount from the position (already tracked correctly)
+  const actualTokenAmount = trade.amount;
   
   // Use actual token name/symbol, fallback to formatted address
   const displaySymbol = getTokenDisplaySymbol(trade.token_symbol, trade.token_address);
@@ -454,13 +453,15 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
     </div>
   );
 }, (prevProps, nextProps) => {
+  // STABLE COMPARISON: Only re-render when source-of-truth values change
   return (
     prevProps.trade.id === nextProps.trade.id &&
+    prevProps.trade.amount === nextProps.trade.amount &&
     prevProps.trade.current_price === nextProps.trade.current_price &&
     prevProps.trade.current_value === nextProps.trade.current_value &&
     prevProps.trade.entry_value === nextProps.trade.entry_value &&
+    prevProps.trade.entry_price === nextProps.trade.entry_price &&
     prevProps.trade.profit_loss_percent === nextProps.trade.profit_loss_percent &&
-    prevProps.trade.profit_loss_value === nextProps.trade.profit_loss_value &&
     prevProps.trade.token_name === nextProps.trade.token_name &&
     prevProps.trade.token_symbol === nextProps.trade.token_symbol &&
     prevProps.colorIndex === nextProps.colorIndex
