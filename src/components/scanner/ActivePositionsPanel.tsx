@@ -73,19 +73,18 @@ const PositionRow = memo(({
   onClosePosition?: (positionId: string, currentPrice: number) => void;
   onForceClose?: (positionId: string) => void;
 }) => {
-  const pnlPercent = position.profit_loss_percent || 0;
+  // CRITICAL: Use entry_value and current_value for accurate P&L (matches Phantom wallet)
+  const entryUsdValue = position.entry_value || 0;
+  const currentUsdValue = position.current_value || (position.amount * position.current_price);
+  
+  // P&L % calculated from actual USD values - THIS IS WHAT PHANTOM SHOWS
+  const pnlPercent = entryUsdValue > 0 
+    ? ((currentUsdValue - entryUsdValue) / entryUsdValue) * 100 
+    : (position.profit_loss_percent || 0);
   const isPositive = pnlPercent >= 0;
   const progressWidth = Math.min(Math.abs(pnlPercent), 100);
-
-  // CRITICAL: Use current_value from DB directly (it's already correct)
-  // Fall back to entry_value based calculation if current_value not available
-  const currentUsdValue = position.current_value || (
-    position.entry_value && position.entry_value > 0 && position.current_price > 0
-      ? (position.entry_value / position.entry_price) * position.current_price
-      : position.amount * position.current_price
-  );
   
-  // Calculate actual token amount from current_value or entry_value
+  // Calculate actual token amount from current_value / current_price
   const actualTokenAmount = position.current_price > 0 
     ? currentUsdValue / position.current_price 
     : position.amount;
@@ -101,6 +100,14 @@ const PositionRow = memo(({
   const handleForceClose = useCallback(() => {
     onForceClose?.(position.id);
   }, [onForceClose, position.id]);
+  
+  // Format USD value with appropriate precision
+  const formatUsdValue = (val: number) => {
+    if (val >= 1000) return `$${val.toFixed(0)}`;
+    if (val >= 1) return `$${val.toFixed(2)}`;
+    if (val >= 0.01) return `$${val.toFixed(3)}`;
+    return `$${val.toFixed(4)}`;
+  };
 
   return (
     <div className="px-4 py-3 border-b border-border/20 hover:bg-secondary/20 transition-colors group">
@@ -120,9 +127,9 @@ const PositionRow = memo(({
               <span className="font-semibold text-sm text-foreground truncate">{displayName}</span>
               <span className="text-xs text-muted-foreground">{displaySymbol}</span>
             </div>
-            {/* Token quantity + current market price */}
+            {/* Token quantity + Entry → Current value */}
             <p className="text-xs text-muted-foreground tabular-nums">
-              {formatTokenAmount(actualTokenAmount)} {displaySymbol} • Now: {formatPrice(position.current_price)}
+              {formatTokenAmount(actualTokenAmount)} {displaySymbol} • {formatUsdValue(entryUsdValue)} → {formatUsdValue(currentUsdValue)}
             </p>
           </div>
         </div>
@@ -148,14 +155,18 @@ const PositionRow = memo(({
             <TooltipContent side="left" className="bg-popover border-border text-xs">
               <div className="space-y-1">
                 <p className="tabular-nums">Tokens: {formatTokenAmount(actualTokenAmount)} {displaySymbol}</p>
-                <p className="tabular-nums">Entry: {formatPrice(position.entry_price)}</p>
-                <p className="tabular-nums">Current: {formatPrice(position.current_price)}</p>
-                <p className="tabular-nums">Value: ${currentUsdValue.toFixed(2)}</p>
+                <p className="tabular-nums">Entry Price: {formatPrice(position.entry_price)}</p>
+                <p className="tabular-nums">Current Price: {formatPrice(position.current_price)}</p>
+                <p className="tabular-nums text-muted-foreground">Entry Value: {formatUsdValue(entryUsdValue)}</p>
+                <p className="tabular-nums font-medium">Current Value: {formatUsdValue(currentUsdValue)}</p>
+                <p className={cn("tabular-nums font-medium", isPositive ? 'text-success' : 'text-destructive')}>
+                  P&L: {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}%
+                </p>
                 {position.profit_take_percent && (
-                  <p className="text-success">TP: +{position.profit_take_percent}%</p>
+                  <p className="text-success">TP Target: +{position.profit_take_percent}%</p>
                 )}
                 {position.stop_loss_percent && (
-                  <p className="text-destructive">SL: -{position.stop_loss_percent}%</p>
+                  <p className="text-destructive">SL Target: -{position.stop_loss_percent}%</p>
                 )}
               </div>
             </TooltipContent>
@@ -241,6 +252,7 @@ const PositionRow = memo(({
     prevProps.position.id === nextProps.position.id &&
     prevProps.position.current_price === nextProps.position.current_price &&
     prevProps.position.current_value === nextProps.position.current_value &&
+    prevProps.position.entry_value === nextProps.position.entry_value &&
     prevProps.position.profit_loss_percent === nextProps.position.profit_loss_percent &&
     prevProps.position.profit_loss_value === nextProps.position.profit_loss_value &&
     prevProps.position.token_name === nextProps.position.token_name &&

@@ -354,12 +354,17 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   colorIndex: number; 
   onExit?: (id: string, price: number) => void 
 }) => {
-  const pnlPercent = trade.profit_loss_percent || 0;
+  // CRITICAL: Use entry_value and current_value for accurate P&L (matches Phantom wallet)
+  const entryUsdValue = trade.entry_value || 0;
+  const currentUsdValue = trade.current_value || (trade.amount * trade.current_price);
+  
+  // P&L % calculated from actual USD values - THIS IS WHAT PHANTOM SHOWS
+  const pnlPercent = entryUsdValue > 0 
+    ? ((currentUsdValue - entryUsdValue) / entryUsdValue) * 100 
+    : (trade.profit_loss_percent || 0);
   const isPositive = pnlPercent >= 0;
   
-  // CRITICAL: Use current_value from DB directly (it's already correct)
   // Calculate actual token amount from current_value / current_price
-  const currentUsdValue = trade.current_value || (trade.amount * trade.current_price);
   const actualTokenAmount = trade.current_price > 0 
     ? currentUsdValue / trade.current_price 
     : trade.amount;
@@ -383,6 +388,14 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
     if (amount >= 0.001) return amount.toFixed(6);
     return amount.toFixed(8);
   };
+  
+  // Format USD value with appropriate precision
+  const formatUsdValue = (val: number) => {
+    if (val >= 1000) return `$${val.toFixed(0)}`;
+    if (val >= 1) return `$${val.toFixed(2)}`;
+    if (val >= 0.01) return `$${val.toFixed(3)}`;
+    return `$${val.toFixed(4)}`;
+  };
 
   return (
     <div className="grid grid-cols-[40px_1fr_auto_auto] items-center gap-3 px-3 py-2.5 border-b border-border/20 hover:bg-secondary/30 transition-colors">
@@ -394,19 +407,22 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
         {initials}
       </div>
       
-      {/* Token Info - Show amount prominently like Phantom */}
+      {/* Token Info - Show entry value + current value like Phantom */}
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
           <span className="text-muted-foreground text-xs">{displaySymbol}</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {/* Token quantity like Phantom shows */}
+          {/* Token quantity */}
           <span className="tabular-nums font-medium text-foreground/80">
             {formatTokenAmount(actualTokenAmount)} {displaySymbol}
           </span>
           <span className="text-muted-foreground/40">•</span>
-          <span className="tabular-nums">Now: {formatPrice(trade.current_price)}</span>
+          {/* Entry → Current value */}
+          <span className="tabular-nums">
+            {formatUsdValue(entryUsdValue)} → {formatUsdValue(currentUsdValue)}
+          </span>
         </div>
       </div>
       
@@ -442,6 +458,7 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
     prevProps.trade.id === nextProps.trade.id &&
     prevProps.trade.current_price === nextProps.trade.current_price &&
     prevProps.trade.current_value === nextProps.trade.current_value &&
+    prevProps.trade.entry_value === nextProps.trade.entry_value &&
     prevProps.trade.profit_loss_percent === nextProps.trade.profit_loss_percent &&
     prevProps.trade.profit_loss_value === nextProps.trade.profit_loss_value &&
     prevProps.trade.token_name === nextProps.trade.token_name &&
