@@ -347,6 +347,114 @@ export type Database = {
         }
         Relationships: []
       }
+      risk_check_logs: {
+        Row: {
+          buy_tax: number | null
+          chain: string | null
+          checked_at: string
+          id: string
+          is_blacklisted: boolean | null
+          is_honeypot: boolean | null
+          liquidity_locked: boolean | null
+          lock_percentage: number | null
+          metadata: Json | null
+          owner_renounced: boolean | null
+          passed_checks: boolean | null
+          rejection_reasons: string[] | null
+          risk_score: number | null
+          sell_tax: number | null
+          token_address: string
+          token_symbol: string | null
+          user_id: string | null
+        }
+        Insert: {
+          buy_tax?: number | null
+          chain?: string | null
+          checked_at?: string
+          id?: string
+          is_blacklisted?: boolean | null
+          is_honeypot?: boolean | null
+          liquidity_locked?: boolean | null
+          lock_percentage?: number | null
+          metadata?: Json | null
+          owner_renounced?: boolean | null
+          passed_checks?: boolean | null
+          rejection_reasons?: string[] | null
+          risk_score?: number | null
+          sell_tax?: number | null
+          token_address: string
+          token_symbol?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          buy_tax?: number | null
+          chain?: string | null
+          checked_at?: string
+          id?: string
+          is_blacklisted?: boolean | null
+          is_honeypot?: boolean | null
+          liquidity_locked?: boolean | null
+          lock_percentage?: number | null
+          metadata?: Json | null
+          owner_renounced?: boolean | null
+          passed_checks?: boolean | null
+          rejection_reasons?: string[] | null
+          risk_score?: number | null
+          sell_tax?: number | null
+          token_address?: string
+          token_symbol?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      risk_settings: {
+        Row: {
+          circuit_breaker_enabled: boolean
+          circuit_breaker_loss_threshold: number
+          circuit_breaker_time_window_minutes: number
+          circuit_breaker_triggered_at: string | null
+          created_at: string
+          emergency_stop_active: boolean
+          id: string
+          max_risk_score: number
+          max_tax_percent: number
+          require_liquidity_locked: boolean
+          require_ownership_renounced: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          circuit_breaker_enabled?: boolean
+          circuit_breaker_loss_threshold?: number
+          circuit_breaker_time_window_minutes?: number
+          circuit_breaker_triggered_at?: string | null
+          created_at?: string
+          emergency_stop_active?: boolean
+          id?: string
+          max_risk_score?: number
+          max_tax_percent?: number
+          require_liquidity_locked?: boolean
+          require_ownership_renounced?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          circuit_breaker_enabled?: boolean
+          circuit_breaker_loss_threshold?: number
+          circuit_breaker_time_window_minutes?: number
+          circuit_breaker_triggered_at?: string | null
+          created_at?: string
+          emergency_stop_active?: boolean
+          id?: string
+          max_risk_score?: number
+          max_tax_percent?: number
+          require_liquidity_locked?: boolean
+          require_ownership_renounced?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       sniper_settings: {
         Row: {
           auto_buy_enabled: boolean | null
