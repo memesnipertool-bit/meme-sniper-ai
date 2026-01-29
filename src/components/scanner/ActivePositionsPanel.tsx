@@ -73,21 +73,20 @@ const PositionRow = memo(({
   onClosePosition?: (positionId: string, currentPrice: number) => void;
   onForceClose?: (positionId: string) => void;
 }) => {
-  // CRITICAL: Use entry_value and current_value for accurate P&L (matches Phantom wallet)
+  // CRITICAL: Use pre-calculated values from usePositions hook - DO NOT RECALCULATE
+  // The hook already computes accurate P&L using entry_price_usd vs current_price (USD to USD)
+  // Recalculating here with entry_value/current_value causes mismatches because
+  // entry_value is in SOL but current_value is in USD
   const entryUsdValue = position.entry_value || 0;
-  const currentUsdValue = position.current_value || (position.amount * position.current_price);
+  const currentUsdValue = position.current_value || 0;
   
-  // P&L % calculated from actual USD values - THIS IS WHAT PHANTOM SHOWS
-  const pnlPercent = entryUsdValue > 0 
-    ? ((currentUsdValue - entryUsdValue) / entryUsdValue) * 100 
-    : (position.profit_loss_percent || 0);
+  // USE the pre-calculated P&L from the hook - this is the source of truth
+  const pnlPercent = position.profit_loss_percent ?? 0;
   const isPositive = pnlPercent >= 0;
   const progressWidth = Math.min(Math.abs(pnlPercent), 100);
   
-  // Calculate actual token amount from current_value / current_price
-  const actualTokenAmount = position.current_price > 0 
-    ? currentUsdValue / position.current_price 
-    : position.amount;
+  // Use the actual token amount from the position (already tracked correctly)
+  const actualTokenAmount = position.amount;
 
   // Use actual token name/symbol, fallback to formatted address
   const displaySymbol = getTokenDisplaySymbol(position.token_symbol, position.token_address || '');
@@ -248,13 +247,15 @@ const PositionRow = memo(({
     </div>
   );
 }, (prevProps, nextProps) => {
+  // STABLE COMPARISON: Only re-render when source-of-truth values change
   return (
     prevProps.position.id === nextProps.position.id &&
+    prevProps.position.amount === nextProps.position.amount &&
     prevProps.position.current_price === nextProps.position.current_price &&
     prevProps.position.current_value === nextProps.position.current_value &&
     prevProps.position.entry_value === nextProps.position.entry_value &&
+    prevProps.position.entry_price === nextProps.position.entry_price &&
     prevProps.position.profit_loss_percent === nextProps.position.profit_loss_percent &&
-    prevProps.position.profit_loss_value === nextProps.position.profit_loss_value &&
     prevProps.position.token_name === nextProps.position.token_name &&
     prevProps.position.token_symbol === nextProps.position.token_symbol &&
     prevProps.colorIndex === nextProps.colorIndex
