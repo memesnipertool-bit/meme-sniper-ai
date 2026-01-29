@@ -844,12 +844,30 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       return;
     }
     
-    // Filter for tokens we haven't processed yet AND haven't traded
-    // tradedTokensRef is NEVER cleared during bot session - prevents duplicate buys
-    const unseenTokens = tokens.filter(t => 
-      !processedTokensRef.current.has(t.address) && 
-      !tradedTokensRef.current.has(t.address)
+    // Build set of active position addresses for deduplication
+    const activePositionAddresses = new Set(
+      openPositions.map(p => p.token_address.toLowerCase())
     );
+    
+    // Filter for tokens we haven't processed yet AND haven't traded AND not in active positions
+    // tradedTokensRef is NEVER cleared during bot session - prevents duplicate buys
+    const unseenTokens = tokens.filter(t => {
+      const addrLower = t.address.toLowerCase();
+      
+      // Skip if already processed this session
+      if (processedTokensRef.current.has(t.address)) return false;
+      
+      // Skip if already traded this session
+      if (tradedTokensRef.current.has(t.address)) return false;
+      
+      // CRITICAL: Skip if token already has an active position in database
+      if (activePositionAddresses.has(addrLower)) {
+        console.log(`[Scanner] Filtered out ${t.symbol} - already in active positions`);
+        return false;
+      }
+      
+      return true;
+    });
 
     if (unseenTokens.length === 0) {
       // No new tokens - this is normal, just wait for next scan
@@ -864,6 +882,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       if (t.canSell === false) return false;
       // Double-check against traded tokens
       if (tradedTokensRef.current.has(t.address)) return false;
+      // CRITICAL: Double-check against active positions
+      if (activePositionAddresses.has(t.address.toLowerCase())) return false;
       return true;
     });
 
