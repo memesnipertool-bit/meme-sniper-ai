@@ -11,7 +11,7 @@
  * This is the SINGLE ENTRY POINT for all live trades.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useWallet } from '@/hooks/useWallet';
 import { useWalletModal } from '@/hooks/useWalletModal';
@@ -68,7 +68,7 @@ export function useLiveTradingOrchestrator() {
   const { openModal: openWalletModal } = useWalletModal();
   const tradingEngine = useTradingEngine();
   const { snipeToken, exitPosition, createConfig } = tradingEngine;
-  const { createPosition, fetchPositions } = usePositions();
+  const { createPosition, fetchPositions, openPositions } = usePositions();
   const { settings } = useSniperSettings();
   const { toast } = useToast();
 
@@ -85,6 +85,17 @@ export function useLiveTradingOrchestrator() {
   // CRITICAL: Use ref for executedTokens to prevent stale closure issues
   // This ensures deduplication works correctly across all callbacks
   const executedTokensRef = useRef<Set<string>>(new Set());
+  
+  // CRITICAL: Track active position addresses from database to prevent duplicate trades
+  // This persists across sessions unlike executedTokensRef which is session-only
+  const activePositionAddressesRef = useRef<Set<string>>(new Set());
+  
+  // Keep activePositionAddressesRef synced with database positions
+  useEffect(() => {
+    const addresses = new Set(openPositions.map(p => p.token_address.toLowerCase()));
+    activePositionAddressesRef.current = addresses;
+    console.log(`[Orchestrator] Synced ${addresses.size} active position addresses for deduplication`);
+  }, [openPositions]);
 
   /**
    * Validate prerequisites for live trading
@@ -315,8 +326,24 @@ export function useLiveTradingOrchestrator() {
       const token = queueRef.current.shift();
       if (!token) break;
 
+      const tokenAddrLower = token.address.toLowerCase();
+      
       // Skip if already executed - use ref for stable closure access
       if (executedTokensRef.current.has(token.address)) {
+        continue;
+      }
+      
+      // CRITICAL: Skip if token already has an active position in database
+      // This prevents duplicate buys across sessions
+      if (activePositionAddressesRef.current.has(tokenAddrLower)) {
+        addBotLog({
+          level: 'warning',
+          category: 'trade',
+          message: `⏭️ Skipped: ${token.symbol} (already in active positions)`,
+          tokenSymbol: token.symbol,
+          tokenAddress: token.address,
+          details: 'Token already has an open position - skipping to avoid duplicate buy',
+        });
         continue;
       }
 
@@ -372,11 +399,24 @@ export function useLiveTradingOrchestrator() {
    * Queue approved tokens for execution
    */
   const queueTokens = useCallback((tokens: ApprovedToken[]) => {
-    // Filter out already executed or queued tokens - use ref for stable access
-    const newTokens = tokens.filter(t => 
-      !executedTokensRef.current.has(t.address) &&
-      !queueRef.current.some(q => q.address === t.address)
-    );
+    // Filter out already executed, queued, OR having active positions
+    const newTokens = tokens.filter(t => {
+      const addrLower = t.address.toLowerCase();
+      
+      // Skip if already executed this session
+      if (executedTokensRef.current.has(t.address)) return false;
+      
+      // Skip if already in queue
+      if (queueRef.current.some(q => q.address === t.address)) return false;
+      
+      // CRITICAL: Skip if token already has an active position in database
+      if (activePositionAddressesRef.current.has(addrLower)) {
+        console.log(`[Orchestrator] Filtered out ${t.symbol} - already in active positions`);
+        return false;
+      }
+      
+      return true;
+    });
 
     if (newTokens.length === 0) return;
 
