@@ -414,6 +414,12 @@ export function useLiquidityRetryWorker() {
   // Move a position to waiting for liquidity
   const moveToWaitingForLiquidity = useCallback(async (positionId: string): Promise<boolean> => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.error('[LiquidityRetry] No authenticated user');
+        return false;
+      }
+
       const { error } = await supabase
         .from('positions')
         .update({
@@ -422,7 +428,8 @@ export function useLiquidityRetryWorker() {
           liquidity_check_count: 0,
           liquidity_last_checked_at: null,
         })
-        .eq('id', positionId);
+        .eq('id', positionId)
+        .eq('user_id', user.id);
 
       if (error) {
         console.error('[LiquidityRetry] Move error:', error);
@@ -446,6 +453,9 @@ export function useLiquidityRetryWorker() {
   // Move position back to open (remove from waiting)
   const moveBackToOpen = useCallback(async (positionId: string): Promise<boolean> => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return false;
+
       const { error } = await supabase
         .from('positions')
         .update({
@@ -454,7 +464,8 @@ export function useLiquidityRetryWorker() {
           liquidity_check_count: 0,
           liquidity_last_checked_at: null,
         })
-        .eq('id', positionId);
+        .eq('id', positionId)
+        .eq('user_id', user.id);
 
       if (error) {
         return false;
