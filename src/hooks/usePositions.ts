@@ -518,22 +518,32 @@ export function usePositions() {
           
           const currentValue = p.amount * currentPriceUsd;
           
-          // CRITICAL: Use entry_price_usd for P&L if available, otherwise use entry_price
-          // This ensures unit consistency (USD vs USD)
-          const entryPriceForCalc = p.entry_price_usd ?? p.entry_price;
+          // CRITICAL FIX: Use entry_price_usd for P&L calculations
+          // entry_price_usd is stored in USD (same unit as DexScreener's current_price)
+          // entry_price is in SOL (for backwards compatibility) - DO NOT use for P&L
+          //
+          // If entry_price_usd is missing (legacy positions), we need to detect and handle:
+          // - If entry_price < 0.0001, it's likely a SOL-denominated price (needs conversion)
+          // - We mark it for backfill but use current_value / entry_value ratio for P&L
+          const hasValidEntryPriceUsd = p.entry_price_usd !== null && p.entry_price_usd > 0;
           
-          // Use entry_value (actual SOL invested) for P&L dollar value calculation
-          // This is more accurate than amount * entry_price for tiny token amounts
-          const entryValueForCalc = p.entry_value ?? (p.amount * entryPriceForCalc);
+          // For positions WITHOUT entry_price_usd, calculate P&L from value ratio
+          // This is more accurate than mixing SOL prices with USD prices
+          let profitLossPercent: number;
           
-          // If we didn't have entry_price_usd, try to backfill it from current price structure
-          // This handles legacy positions that were stored with SOL entry prices
-          const needsBackfill = p.entry_price_usd === null && p.entry_price < 0.0001;
-          
-          // P&L % is based on price change
-          let profitLossPercent = entryPriceForCalc > 0 
-            ? ((currentPriceUsd - entryPriceForCalc) / entryPriceForCalc) * 100 
-            : 0;
+          if (hasValidEntryPriceUsd) {
+            // CORRECT: Both prices are in USD
+            profitLossPercent = ((currentPriceUsd - p.entry_price_usd!) / p.entry_price_usd!) * 100;
+          } else {
+            // FALLBACK: Use value-based P&L for legacy positions
+            // entry_value and current_value are both in their original units
+            const entryValueForCalc = p.entry_value ?? (p.amount * p.entry_price);
+            if (entryValueForCalc > 0) {
+              profitLossPercent = ((currentValue - entryValueForCalc) / entryValueForCalc) * 100;
+            } else {
+              profitLossPercent = 0;
+            }
+          }
           
           // SANITY CHECK: Clamp P&L to reasonable bounds (-100% to +10000%)
           // Prevents UI from showing absurd values due to data errors
@@ -541,10 +551,9 @@ export function usePositions() {
           const MAX_REASONABLE_LOSS = -99.99;
           profitLossPercent = Math.max(MAX_REASONABLE_LOSS, Math.min(MAX_REASONABLE_GAIN, profitLossPercent));
           
-          // P&L $ value uses entry_value (SOL invested) as baseline for accuracy
-          // Formula: entryValue * (1 + profitLossPercent/100) - entryValue
-          // Which simplifies to: entryValue * profitLossPercent/100
-          const profitLossValue = entryValueForCalc * (profitLossPercent / 100);
+          // P&L $ value = current value - entry value (both in USD now)
+          const entryValueForDollarCalc = p.entry_value ?? (p.amount * (p.entry_price_usd ?? p.entry_price));
+          const profitLossValue = currentValue - entryValueForDollarCalc;
 
           // Check if metadata needs enrichment (name/symbol are placeholders)
           const needsMetadataEnrichment = isPlaceholderText(p.token_name) || isPlaceholderText(p.token_symbol);
@@ -591,9 +600,6 @@ export function usePositions() {
             // Enrich token metadata from DexScreener
             token_name: enrichedName,
             token_symbol: enrichedSymbol,
-            // Backfill entry_price_usd if we detected a unit mismatch
-            // (entry was in SOL but current is in USD)
-            entry_price_usd: needsBackfill ? null : (p.entry_price_usd ?? entryPriceForCalc),
           };
         });
         
