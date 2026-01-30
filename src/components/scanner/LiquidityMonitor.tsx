@@ -19,10 +19,11 @@ interface ActiveTradePosition {
   token_name: string;
   chain: string;
   entry_price: number;
+  entry_price_usd?: number | null; // USD entry price (source of truth for P&L)
   current_price: number;
   amount: number;
-  entry_value: number;
-  current_value: number;
+  entry_value: number;      // May be stale/mixed-unit - prefer deriving from amount × entry_price_usd
+  current_value: number;    // May be stale/mixed-unit - prefer deriving from amount × current_price
   profit_loss_percent: number | null;
   profit_loss_value: number | null;
   profit_take_percent: number;
@@ -349,24 +350,35 @@ const shortAddress = (address: string) => formatShortAddress(address);
 const isPlaceholder = (val: string | null | undefined) => isPlaceholderText(val);
 
 // Memoized Trade Row with improved visibility - shows accurate USD values like Phantom
+// CRITICAL: Derives USD values from amount × price to prevent 1000x magnitude bugs
 const TradeRow = memo(({ trade, colorIndex, onExit }: { 
   trade: ActiveTradePosition; 
   colorIndex: number; 
   onExit?: (id: string, price: number) => void 
 }) => {
-  // CRITICAL: Use pre-calculated values from usePositions hook - DO NOT RECALCULATE
-  // The hook already computes accurate P&L using entry_price_usd vs current_price (USD to USD)
-  // Recalculating here with entry_value/current_value causes mismatches because
-  // entry_value is in SOL but current_value is in USD
-  const entryUsdValue = trade.entry_value || 0;
-  const currentUsdValue = trade.current_value || 0;
+  const actualTokenAmount = trade.amount;
+  
+  // CRITICAL FIX: Derive USD values from amount × price (source of truth)
+  // entry_value/current_value fields can have mixed units causing 1000x errors
+  // Use entry_price_usd when available (USD), fallback to entry_price
+  const entryPriceUsd = trade.entry_price_usd ?? trade.entry_price;
+  const currentPriceUsd = trade.current_price || entryPriceUsd;
+  
+  // Derive values consistently from amount × price (both in USD)
+  const derivedEntryUsdValue = actualTokenAmount * entryPriceUsd;
+  const derivedCurrentUsdValue = actualTokenAmount * currentPriceUsd;
+  
+  // Use derived values, with sanity check for reasonable values
+  const entryUsdValue = Number.isFinite(derivedEntryUsdValue) && derivedEntryUsdValue > 0 
+    ? derivedEntryUsdValue 
+    : (trade.entry_value || 0);
+  const currentUsdValue = Number.isFinite(derivedCurrentUsdValue) && derivedCurrentUsdValue > 0 
+    ? derivedCurrentUsdValue 
+    : (trade.current_value || 0);
   
   // USE the pre-calculated P&L from the hook - this is the source of truth
   const pnlPercent = trade.profit_loss_percent ?? 0;
   const isPositive = pnlPercent >= 0;
-  
-  // Use the actual token amount from the position (already tracked correctly)
-  const actualTokenAmount = trade.amount;
   
   // Use actual token name/symbol, fallback to formatted address
   const displaySymbol = getTokenDisplaySymbol(trade.token_symbol, trade.token_address);
@@ -383,8 +395,8 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   const formatTokenAmount = (amount: number) => {
     if (amount >= 1000000) return `${(amount / 1000000).toFixed(2)}M`;
     if (amount >= 1000) return `${(amount / 1000).toFixed(2)}K`;
-    if (amount >= 1) return amount.toFixed(5);
-    if (amount >= 0.001) return amount.toFixed(6);
+    if (amount >= 1) return amount.toFixed(2);
+    if (amount >= 0.001) return amount.toFixed(5);
     return amount.toFixed(8);
   };
   
@@ -406,7 +418,7 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
         {initials}
       </div>
       
-      {/* Token Info - Show entry value + current value like Phantom */}
+      {/* Token Info - Simplified: quantity + entry/current price */}
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
@@ -418,9 +430,9 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
             {formatTokenAmount(actualTokenAmount)} {displaySymbol}
           </span>
           <span className="text-muted-foreground/40">•</span>
-          {/* Entry → Current value */}
+          {/* Entry → Current price (not value, to avoid confusion) */}
           <span className="tabular-nums">
-            {formatUsdValue(entryUsdValue)} → {formatUsdValue(currentUsdValue)}
+            {formatPrice(entryPriceUsd)} → {formatPrice(currentPriceUsd)}
           </span>
         </div>
       </div>
@@ -454,13 +466,13 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   );
 }, (prevProps, nextProps) => {
   // STABLE COMPARISON: Only re-render when source-of-truth values change
+  // entry_price_usd is primary for USD values, current_price for live updates
   return (
     prevProps.trade.id === nextProps.trade.id &&
     prevProps.trade.amount === nextProps.trade.amount &&
     prevProps.trade.current_price === nextProps.trade.current_price &&
-    prevProps.trade.current_value === nextProps.trade.current_value &&
-    prevProps.trade.entry_value === nextProps.trade.entry_value &&
     prevProps.trade.entry_price === nextProps.trade.entry_price &&
+    prevProps.trade.entry_price_usd === nextProps.trade.entry_price_usd &&
     prevProps.trade.profit_loss_percent === nextProps.trade.profit_loss_percent &&
     prevProps.trade.token_name === nextProps.trade.token_name &&
     prevProps.trade.token_symbol === nextProps.trade.token_symbol &&
