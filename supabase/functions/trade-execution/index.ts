@@ -931,7 +931,60 @@ Deno.serve(async (req) => {
           ? 6
           : await getMintDecimals(rpcUrl, body.outputMint);
         const outputAmountDecimal = outputAmountLamports / Math.pow(10, outputDecimals);
+        
+        // CRITICAL FIX: Fetch USD prices at execution time to ensure unit consistency
+        // entry_price_usd must be in USD to match DexScreener's current_price (also USD)
+        let entryPriceUsd: number | null = null;
+        let solPriceUsd = 150; // Fallback SOL price
+        
+        try {
+          // Fetch SOL price in USD from DexScreener
+          const solPriceRes = await fetch(
+            `https://api.dexscreener.com/latest/dex/tokens/${SOL_MINT}`,
+            { signal: AbortSignal.timeout(3000) }
+          );
+          if (solPriceRes.ok) {
+            const solData = await solPriceRes.json();
+            const solPairs = solData?.pairs || [];
+            const bestSolPair = solPairs
+              .filter((p: any) => p?.chainId === 'solana' && p?.quoteToken?.symbol === 'USDC')
+              .sort((a: any, b: any) => (b?.liquidity?.usd || 0) - (a?.liquidity?.usd || 0))[0];
+            if (bestSolPair?.priceUsd) {
+              solPriceUsd = parseFloat(bestSolPair.priceUsd) || solPriceUsd;
+            }
+          }
+          
+          // Fetch token price in USD from DexScreener
+          const tokenPriceRes = await fetch(
+            `https://api.dexscreener.com/latest/dex/tokens/${body.outputMint}`,
+            { signal: AbortSignal.timeout(3000) }
+          );
+          if (tokenPriceRes.ok) {
+            const tokenData = await tokenPriceRes.json();
+            const tokenPairs = tokenData?.pairs || [];
+            const bestTokenPair = tokenPairs
+              .filter((p: any) => p?.chainId === 'solana')
+              .sort((a: any, b: any) => (b?.liquidity?.usd || 0) - (a?.liquidity?.usd || 0))[0];
+            if (bestTokenPair?.priceUsd) {
+              entryPriceUsd = parseFloat(bestTokenPair.priceUsd) || null;
+              console.log(`[Trade] Token USD price from DexScreener: $${entryPriceUsd}`);
+            }
+          }
+        } catch (priceErr) {
+          console.log(`[Trade] USD price fetch failed (non-blocking): ${priceErr}`);
+        }
+        
+        // Calculate entry price in SOL (for backwards compatibility)
         const entryPrice = inputAmountDecimal / outputAmountDecimal;
+        
+        // Calculate entry value in USD (SOL invested * SOL price)
+        const entryValueUsd = inputAmountDecimal * solPriceUsd;
+        
+        // If we couldn't get token USD price from DexScreener, calculate from SOL price
+        if (!entryPriceUsd) {
+          entryPriceUsd = entryPrice * solPriceUsd;
+          console.log(`[Trade] Calculated USD price from SOL: $${entryPriceUsd}`);
+        }
 
         // CRITICAL: Fetch token metadata from DexScreener if not provided
         // This ensures proper token names are stored in the database for all tabs
@@ -1022,10 +1075,11 @@ Deno.serve(async (req) => {
             token_name: finalTokenName,
             chain: "solana",
             entry_price: entryPrice,
-            current_price: entryPrice,
+            entry_price_usd: entryPriceUsd,
+            current_price: entryPriceUsd || entryPrice,
             amount: outputAmountDecimal,
-            entry_value: inputAmountDecimal,
-            current_value: inputAmountDecimal,
+            entry_value: entryValueUsd,
+            current_value: entryValueUsd,
             profit_take_percent: body.profitTakePercent || 100,
             stop_loss_percent: body.stopLossPercent || 20,
             status: "pending",
