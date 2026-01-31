@@ -1161,18 +1161,6 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         const safetyScore = next.token.riskScore != null ? `${100 - next.token.riskScore}/100` : 'N/A';
         const liqText = next.token.liquidity ? `$${next.token.liquidity.toLocaleString()}` : 'N/A';
         
-        addBotLog({
-          level: 'info',
-          category: 'trade',
-          message: `📝 Starting trade: ${next.token.symbol}`,
-          tokenSymbol: next.token.symbol,
-          tokenAddress: next.token.address,
-          details: `💧 Liquidity: ${liqText} | 👤 Buyer Pos: ${buyerPos} | 🛡️ Safety: ${safetyScore}\n⚙️ Amount: ${tradeAmountSol} SOL | Slippage: ${settings.slippage_tolerance || 15}% | Priority: ${settings.priority}`,
-        });
-
-        // Use user settings for slippage and priority, with sensible defaults
-        const slippagePct = next.tradeParams?.slippage ?? settings.slippage_tolerance ?? 15;
-        
         // Priority fee mapping - configurable based on user's priority setting
         const priorityFeeMap: Record<string, number> = {
           turbo: 500000,  // 0.0005 SOL
@@ -1180,6 +1168,28 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           normal: 100000, // 0.0001 SOL
         };
         const priorityFee = priorityFeeMap[settings.priority] || priorityFeeMap.normal;
+        
+        // Log detailed validation steps
+        addBotLog({
+          level: 'info',
+          category: 'trade',
+          message: `🔎 Validating: ${next.token.symbol}`,
+          tokenSymbol: next.token.symbol,
+          tokenAddress: next.token.address,
+          details: `Step 1: ✅ Liquidity Check - ${liqText}\nStep 2: ✅ Safety Score - ${safetyScore}\nStep 3: ✅ Buyer Position - ${buyerPos}\nStep 4: 🔄 Preparing swap transaction...`,
+        });
+        
+        addBotLog({
+          level: 'info',
+          category: 'trade',
+          message: `📝 Executing BUY: ${next.token.symbol}`,
+          tokenSymbol: next.token.symbol,
+          tokenAddress: next.token.address,
+          details: `💰 Amount: ${tradeAmountSol} SOL | Slippage: ${settings.slippage_tolerance || 15}%\n⚡ Priority: ${settings.priority} | Fee: ${priorityFee / 1e9} SOL`,
+        });
+
+        // Use user settings for slippage and priority, with sensible defaults
+        const slippagePct = next.tradeParams?.slippage ?? settings.slippage_tolerance ?? 15;
 
         const result = await snipeToken(
           next.token.address,
@@ -1263,9 +1273,10 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     }, intervalMs);
 
     addBotLog({
-      level: 'info',
+      level: 'success',
       category: 'system',
-      message: `Bot loop started (${intervalMs / 1000}s interval)`,
+      message: `🤖 Bot Active`,
+      details: `⏱️ Scan Interval: ${intervalMs / 1000}s | Mode: ${isDemo ? 'Demo' : 'Live'}\n⚙️ Settings: ${settings?.trade_amount || 0.1} SOL | TP: ${settings?.profit_take_percentage || 100}% | SL: ${settings?.stop_loss_percentage || 20}%\n🔍 Max Positions: ${settings?.max_concurrent_trades || 3} | Min Liquidity: ${settings?.min_liquidity || 300} SOL`,
     });
 
     return () => {

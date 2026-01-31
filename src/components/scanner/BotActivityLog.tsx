@@ -289,8 +289,8 @@ function getFriendlyMessage(entry: BotLogEntry): string {
   return msg;
 }
 
-const INITIAL_DISPLAY_COUNT = 10;
-const LOAD_MORE_COUNT = 15;
+const INITIAL_DISPLAY_COUNT = 15;
+const LOAD_MORE_COUNT = 20;
 
 export default function BotActivityLog({ maxEntries = 100 }: BotActivityLogProps) {
   const logs = useBotLogs();
@@ -385,7 +385,7 @@ export default function BotActivityLog({ maxEntries = 100 }: BotActivityLogProps
         
         <CollapsibleContent>
           <CardContent className="pt-0 pb-3">
-            <ScrollArea className="h-[280px] pr-2">
+            <ScrollArea className="h-[420px] pr-2">
               {displayLogs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center py-10">
                   <div className="p-3 rounded-full bg-muted/30 mb-3">

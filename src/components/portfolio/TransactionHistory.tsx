@@ -580,14 +580,14 @@ export function TransactionHistory({ trades, loading, onRefetch, onForceSync }: 
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <Table>
+             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Token</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="text-right">Price (SOL)</TableHead>
+                  <TableHead className="text-right">SOL Flow</TableHead>
                   <TableHead className="text-right">Value (USD)</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">TX</TableHead>
@@ -653,14 +653,31 @@ export function TransactionHistory({ trades, loading, onRefetch, onForceSync }: 
                         <div className="text-xs text-muted-foreground">tokens</div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="font-medium text-primary">
-                          {trade.price_sol ? `${trade.price_sol.toFixed(6)}` : '-'}
-                        </div>
-                        {trade.price_usd && (
-                          <div className="text-xs text-muted-foreground">
-                            ${trade.price_usd.toFixed(6)}
+                        {trade.price_sol ? (
+                          <div className={cn(
+                            "font-semibold",
+                            trade.trade_type === 'buy' 
+                              ? "text-destructive" 
+                              : "text-success"
+                          )}>
+                            {trade.trade_type === 'buy' ? (
+                              <span className="flex items-center justify-end gap-1">
+                                <ArrowUpRight className="w-3.5 h-3.5" />
+                                -{trade.price_sol.toFixed(4)} SOL
+                              </span>
+                            ) : (
+                              <span className="flex items-center justify-end gap-1">
+                                <ArrowDownRight className="w-3.5 h-3.5" />
+                                +{trade.price_sol.toFixed(4)} SOL
+                              </span>
+                            )}
                           </div>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
                         )}
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          {trade.trade_type === 'buy' ? 'Debited' : 'Credited'}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         {totalValueSol !== null ? (
