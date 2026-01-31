@@ -151,17 +151,38 @@ Deno.serve(async (req) => {
           .eq("user_id", user.id);
 
         console.log(`[Confirm] Position ${body.positionId} closed`);
+        
+        // Update trade_history entry status to confirmed if tx_hash matches
+        await supabase
+          .from("trade_history")
+          .update({ status: "confirmed" })
+          .eq("tx_hash", body.signature)
+          .eq("user_id", user.id);
       }
     } else if (!result.confirmed && body.positionId) {
-      // Mark position as failed/delete
-      await supabase
-        .from("positions")
-        .delete()
-        .eq("id", body.positionId)
-        .eq("user_id", user.id)
-        .eq("status", "pending");
+      // CRITICAL: For SELL transactions that fail, do NOT close the position
+      // The tokens are still in the wallet, only the swap failed
+      if (body.action === "sell") {
+        // Keep position open - the sell failed, user still has tokens
+        console.log(`[Confirm] Sell TX failed - position ${body.positionId} kept OPEN (tokens not sold)`);
+        
+        // Update any trade_history entry with this tx_hash to failed status
+        await supabase
+          .from("trade_history")
+          .update({ status: "failed" })
+          .eq("tx_hash", body.signature)
+          .eq("user_id", user.id);
+      } else {
+        // For BUY transactions that fail, remove the pending position
+        await supabase
+          .from("positions")
+          .delete()
+          .eq("id", body.positionId)
+          .eq("user_id", user.id)
+          .eq("status", "pending");
 
-      console.log(`[Confirm] Removed pending position ${body.positionId}`);
+        console.log(`[Confirm] Removed pending buy position ${body.positionId}`);
+      }
     }
 
     // Log the transaction
