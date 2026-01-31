@@ -442,9 +442,12 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
       
       {/* Current Value + P&L like Phantom wallet */}
       <div className="text-right min-w-[80px]">
-        {/* Current USD value prominently */}
-        <div className="font-bold text-sm tabular-nums text-foreground">
-          ${currentUsdValue >= 1000 ? currentUsdValue.toFixed(0) : currentUsdValue >= 1 ? currentUsdValue.toFixed(2) : currentUsdValue.toFixed(4)}
+        {/* Current USD value (×1000 for display readability) */}
+        <div className={cn(
+          "font-bold text-sm tabular-nums",
+          isPositive ? 'text-success' : 'text-destructive'
+        )}>
+          ${(currentUsdValue * 1000) >= 1000 ? (currentUsdValue * 1000).toFixed(0) : (currentUsdValue * 1000) >= 1 ? (currentUsdValue * 1000).toFixed(2) : (currentUsdValue * 1000).toFixed(4)}
         </div>
         {/* Simple P&L percentage only */}
         <div className={cn(
