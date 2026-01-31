@@ -595,15 +595,16 @@ export function TransactionHistory({ trades, loading, onRefetch, onForceSync }: 
               </TableHeader>
               <TableBody>
                 {filteredTrades.map((trade) => {
-                  // Normalize status for display (confirmed = completed in the UI)
-                  const displayStatus = trade.status === 'confirmed' ? 'completed' : (trade.status || 'pending');
-                  const statusColors = {
+                  // Normalize status for display - show actual status from database
+                  const rawStatus = trade.status?.toLowerCase() || 'pending';
+                  const displayStatus = rawStatus === 'confirmed' ? 'completed' : rawStatus;
+                  const statusColors: Record<string, string> = {
                     completed: 'bg-success/10 text-success border-success/30',
                     confirmed: 'bg-success/10 text-success border-success/30',
                     failed: 'bg-destructive/10 text-destructive border-destructive/30',
                     pending: 'bg-warning/10 text-warning border-warning/30',
                   };
-                  const statusColor = statusColors[displayStatus as keyof typeof statusColors] || statusColors.pending;
+                  const statusColor = statusColors[rawStatus] || statusColors.pending;
                   
                   // Calculate total value
                   const totalValueUsd = trade.price_usd ? trade.amount * trade.price_usd : null;

@@ -583,6 +583,7 @@ serve(async (req) => {
           
           // CRITICAL: Also log to trade_history for Transaction History display
           // This ensures external sales are visible in the portfolio
+          // Mark as 'confirmed' since the external sale was detected as complete (0 balance)
           await supabase.from('trade_history').insert({
             user_id: user.id,
             token_address: position.token_address,
@@ -592,8 +593,8 @@ serve(async (req) => {
             amount: position.amount,
             price_sol: exitPrice, // Using current price as proxy
             price_usd: null,
-            status: 'confirmed',
-            tx_hash: null, // No tx hash for external sales
+            status: 'confirmed', // External sales are confirmed by on-chain balance check
+            tx_hash: null, // No tx hash for external sales - sold via Phantom/other wallet
           });
           
           results.push({
