@@ -430,9 +430,9 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
             {formatTokenAmount(actualTokenAmount)} {displaySymbol}
           </span>
           <span className="text-muted-foreground/40">•</span>
-          {/* Entry → Current price (not value, to avoid confusion) */}
+          {/* Entry → Current price (×1000 for display readability) */}
           <span className="tabular-nums">
-            {formatPrice(entryPriceUsd)} → {formatPrice(currentPriceUsd)}
+            {formatPrice(entryPriceUsd * 1000)} → {formatPrice(currentPriceUsd * 1000)}
           </span>
         </div>
       </div>
