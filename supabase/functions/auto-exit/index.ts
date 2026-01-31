@@ -550,20 +550,23 @@ serve(async (req) => {
           // Token was sold externally (Phantom wallet or elsewhere)
           console.log(`[AutoExit] Position ${position.token_symbol} sold externally - closing stale position`);
           
+          const exitPrice = position.current_price || position.entry_price;
+          const closedAt = new Date().toISOString();
+          
           await supabase
             .from('positions')
             .update({
               status: 'closed',
               exit_reason: 'sold_externally',
-              exit_price: position.current_price || position.entry_price,
+              exit_price: exitPrice,
               exit_tx_id: null,
-              closed_at: new Date().toISOString(),
+              closed_at: closedAt,
               profit_loss_percent: position.profit_loss_percent,
               profit_loss_value: position.profit_loss_value,
             })
             .eq('id', position.id);
           
-          // Log the external sale detection
+          // Log the external sale detection to system_logs
           await supabase.from('system_logs').insert({
             user_id: user.id,
             event_type: 'position_sold_externally',
@@ -578,11 +581,26 @@ serve(async (req) => {
             severity: 'info',
           });
           
+          // CRITICAL: Also log to trade_history for Transaction History display
+          // This ensures external sales are visible in the portfolio
+          await supabase.from('trade_history').insert({
+            user_id: user.id,
+            token_address: position.token_address,
+            token_symbol: position.token_symbol,
+            token_name: position.token_name,
+            trade_type: 'sell',
+            amount: position.amount,
+            price_sol: exitPrice, // Using current price as proxy
+            price_usd: null,
+            status: 'confirmed',
+            tx_hash: null, // No tx hash for external sales
+          });
+          
           results.push({
             positionId: position.id,
             symbol: safeTokenSymbol(position.token_symbol, position.token_address),
             action: 'hold',
-            currentPrice: position.current_price || position.entry_price,
+            currentPrice: exitPrice,
             profitLossPercent: position.profit_loss_percent || 0,
             executed: true,
             error: 'Position closed - sold externally via wallet',

@@ -422,42 +422,89 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           // ignore
         }
 
-        // FIXED: Use percentage-based threshold to avoid false "Partial Exit" notifications
-        // A partial sell is only meaningful if remaining balance is >1% of original amount
-        // This prevents rounding errors from triggering misleading notifications
-        const DUST = 1e-6;
+        // FIXED: Much tighter threshold - only consider partial if remaining balance is significant
+        // Use a tiny dust threshold (0.0001% of original) to account for rounding
+        // Most "partial exits" are just rounding dust from swaps - treat as full exit
+        const DUST_THRESHOLD = 1e-6;
+        const DUST_PERCENT_THRESHOLD = 0.01; // 0.01% = practically dust
+        
         const remainingPercent = tokenAmountToSell > 0 && remainingBalance !== null 
           ? (remainingBalance / tokenAmountToSell) * 100 
           : 0;
-        const isSignificantRemaining = remainingBalance !== null && remainingBalance > DUST && remainingPercent > 1;
         
-        if (isSignificantRemaining) {
-          // Update position with remaining balance
-          await supabase
-            .from('positions')
-            .update({ amount: remainingBalance, updated_at: new Date().toISOString() })
-            .eq('id', positionId);
-
-          // Calculate how much was sold
-          const soldAmount = tokenAmountToSell - remainingBalance;
-          const soldPercent = tokenAmountToSell > 0 ? ((soldAmount / tokenAmountToSell) * 100).toFixed(1) : '0';
-
-          toast({
-            title: 'Partial Exit Completed',
-            description: `Sold ${soldPercent}% (${soldAmount.toFixed(6)} tokens). ${remainingBalance.toFixed(6)} ${position.token_symbol} remaining in wallet.`,
-          });
-
+        // Only treat as partial if:
+        // 1. Remaining balance is above absolute dust AND
+        // 2. Remaining is more than 0.01% of original (meaningful amount)
+        const isSignificantRemaining = remainingBalance !== null && 
+          remainingBalance > DUST_THRESHOLD && 
+          remainingPercent > DUST_PERCENT_THRESHOLD;
+        
+        if (isSignificantRemaining && remainingPercent < 99) {
+          // Significant remaining balance - try to sell remaining automatically
           addBotLog({
-            level: 'warning',
+            level: 'info',
             category: 'trade',
-            message: 'Partial sell executed',
+            message: `Remaining balance detected, auto-selling remaining ${remainingBalance.toFixed(6)} tokens...`,
             tokenSymbol: position.token_symbol,
-            details: `Sold ${soldAmount.toFixed(6)}, remaining: ${remainingBalance.toFixed(6)}`,
           });
 
-          await fetchPositions(true);
-          refreshBalance();
-          return;
+          // Attempt to sell remaining balance automatically (like bot does)
+          try {
+            const retryResult = await exitPosition(
+              position.token_address,
+              remainingBalance,
+              wallet.address!,
+              (tx) => signAndSendTransaction(tx),
+              { slippage: 0.20 } // Higher slippage for cleanup
+            );
+
+            if (retryResult.success) {
+              addBotLog({
+                level: 'success',
+                category: 'trade',
+                message: `✅ Sold remaining ${position.token_symbol} tokens`,
+                tokenSymbol: position.token_symbol,
+                details: `TX: ${retryResult.txHash?.slice(0, 12)}...`,
+              });
+              // Continue to mark as closed below
+            } else {
+              // Couldn't sell remaining - update position with remaining balance
+              await supabase
+                .from('positions')
+                .update({ amount: remainingBalance, updated_at: new Date().toISOString() })
+                .eq('id', positionId)
+                .eq('user_id', (await supabase.auth.getUser()).data.user?.id);
+
+              const soldAmount = tokenAmountToSell - remainingBalance;
+              const soldPercent = tokenAmountToSell > 0 ? ((soldAmount / tokenAmountToSell) * 100).toFixed(1) : '0';
+
+              toast({
+                title: 'Partial Exit - Retry Failed',
+                description: `Sold ${soldPercent}%. ${remainingBalance.toFixed(6)} ${position.token_symbol} still in wallet. Try again manually.`,
+              });
+
+              await fetchPositions(true);
+              refreshBalance();
+              return;
+            }
+          } catch (retryErr) {
+            // Retry failed - update position with remaining
+            await supabase
+              .from('positions')
+              .update({ amount: remainingBalance, updated_at: new Date().toISOString() })
+              .eq('id', positionId)
+              .eq('user_id', (await supabase.auth.getUser()).data.user?.id);
+
+            const soldAmount = tokenAmountToSell - remainingBalance;
+            toast({
+              title: 'Partial Exit Completed',
+              description: `Sold ${soldAmount.toFixed(6)} tokens. ${remainingBalance.toFixed(6)} remaining.`,
+            });
+
+            await fetchPositions(true);
+            refreshBalance();
+            return;
+          }
         }
 
         // IMPORTANT: A successful on-chain sell does NOT automatically update our positions table.
