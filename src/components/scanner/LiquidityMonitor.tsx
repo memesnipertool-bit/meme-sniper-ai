@@ -432,7 +432,10 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
           <span className="text-muted-foreground/40">•</span>
           {/* Entry → Current price (×1000 for display readability) */}
           <span className="tabular-nums">
-            {formatPrice(entryPriceUsd * 1000)} → {formatPrice(currentPriceUsd * 1000)}
+            {formatPrice(entryPriceUsd * 1000)} → <span className={cn(
+              "font-medium",
+              isPositive ? 'text-success' : 'text-destructive'
+            )}>{formatPrice(currentPriceUsd * 1000)}</span>
           </span>
         </div>
       </div>
