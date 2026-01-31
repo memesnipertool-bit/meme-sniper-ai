@@ -123,7 +123,17 @@ interface TokenValidation {
   canBuy: boolean;
   canSell: boolean;
   reasons: string[];
+  sellSimulation?: {
+    canSell: boolean;
+    estimatedTax?: number;
+    priceImpact?: number;
+    source?: string;
+    error?: string;
+  };
 }
+
+// Position status types
+type PositionStatus = 'open' | 'closed' | 'pending' | 'waiting_for_liquidity' | 'swap_failed';
 
 // Priority fee levels in microLamports
 const PRIORITY_FEES = {
@@ -132,6 +142,51 @@ const PRIORITY_FEES = {
   high: 200000,
   veryHigh: 1000000,
 };
+
+// Sell tax threshold - block if >= this percentage
+const SELL_TAX_THRESHOLD = 50;
+
+// Dynamic slippage calculation based on conditions
+function calculateDynamicSlippage(params: {
+  liquidity?: number;
+  priceImpact?: number;
+  isSell?: boolean;
+  requestedSlippage?: number;
+}): { slippageBps: number; reason: string } {
+  const { liquidity, priceImpact = 0, isSell = false, requestedSlippage } = params;
+  
+  // Use requested slippage as minimum
+  let baseBps = requestedSlippage || (isSell ? 150 : 100);
+  let reason = 'Default slippage';
+  
+  // Adjust for liquidity
+  if (liquidity !== undefined) {
+    if (liquidity < 500) {
+      baseBps = Math.max(baseBps, 2000); // 20% for very low liquidity
+      reason = 'Very low liquidity (<$500)';
+    } else if (liquidity < 1000) {
+      baseBps = Math.max(baseBps, 1500); // 15% for low liquidity
+      reason = 'Low liquidity (<$1000)';
+    } else if (liquidity < 5000) {
+      baseBps = Math.max(baseBps, 1000); // 10% for moderate liquidity
+      reason = 'Moderate liquidity (<$5000)';
+    } else if (liquidity < 10000) {
+      baseBps = Math.max(baseBps, 500); // 5% for decent liquidity
+      reason = 'Decent liquidity';
+    }
+  }
+  
+  // Adjust for price impact
+  if (priceImpact >= 10) {
+    baseBps = Math.max(baseBps, 2000); // 20% for very high impact
+    reason = `Very high price impact (${priceImpact.toFixed(1)}%)`;
+  } else if (priceImpact >= 5) {
+    baseBps = Math.max(baseBps, 1500); // 15% for high impact
+    reason = `High price impact (${priceImpact.toFixed(1)}%)`;
+  }
+  
+  return { slippageBps: baseBps, reason };
+}
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -296,6 +351,85 @@ async function validateToken(tokenMint: string): Promise<TokenValidation> {
   }
 
   return validation;
+}
+
+// NEW: Simulate sell to detect honeypots and estimate sell tax
+async function simulateSellRoute(tokenMint: string): Promise<{
+  canSell: boolean;
+  estimatedTax?: number;
+  priceImpact?: number;
+  source?: string;
+  error?: string;
+}> {
+  // Use a small test amount for simulation
+  const testAmount = "1000000"; // Small amount in base units
+  
+  // Try Jupiter sell quote first
+  try {
+    const params = new URLSearchParams({
+      inputMint: tokenMint,
+      outputMint: SOL_MINT,
+      amount: testAmount,
+      slippageBps: "500", // 5% for simulation
+      swapMode: "ExactIn",
+    });
+
+    const response = await fetch(`${JUPITER_QUOTE_API}?${params}`, {
+      signal: AbortSignal.timeout(10000),
+      headers: JUPITER_API_KEY ? { 'x-api-key': JUPITER_API_KEY } : {},
+    });
+
+    if (response.ok) {
+      const quoteData = await response.json();
+      if (quoteData && !quoteData.error) {
+        const priceImpact = parseFloat(quoteData.priceImpactPct || "0");
+        // High price impact with small amounts often indicates sell tax
+        const estimatedTax = priceImpact > 10 ? priceImpact : 0;
+        
+        return {
+          canSell: true,
+          estimatedTax,
+          priceImpact,
+          source: "jupiter",
+        };
+      }
+    }
+  } catch (err) {
+    console.log("[SellSim] Jupiter failed:", err);
+  }
+
+  // Try Raydium as fallback
+  try {
+    const raydiumParams = new URLSearchParams({
+      inputMint: tokenMint,
+      outputMint: SOL_MINT,
+      amount: testAmount,
+      slippageBps: "500",
+      txVersion: "V0",
+    });
+
+    const raydiumRes = await fetch(`${RAYDIUM_QUOTE_API}?${raydiumParams}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (raydiumRes.ok) {
+      const raydiumData = await raydiumRes.json();
+      if (raydiumData?.success) {
+        return {
+          canSell: true,
+          priceImpact: raydiumData.data?.priceImpactPct || 0,
+          source: "raydium",
+        };
+      }
+    }
+  } catch (err) {
+    console.log("[SellSim] Raydium failed:", err);
+  }
+
+  return {
+    canSell: false,
+    error: "No sell route available on Jupiter or Raydium",
+  };
 }
 
 // Get Jupiter quote with retry (uses API key if available)
@@ -764,7 +898,7 @@ Deno.serve(async (req) => {
           );
         }
 
-        // Step 1: Validate token safety
+        // Step 1: Validate token safety (includes RugCheck honeypot detection)
         const [validation, pumpCheck] = await Promise.all([
           validateToken(body.outputMint),
           isPumpFunToken(body.outputMint),
@@ -775,7 +909,8 @@ Deno.serve(async (req) => {
           return new Response(
             JSON.stringify({
               success: false,
-              error: "Token failed safety check: HONEYPOT DETECTED",
+              error: "🚨 HONEYPOT DETECTED - Token blocked for your safety",
+              errorCode: "HONEYPOT",
               validation,
             }),
             { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -785,6 +920,49 @@ Deno.serve(async (req) => {
         // Warn if freeze authority is not revoked
         if (validation.freezeAuthority) {
           console.log(`[Trade] Warning: Token has freeze authority: ${validation.freezeAuthority}`);
+          validation.reasons.push("⚠️ Token has freeze authority - owner can freeze your tokens");
+        }
+
+        // Step 1.5: CRITICAL - Simulate sell BEFORE buying (unless it's a Pump.fun token)
+        // This prevents buying tokens that cannot be sold (honeypots, high-tax tokens)
+        if (!pumpCheck.isPumpFun) {
+          console.log(`[Trade] Simulating sell route for ${body.outputMint}...`);
+          const sellSimulation = await simulateSellRoute(body.outputMint);
+          validation.sellSimulation = sellSimulation;
+          
+          if (!sellSimulation.canSell) {
+            console.log(`[Trade] ❌ BLOCKED: Cannot sell token - ${sellSimulation.error}`);
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: `🚨 ILLIQUID TOKEN - No sell route available. This token cannot be sold on Jupiter or Raydium.`,
+                errorCode: "ILLIQUID",
+                validation,
+              }),
+              { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+          
+          // Check for high sell tax
+          if (sellSimulation.estimatedTax && sellSimulation.estimatedTax >= SELL_TAX_THRESHOLD) {
+            console.log(`[Trade] ❌ BLOCKED: High sell tax ${sellSimulation.estimatedTax}%`);
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: `🚨 HIGH SELL TAX DETECTED - Estimated ${sellSimulation.estimatedTax.toFixed(1)}% tax. Token blocked for your safety.`,
+                errorCode: "HIGH_TAX",
+                validation,
+              }),
+              { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+          
+          if (sellSimulation.canSell) {
+            validation.reasons.push(`✅ Sell route verified via ${sellSimulation.source}`);
+            if (sellSimulation.priceImpact && sellSimulation.priceImpact > 5) {
+              validation.reasons.push(`⚠️ High sell price impact: ${sellSimulation.priceImpact.toFixed(1)}%`);
+            }
+          }
         }
 
         // Step 2: Get quote - CRITICAL: Check Pump.fun FIRST for new tokens

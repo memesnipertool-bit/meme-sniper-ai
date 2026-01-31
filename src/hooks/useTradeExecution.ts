@@ -1,8 +1,14 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { VersionedTransaction } from '@solana/web3.js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAppMode } from '@/contexts/AppModeContext';
+import {
+  calculateDynamicSlippage,
+  isSlippageError,
+  SLIPPAGE_RETRY_CONFIG,
+  getRetryDelay,
+} from '@/lib/tradeSafety';
 
 // Common token addresses
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -16,7 +22,8 @@ export type TransactionStatus =
   | 'broadcasting' 
   | 'confirming' 
   | 'confirmed' 
-  | 'failed';
+  | 'failed'
+  | 'retrying'; // New status for slippage retries
 
 export type PriorityLevel = 'low' | 'medium' | 'high' | 'veryHigh';
 
@@ -49,6 +56,7 @@ export interface TradeResult {
   quote?: TradeQuote;
   error?: string;
   explorerUrl?: string;
+  retryCount?: number; // Track retry attempts
 }
 
 interface SignAndSendResult {
@@ -295,7 +303,7 @@ export function useTradeExecution() {
     }
   }, [isDemo, toast]);
 
-  // Sell/close a position
+  // Sell/close a position with automatic slippage retry
   const sellPosition = useCallback(async (
     tokenMint: string,
     amount: string,
@@ -312,90 +320,146 @@ export function useTradeExecution() {
       return { success: true, signature: 'demo_sell_' + Date.now() };
     }
 
-    setStatus('fetching_quote');
-    setError(null);
+    // Retry loop for slippage errors
+    let retryCount = 0;
+    let lastError: string | null = null;
+    
+    while (retryCount <= SLIPPAGE_RETRY_CONFIG.maxRetries) {
+      try {
+        if (retryCount > 0) {
+          setStatus('retrying');
+          // Wait before retry with exponential backoff
+          const delay = getRetryDelay(retryCount - 1);
+          console.log(`[Sell] Retrying with higher slippage (attempt ${retryCount + 1}), waiting ${delay}ms`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+        
+        setStatus('fetching_quote');
+        setError(null);
 
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Please sign in to trade');
-      }
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          throw new Error('Please sign in to trade');
+        }
 
-      // Get quote for selling token back to SOL
-      setStatus('building_tx');
-      
-      const { data, error: fnError } = await supabase.functions.invoke('trade-execution', {
-        body: {
-          action: 'execute',
-          inputMint: tokenMint,
-          outputMint: SOL_MINT,
-          amount,
-          slippageBps: 150, // Slightly higher for sells
-          userPublicKey: walletAddress,
-          priorityLevel: 'high', // Fast exit
-        },
-      });
+        // Calculate dynamic slippage based on retry count
+        const { slippageBps, reason } = calculateDynamicSlippage({
+          isSell: true,
+          isRetry: retryCount > 0,
+          retryCount,
+        });
+        
+        console.log(`[Sell] Using slippage: ${slippageBps} bps (${reason})`);
 
-      if (fnError) throw fnError;
-      if (data.error) throw new Error(data.error);
+        // Get quote for selling token back to SOL
+        setStatus('building_tx');
+        
+        const { data, error: fnError } = await supabase.functions.invoke('trade-execution', {
+          body: {
+            action: 'execute',
+            inputMint: tokenMint,
+            outputMint: SOL_MINT,
+            amount,
+            slippageBps,
+            userPublicKey: walletAddress,
+            priorityLevel: 'high', // Fast exit
+          },
+        });
 
-      // Sign and send
-      setStatus('awaiting_signature');
-      const swapTransactionBytes = base64ToBytes(data.swapTransaction);
-      const transaction = VersionedTransaction.deserialize(swapTransactionBytes);
+        if (fnError) throw fnError;
+        if (data.error) throw new Error(data.error);
 
-      setStatus('broadcasting');
-      const signResult = await signAndSend(transaction);
+        // Sign and send
+        setStatus('awaiting_signature');
+        const swapTransactionBytes = base64ToBytes(data.swapTransaction);
+        const transaction = VersionedTransaction.deserialize(swapTransactionBytes);
 
-      if (!signResult.success) {
-        throw new Error(signResult.error || 'Transaction rejected');
-      }
+        setStatus('broadcasting');
+        const signResult = await signAndSend(transaction);
 
-      setTxSignature(signResult.signature);
-      setStatus('confirming');
+        if (!signResult.success) {
+          throw new Error(signResult.error || 'Transaction rejected');
+        }
 
-      // Confirm and update position
-      const { data: confirmData } = await supabase.functions.invoke('confirm-transaction', {
-        body: {
-          signature: signResult.signature,
-          positionId,
-          action: 'sell',
-        },
-      });
+        setTxSignature(signResult.signature);
+        setStatus('confirming');
 
-      if (confirmData?.confirmed) {
-        setStatus('confirmed');
+        // Confirm and update position
+        const { data: confirmData } = await supabase.functions.invoke('confirm-transaction', {
+          body: {
+            signature: signResult.signature,
+            positionId,
+            action: 'sell',
+          },
+        });
+
+        if (confirmData?.confirmed) {
+          setStatus('confirmed');
+          toast({
+            title: '💰 Position Closed!',
+            description: retryCount > 0 
+              ? `Successfully sold after ${retryCount + 1} attempts` 
+              : 'Successfully sold your position',
+          });
+
+          return {
+            success: true,
+            signature: signResult.signature,
+            positionId,
+            quote: data.quote,
+            explorerUrl: `https://solscan.io/tx/${signResult.signature}`,
+            retryCount,
+          };
+        } else {
+          // Check if this is a slippage error that should trigger retry
+          const errorMsg = confirmData?.error || 'Failed to confirm sell';
+          if (isSlippageError(errorMsg) && retryCount < SLIPPAGE_RETRY_CONFIG.maxRetries) {
+            lastError = errorMsg;
+            retryCount++;
+            continue; // Retry with higher slippage
+          }
+          throw new Error(errorMsg);
+        }
+      } catch (err: any) {
+        const message = err.message || 'Sell failed';
+        
+        // Check if this is a slippage error that should trigger retry
+        if (isSlippageError(message) && retryCount < SLIPPAGE_RETRY_CONFIG.maxRetries) {
+          lastError = message;
+          retryCount++;
+          toast({
+            title: 'Slippage Exceeded',
+            description: `Retrying with higher slippage (attempt ${retryCount + 1}/${SLIPPAGE_RETRY_CONFIG.maxRetries + 1})...`,
+          });
+          continue; // Retry with higher slippage
+        }
+        
+        // Non-retryable error or max retries reached
+        setError(message);
+        setStatus('failed');
+
         toast({
-          title: '💰 Position Closed!',
-          description: 'Successfully sold your position',
+          title: retryCount > 0 ? 'Sell Failed After Retries' : 'Sell Failed',
+          description: message,
+          variant: 'destructive',
         });
 
         return {
-          success: true,
-          signature: signResult.signature,
-          positionId,
-          quote: data.quote,
-          explorerUrl: `https://solscan.io/tx/${signResult.signature}`,
+          success: false,
+          error: message,
+          retryCount,
         };
-      } else {
-        throw new Error(confirmData?.error || 'Failed to confirm sell');
       }
-    } catch (err: any) {
-      const message = err.message || 'Sell failed';
-      setError(message);
-      setStatus('failed');
-
-      toast({
-        title: 'Sell Failed',
-        description: message,
-        variant: 'destructive',
-      });
-
-      return {
-        success: false,
-        error: message,
-      };
     }
+    
+    // Should not reach here, but handle edge case
+    setError(lastError || 'Max retries exceeded');
+    setStatus('failed');
+    return {
+      success: false,
+      error: lastError || 'Max retries exceeded',
+      retryCount,
+    };
   }, [isDemo, toast]);
 
   const reset = useCallback(() => {

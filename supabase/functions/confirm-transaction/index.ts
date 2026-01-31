@@ -15,7 +15,7 @@ async function confirmTransaction(
   rpcUrl: string,
   signature: string,
   maxRetries: number = 30
-): Promise<{ confirmed: boolean; slot?: number; error?: string }> {
+): Promise<{ confirmed: boolean; slot?: number; error?: string; isSlippageError?: boolean }> {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const response = await fetch(rpcUrl, {
@@ -41,7 +41,19 @@ async function confirmTransaction(
       if (status) {
         if (status.err) {
           console.error(`[Confirm] Transaction failed:`, status.err);
-          return { confirmed: false, error: JSON.stringify(status.err) };
+          
+          // Detect slippage errors for retry handling
+          const errString = JSON.stringify(status.err);
+          const isSlippageError = 
+            errString.includes('6024') || // Jupiter slippage error
+            errString.includes('1771') || // Raydium slippage error
+            errString.toLowerCase().includes('slippage');
+          
+          return { 
+            confirmed: false, 
+            error: errString,
+            isSlippageError,
+          };
         }
 
         if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized") {

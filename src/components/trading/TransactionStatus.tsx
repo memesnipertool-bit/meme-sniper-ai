@@ -8,7 +8,8 @@ import {
   Send,
   Wallet,
   Search,
-  Zap
+  Zap,
+  RefreshCw
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
@@ -73,6 +74,12 @@ const STATUS_CONFIG: Record<TxStatus, {
     icon: CheckCircle2,
     color: 'text-green-500',
     progress: 100,
+  },
+  retrying: {
+    label: 'Retrying with higher slippage...',
+    icon: RefreshCw,
+    color: 'text-yellow-500',
+    progress: 40,
   },
   failed: {
     label: 'Transaction failed',

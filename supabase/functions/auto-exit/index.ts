@@ -682,21 +682,30 @@ serve(async (req) => {
                               jupiterResult.error?.includes('Route not found');
               
               if (noRoute) {
-                console.log(`[AutoExit] No Jupiter route for ${position.token_symbol} - ${reason} triggered but keeping position OPEN (illiquid)`);
+                console.log(`[AutoExit] No Jupiter route for ${position.token_symbol} - ${reason} triggered, moving to WAITING_FOR_LIQUIDITY`);
                 
-                // Log the warning but DO NOT close the position
+                // CRITICAL: Update position status to waiting_for_liquidity instead of keeping it open
+                // This ensures the UI shows the correct status and the retry worker will handle it
+                await supabase.from('positions').update({
+                  status: 'waiting_for_liquidity',
+                  waiting_for_liquidity_since: new Date().toISOString(),
+                  liquidity_last_checked_at: new Date().toISOString(),
+                  liquidity_check_count: (position as any).liquidity_check_count ? (position as any).liquidity_check_count + 1 : 1,
+                }).eq('id', position.id).eq('user_id', user.id);
+                
+                // Log the warning
                 await supabase.from('system_logs').insert({
                   user_id: user.id,
                   event_type: 'exit_blocked_no_route',
                   event_category: 'trading',
-                  message: `Exit blocked (no route): ${position.token_symbol} - ${reason} triggered at ${profitLossPercent.toFixed(2)}% but no swap available`,
+                  message: `Exit blocked (no route): ${position.token_symbol} - ${reason} triggered at ${profitLossPercent.toFixed(2)}%, moved to waiting for liquidity`,
                   metadata: {
                     position_id: position.id,
                     token_symbol: position.token_symbol,
                     entry_price: position.entry_price,
                     current_price: currentPrice,
                     profit_loss_percent: profitLossPercent,
-                    reason: `${reason} triggered but Jupiter has no route - position kept open, user must handle manually`,
+                    reason: `${reason} triggered but Jupiter has no route - moved to WAITING_FOR_LIQUIDITY`,
                     original_error: jupiterResult.error,
                   },
                   severity: 'warning',
@@ -705,7 +714,7 @@ serve(async (req) => {
               
               executed = false;
               error = noRoute 
-                ? `NO_ROUTE: ${reason} triggered but token has no liquidity - position kept open` 
+                ? `NO_ROUTE: ${reason} triggered but token has no liquidity - moved to Waiting tab` 
                 : (jupiterResult.error || 'Jupiter sell failed - waiting for route availability');
             }
           }
