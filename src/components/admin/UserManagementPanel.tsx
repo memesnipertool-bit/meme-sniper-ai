@@ -32,9 +32,14 @@ import {
   UserX,
   UserCheck,
   Loader2,
+  Calendar,
+  ArrowRightLeft,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, subDays, format } from "date-fns";
+import { UserTransactionTable } from "./UserTransactionTable";
+import { UserDayWiseStatement, DayStatement } from "./UserDayWiseStatement";
 
 interface UserProfile {
   user_id: string;
@@ -69,13 +74,31 @@ interface UserActivity {
   severity?: string;
 }
 
+interface Transaction {
+  id: string;
+  token_address: string;
+  token_symbol: string | null;
+  token_name: string | null;
+  trade_type: 'buy' | 'sell';
+  amount: number;
+  price_sol: number | null;
+  price_usd: number | null;
+  status: string | null;
+  tx_hash: string | null;
+  created_at: string;
+}
+
 interface UserDetailStats {
   totalTrades: number;
   totalVolume: number;
   totalPnL: number;
   winRate: number;
+  openPositions: number;
+  closedPositions: number;
   pnlByDay: UserPnLData[];
   recentActivity: UserActivity[];
+  transactions: Transaction[];
+  dayStatements: DayStatement[];
 }
 
 const formatCurrency = (value: number) => {
@@ -127,9 +150,8 @@ export function UserManagementPanel() {
   const fetchUserStats = useCallback(async (userId: string) => {
     setLoadingStats(true);
     try {
-      // Fetch user positions for P&L
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      // Fetch user positions for P&L (last 30 days)
+      const thirtyDaysAgo = subDays(new Date(), 30);
 
       const { data: positions, error: posError } = await supabase
         .from("positions")
@@ -139,15 +161,35 @@ export function UserManagementPanel() {
 
       if (posError) throw posError;
 
-      // Calculate daily P&L
+      // Calculate daily P&L and day statements
       const pnlByDay: Record<string, UserPnLData> = {};
+      const dayStatementsMap: Record<string, DayStatement> = {};
       let totalTrades = 0;
       let totalVolume = 0;
       let totalPnL = 0;
       let winningTrades = 0;
+      let openPositions = 0;
+      let closedPositions = 0;
 
       (positions || []).forEach((p: any) => {
         const date = new Date(p.created_at).toISOString().split("T")[0];
+        
+        // Initialize day statement if needed
+        if (!dayStatementsMap[date]) {
+          dayStatementsMap[date] = {
+            date,
+            totalTrades: 0,
+            buyTrades: 0,
+            sellTrades: 0,
+            volume: 0,
+            realizedPnL: 0,
+            winningTrades: 0,
+            losingTrades: 0,
+            winRate: 0,
+          };
+        }
+        
+        // Initialize pnlByDay if needed
         if (!pnlByDay[date]) {
           pnlByDay[date] = {
             user_id: userId,
@@ -164,20 +206,70 @@ export function UserManagementPanel() {
         pnlByDay[date].total_trades++;
         pnlByDay[date].total_volume += p.entry_value || 0;
         
+        // Update day statement
+        dayStatementsMap[date].totalTrades++;
+        dayStatementsMap[date].buyTrades++; // Positions are buys
+        dayStatementsMap[date].volume += p.entry_value || 0;
+        
         if (p.status === "closed") {
+          closedPositions++;
           const pnl = p.profit_loss_value || 0;
           pnlByDay[date].net_pnl += pnl;
+          dayStatementsMap[date].realizedPnL += pnl;
+          
           if (pnl > 0) {
             pnlByDay[date].winning_trades++;
+            dayStatementsMap[date].winningTrades++;
             winningTrades++;
           } else if (pnl < 0) {
             pnlByDay[date].losing_trades++;
+            dayStatementsMap[date].losingTrades++;
           }
+        } else {
+          openPositions++;
         }
 
         totalTrades++;
         totalVolume += p.entry_value || 0;
         totalPnL += p.profit_loss_value || 0;
+      });
+
+      // Calculate win rates for each day
+      Object.values(dayStatementsMap).forEach((day) => {
+        const totalClosed = day.winningTrades + day.losingTrades;
+        day.winRate = totalClosed > 0 ? (day.winningTrades / totalClosed) * 100 : 0;
+      });
+
+      // Fetch trade history (transactions)
+      const { data: tradeHistory } = await supabase
+        .from("trade_history")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      const transactions: Transaction[] = (tradeHistory || []).map((t: any) => ({
+        id: t.id,
+        token_address: t.token_address,
+        token_symbol: t.token_symbol,
+        token_name: t.token_name,
+        trade_type: t.trade_type as 'buy' | 'sell',
+        amount: Number(t.amount),
+        price_sol: t.price_sol ? Number(t.price_sol) : null,
+        price_usd: t.price_usd ? Number(t.price_usd) : null,
+        status: t.status,
+        tx_hash: t.tx_hash,
+        created_at: t.created_at,
+      }));
+
+      // Update day statements with sell trades from trade_history
+      transactions.forEach((tx) => {
+        if (tx.trade_type === 'sell') {
+          const date = new Date(tx.created_at).toISOString().split("T")[0];
+          if (dayStatementsMap[date]) {
+            dayStatementsMap[date].sellTrades++;
+          }
+        }
       });
 
       // Fetch recent activity logs from user_activity_logs
@@ -186,7 +278,7 @@ export function UserManagementPanel() {
         .select("*")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(20);
 
       // Also fetch trading activity from system_logs
       const { data: systemLogs } = await supabase
@@ -194,7 +286,7 @@ export function UserManagementPanel() {
         .select("*")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(20);
 
       // Merge and sort both activity sources
       const mergedActivity: UserActivity[] = [
@@ -219,15 +311,23 @@ export function UserManagementPanel() {
           severity: log.severity,
         })),
       ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        .slice(0, 20);
+        .slice(0, 30);
+
+      // Sort day statements by date descending
+      const dayStatements = Object.values(dayStatementsMap)
+        .sort((a, b) => b.date.localeCompare(a.date));
 
       setUserStats({
         totalTrades,
         totalVolume,
         totalPnL,
         winRate: totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0,
+        openPositions,
+        closedPositions,
         pnlByDay: Object.values(pnlByDay).sort((a, b) => a.trade_date.localeCompare(b.trade_date)),
         recentActivity: mergedActivity,
+        transactions,
+        dayStatements,
       });
     } catch (err) {
       console.error("Error fetching user stats:", err);
@@ -601,19 +701,46 @@ export function UserManagementPanel() {
                     Loading statistics...
                   </div>
                 ) : userStats ? (
-                  <Tabs defaultValue="pnl" className="space-y-4">
-                    <TabsList>
-                      <TabsTrigger value="pnl">P&L Analytics</TabsTrigger>
-                      <TabsTrigger value="activity">Activity Log</TabsTrigger>
+                  <Tabs defaultValue="overview" className="space-y-4">
+                    <TabsList className="grid grid-cols-4 w-full">
+                      <TabsTrigger value="overview" className="text-xs">
+                        <TrendingUp className="w-3 h-3 mr-1" />
+                        Overview
+                      </TabsTrigger>
+                      <TabsTrigger value="statements" className="text-xs">
+                        <Calendar className="w-3 h-3 mr-1" />
+                        Statements
+                      </TabsTrigger>
+                      <TabsTrigger value="transactions" className="text-xs">
+                        <ArrowRightLeft className="w-3 h-3 mr-1" />
+                        Transactions
+                      </TabsTrigger>
+                      <TabsTrigger value="activity" className="text-xs">
+                        <Activity className="w-3 h-3 mr-1" />
+                        Activity
+                      </TabsTrigger>
                     </TabsList>
 
-                    <TabsContent value="pnl" className="space-y-4">
-                      {/* P&L Stats */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {/* Overview Tab - P&L Analytics */}
+                    <TabsContent value="overview" className="space-y-4">
+                      {/* Enhanced Stats Grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <div className="p-3 bg-secondary/30 rounded-lg">
                           <p className="text-xs text-muted-foreground">Total Trades</p>
                           <p className="text-lg font-semibold text-foreground">
                             {userStats.totalTrades}
+                          </p>
+                        </div>
+                        <div className="p-3 bg-secondary/30 rounded-lg">
+                          <p className="text-xs text-muted-foreground">Open</p>
+                          <p className="text-lg font-semibold text-primary">
+                            {userStats.openPositions}
+                          </p>
+                        </div>
+                        <div className="p-3 bg-secondary/30 rounded-lg">
+                          <p className="text-xs text-muted-foreground">Closed</p>
+                          <p className="text-lg font-semibold text-foreground">
+                            {userStats.closedPositions}
                           </p>
                         </div>
                         <div className="p-3 bg-secondary/30 rounded-lg">
@@ -675,9 +802,26 @@ export function UserManagementPanel() {
                       )}
                     </TabsContent>
 
+                    {/* Day-wise Statements Tab */}
+                    <TabsContent value="statements">
+                      <UserDayWiseStatement 
+                        statements={userStats.dayStatements} 
+                        loading={loadingStats}
+                      />
+                    </TabsContent>
+
+                    {/* Transactions Tab */}
+                    <TabsContent value="transactions">
+                      <UserTransactionTable 
+                        transactions={userStats.transactions}
+                        loading={loadingStats}
+                      />
+                    </TabsContent>
+
+                    {/* Activity Log Tab */}
                     <TabsContent value="activity" className="space-y-2">
                       {userStats.recentActivity.length > 0 ? (
-                        <div className="max-h-[300px] overflow-y-auto space-y-2">
+                        <div className="max-h-[350px] overflow-y-auto space-y-2">
                           {userStats.recentActivity.map((activity) => (
                             <div
                               key={activity.id}
@@ -689,13 +833,18 @@ export function UserManagementPanel() {
                                     ? "bg-primary"
                                     : activity.activity_category === "admin_action"
                                     ? "bg-yellow-500"
+                                    : activity.activity_category === "sniper"
+                                    ? "bg-blue-500"
                                     : "bg-muted-foreground"
                                 }`}
                               />
                               <div className="flex-1">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <Badge variant="outline" className="text-xs">
                                     {activity.activity_type}
+                                  </Badge>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {activity.activity_category}
                                   </Badge>
                                   <span className="text-xs text-muted-foreground">
                                     {formatDistanceToNow(new Date(activity.created_at))} ago
