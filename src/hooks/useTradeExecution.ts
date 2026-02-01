@@ -9,6 +9,7 @@ import {
   SLIPPAGE_RETRY_CONFIG,
   getRetryDelay,
 } from '@/lib/tradeSafety';
+import { acquireSellLock, releaseSellLock, isSellLocked } from '@/lib/sellLock';
 
 // Common token addresses
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -318,6 +319,16 @@ export function useTradeExecution() {
         description: 'Simulated sell executed',
       });
       return { success: true, signature: 'demo_sell_' + Date.now() };
+    }
+
+    // CRITICAL: Check if this token is already being sold
+    if (isSellLocked(tokenMint)) {
+      toast({
+        title: 'Sell Already In Progress',
+        description: 'This token is already being sold by another process.',
+        variant: 'destructive',
+      });
+      return { success: false, error: 'Sell already in progress' };
     }
 
     // Retry loop for slippage errors

@@ -5,7 +5,7 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { useWallet } from '@/hooks/useWallet';
 import { addBotLog } from '@/components/scanner/BotActivityLog';
 import { fetchJupiterQuote } from '@/lib/jupiterQuote';
-
+import { acquireSellLock, releaseSellLock, isSellLocked } from '@/lib/sellLock';
 export interface ExitResult {
   positionId: string;
   symbol: string;
@@ -69,6 +69,18 @@ export function useAutoExit() {
 
       if (posError || !position) {
         console.error('[AutoExit] Position not found:', result.positionId);
+        return false;
+      }
+
+      // CRITICAL: Acquire sell lock to prevent duplicate transactions
+      if (!acquireSellLock(position.token_address, 'auto_exit')) {
+        addBotLog({
+          level: 'warning',
+          category: 'exit',
+          message: `⏳ Sell already in progress: ${result.symbol}`,
+          tokenSymbol: result.symbol,
+          details: 'Another sell transaction is being processed. Skipping duplicate.',
+        });
         return false;
       }
 
@@ -202,6 +214,7 @@ export function useAutoExit() {
         });
 
         if (!swapRes.ok) {
+          releaseSellLock(position.token_address);
           toast({
             title: 'Swap Build Failed',
             description: 'Could not build Jupiter swap transaction',
@@ -213,6 +226,7 @@ export function useAutoExit() {
         const swapData = await swapRes.json();
         
         if (!swapData.swapTransaction) {
+          releaseSellLock(position.token_address);
           toast({
             title: 'Transaction Error',
             description: 'Jupiter did not return transaction data',
@@ -371,6 +385,9 @@ export function useAutoExit() {
       });
 
       refreshBalance();
+      
+      // Release the sell lock after successful exit
+      releaseSellLock(position.token_address);
       return true;
 
     } catch (error: any) {
@@ -391,6 +408,21 @@ export function useAutoExit() {
         variant: 'destructive',
       });
       return false;
+    } finally {
+      // Always release lock, even on error (if we had acquired one)
+      // Re-fetch position to get the token_address
+      try {
+        const { data: pos } = await supabase
+          .from('positions')
+          .select('token_address')
+          .eq('id', result.positionId)
+          .single();
+        if (pos?.token_address) {
+          releaseSellLock(pos.token_address);
+        }
+      } catch {
+        // Ignore - lock will timeout anyway
+      }
     }
   }, [wallet, signAndSendTransaction, refreshBalance, toast]);
 
