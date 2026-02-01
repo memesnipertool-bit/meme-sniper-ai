@@ -119,6 +119,11 @@ export function TransactionHistory({ trades, loading, onRefetch, onForceSync }: 
   // Filter trades
   const filteredTrades = useMemo(() => {
     return trades.filter(trade => {
+      // CRITICAL: Skip entries without tx_hash - these are fake/non-trade movements
+      // (transfers, staking, airdrops, sold_externally detection errors)
+      // Only show real on-chain swaps that have a valid transaction signature
+      if (!trade.tx_hash) return false;
+      
       // Date filter
       if (dateRange.start && isBefore(new Date(trade.created_at), dateRange.start)) return false;
       if (dateRange.end && isAfter(new Date(trade.created_at), dateRange.end)) return false;
