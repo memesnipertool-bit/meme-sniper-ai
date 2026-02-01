@@ -49,6 +49,9 @@ const formatAmount = (value: number) => {
 };
 
 export function UserTransactionTable({ transactions, loading }: UserTransactionTableProps) {
+  // Filter out fake transactions (no tx_hash = not a real on-chain swap)
+  const validTransactions = transactions.filter(tx => tx.tx_hash !== null && tx.tx_hash !== undefined);
+  
   if (loading) {
     return (
       <div className="text-center py-8 text-muted-foreground">
@@ -57,10 +60,10 @@ export function UserTransactionTable({ transactions, loading }: UserTransactionT
     );
   }
 
-  if (transactions.length === 0) {
+  if (validTransactions.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
-        No transactions found
+        No verified transactions found
       </div>
     );
   }
@@ -81,7 +84,7 @@ export function UserTransactionTable({ transactions, loading }: UserTransactionT
           </TableRow>
         </TableHeader>
         <TableBody>
-          {transactions.map((tx) => (
+          {validTransactions.map((tx) => (
             <TableRow key={tx.id} className="hover:bg-secondary/30">
               <TableCell className="text-xs text-muted-foreground">
                 {format(new Date(tx.created_at), 'MMM d, HH:mm')}

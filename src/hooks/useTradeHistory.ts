@@ -98,8 +98,11 @@ export function useTradeHistory(limit: number = 1000) {
         created_at: p.created_at,
       }));
 
+    // Only create sell entries for positions that have a valid exit_tx_id
+    // This prevents fake P&L from external wallet movements (transfers, staking, airdrops)
     const sellRows = positions
       .filter((p) => (p.status || '').toLowerCase() === 'closed')
+      .filter((p) => p.exit_tx_id !== null && p.exit_tx_id !== undefined) // CRITICAL: Only real swaps
       .filter((p) => !existingSet.has(`${p.token_address}-sell-${p.closed_at ?? p.created_at}`))
       .map((p) => ({
         user_id: user.id,
@@ -111,7 +114,7 @@ export function useTradeHistory(limit: number = 1000) {
         price_sol: p.exit_price ?? null,
         price_usd: null,
         status: 'confirmed',
-        tx_hash: p.exit_tx_id ?? null,
+        tx_hash: p.exit_tx_id!, // Now guaranteed non-null
         created_at: p.closed_at ?? p.created_at,
       }));
 

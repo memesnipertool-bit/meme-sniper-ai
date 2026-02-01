@@ -581,21 +581,12 @@ serve(async (req) => {
             severity: 'info',
           });
           
-          // CRITICAL: Also log to trade_history for Transaction History display
-          // This ensures external sales are visible in the portfolio
-          // Mark as 'confirmed' since the external sale was detected as complete (0 balance)
-          await supabase.from('trade_history').insert({
-            user_id: user.id,
-            token_address: position.token_address,
-            token_symbol: position.token_symbol,
-            token_name: position.token_name,
-            trade_type: 'sell',
-            amount: position.amount,
-            price_sol: exitPrice, // Using current price as proxy
-            price_usd: null,
-            status: 'confirmed', // External sales are confirmed by on-chain balance check
-            tx_hash: null, // No tx hash for external sales - sold via Phantom/other wallet
-          });
+          // NOTE: Do NOT log to trade_history for external wallet movements
+          // These could be transfers, staking, LP deposits, or airdrops - NOT real trades
+          // Only log confirmed on-chain swaps with valid tx_hash to avoid fake P&L
+          // The position is closed but no trade_history entry is created
+          // This prevents +10000% phantom profits from non-trade movements
+          console.log(`[AutoExit] Skipping trade_history insert for external movement (no tx_hash) - ${position.token_symbol}`);
           
           results.push({
             positionId: position.id,
