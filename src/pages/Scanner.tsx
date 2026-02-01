@@ -41,6 +41,7 @@ import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
 import { reconcilePositionsWithPools } from "@/lib/positionMetadataReconciler";
 import { fetchDexScreenerTokenMetadata } from "@/lib/dexscreener";
 import { isPlaceholderText } from "@/lib/formatters";
+import { acquireSellLock, releaseSellLock, isSellLocked } from "@/lib/sellLock";
 import { Wallet, TrendingUp, Zap, Activity, AlertTriangle, X, FlaskConical, Coins, RotateCcw, DollarSign } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -330,6 +331,26 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     const position = realOpenPositions.find((p) => p.id === positionId);
     if (!position || !wallet.address) return;
 
+    // CRITICAL: Check if this token is already being sold
+    if (isSellLocked(position.token_address)) {
+      toast({
+        title: 'Sell Already In Progress',
+        description: `${position.token_symbol} is already being sold by another process. Please wait.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Acquire sell lock to prevent duplicate transactions
+    if (!acquireSellLock(position.token_address, 'manual_sell')) {
+      toast({
+        title: 'Sell Already In Progress',
+        description: `${position.token_symbol} is already being sold. Please wait.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const safeExitPrice = Number.isFinite(currentPrice) && currentPrice > 0
       ? currentPrice
       : (position.current_price ?? position.entry_price);
@@ -408,6 +429,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             variant: 'destructive',
           });
           await fetchPositions(true);
+          releaseSellLock(position.token_address);
           return;
         }
 
@@ -485,6 +507,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
               await fetchPositions(true);
               refreshBalance();
+              releaseSellLock(position.token_address);
               return;
             }
           } catch (retryErr) {
@@ -503,6 +526,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
             await fetchPositions(true);
             refreshBalance();
+            releaseSellLock(position.token_address);
             return;
           }
         }
@@ -556,10 +580,10 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           );
         }
 
-        // Force refresh to reconcile any background polling / realtime ordering
         await fetchPositions(true);
         refreshBalance();
         setTimeout(() => refreshBalance(), 8000);
+        releaseSellLock(position.token_address);
         return;
       }
 
@@ -632,6 +656,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             
             await fetchPositions(true);
             refreshBalance();
+            releaseSellLock(position.token_address);
             return;
           }
         } catch (raydiumErr) {
@@ -649,19 +674,23 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
         setNoRoutePosition(position);
         setShowNoRouteModal(true);
+        releaseSellLock(position.token_address);
       } else if (isAlreadySoldError) {
         showForceCloseToast(
           "Token Not Found",
           "This position may have been sold externally. Mark it as closed?"
         );
+        releaseSellLock(position.token_address);
       } else {
         toast({
           title: "Error closing position",
           description: errorMessage,
           variant: "destructive",
         });
+        releaseSellLock(position.token_address);
       }
     } catch (err) {
+      releaseSellLock(position.token_address);
       const message = err instanceof Error ? err.message : String(err);
       
       const isNoRouteError =
@@ -690,6 +719,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           variant: "destructive",
         });
       }
+      
+      // Always release lock on error paths
+      releaseSellLock(position.token_address);
     }
   }, [
     realOpenPositions,

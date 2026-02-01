@@ -4,6 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useWallet } from '@/hooks/useWallet';
 import { addBotLog } from '@/components/scanner/BotActivityLog';
 import { fetchJupiterQuote } from '@/lib/jupiterQuote';
+import { acquireSellLock, releaseSellLock, isSellLocked } from '@/lib/sellLock';
 
 export interface WaitingPosition {
   id: string;
@@ -253,6 +254,12 @@ export function useLiquidityRetryWorker() {
       return false;
     }
 
+    // CRITICAL: Check if another system is already selling this token
+    if (isSellLocked(position.token_address)) {
+      console.log(`[LiquidityRetry] Skipping ${position.token_symbol} - already being sold by another system`);
+      return false;
+    }
+
     // CRITICAL: Detect if this is a wallet token (not a DB position)
     // Wallet tokens have synthetic IDs starting with "wallet-" which are NOT valid UUIDs
     const isWalletToken = typeof position.id === 'string' && position.id.startsWith('wallet-');
@@ -297,6 +304,18 @@ export function useLiquidityRetryWorker() {
       message: `✅ Route found: ${position.token_symbol} via ${routeResult.source}`,
       tokenSymbol: position.token_symbol,
     });
+
+    // CRITICAL: Acquire sell lock before executing swap
+    if (!acquireSellLock(position.token_address, 'liquidity_worker')) {
+      addBotLog({
+        level: 'warning',
+        category: 'exit',
+        message: `⏳ Sell already in progress: ${position.token_symbol}`,
+        tokenSymbol: position.token_symbol,
+        details: 'Another sell transaction is being processed. Skipping duplicate.',
+      });
+      return false;
+    }
 
     toast({
       title: `🎯 Route Available: ${position.token_symbol}`,
@@ -353,6 +372,7 @@ export function useLiquidityRetryWorker() {
       });
 
       refreshBalance();
+      releaseSellLock(position.token_address);
       return true;
     } else {
       addBotLog({
@@ -362,6 +382,7 @@ export function useLiquidityRetryWorker() {
         tokenSymbol: position.token_symbol,
         details: swapResult.error,
       });
+      releaseSellLock(position.token_address);
       return false;
     }
   }, [wallet, signAndSendTransaction, refreshBalance, toast]);
