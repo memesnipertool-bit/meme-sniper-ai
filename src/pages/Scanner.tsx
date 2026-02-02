@@ -160,6 +160,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   const [noRoutePosition, setNoRoutePosition] = useState<any | null>(null);
   const [showNoRouteModal, setShowNoRouteModal] = useState(false);
   
+  // Pool scanning pause state (separate from bot pause)
+  const [isPoolScanningPaused, setIsPoolScanningPaused] = useState(false);
+  
   // Get setMode from AppModeContext
   const { setMode } = useAppMode();
   
@@ -819,16 +822,17 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     };
   }, [cleanup]);
 
-  // Auto-scan on mount
+  // Auto-scan on mount (only if not paused)
   useEffect(() => {
-    if (settings?.min_liquidity && !isPaused) {
+    if (settings?.min_liquidity && !isPaused && !isPoolScanningPaused) {
       scanTokens(settings.min_liquidity);
     }
   }, [settings?.min_liquidity]);
 
   // Periodic scanning based on speed - optimized intervals
+  // Respects both bot pause (isPaused) and pool scanning pause (isPoolScanningPaused)
   useEffect(() => {
-    if (isPaused) return;
+    if (isPaused || isPoolScanningPaused) return;
     
     // Demo mode uses faster intervals since no real API calls
     const intervals = isDemo 
@@ -842,7 +846,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     }, intervals[scanSpeed]);
     
     return () => clearInterval(interval);
-  }, [scanSpeed, isPaused, settings?.min_liquidity, scanTokens, isDemo]);
+  }, [scanSpeed, isPaused, isPoolScanningPaused, settings?.min_liquidity, scanTokens, isDemo]);
 
   // Log scan stats to bot activity when they update
   useEffect(() => {
@@ -1991,7 +1995,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                 walletTokens={walletTokens}
                 loadingWalletTokens={loadingWalletTokens}
                 loading={loading}
-                apiStatus={loading ? 'active' : 'waiting'}
+                apiStatus={loading ? 'active' : (isPoolScanningPaused ? 'waiting' : 'active')}
                 onExitTrade={handleOpenExitPreview}
                 onRetryLiquidityCheck={runLiquidityRetryCheck}
                 onMoveBackFromWaiting={moveBackToOpen}
@@ -2027,6 +2031,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
                 }}
                 onRefreshWalletTokens={refetchWalletTokens}
                 checkingLiquidity={checkingLiquidity}
+                isScanningPaused={isPoolScanningPaused}
+                onToggleScanning={() => setIsPoolScanningPaused(prev => !prev)}
               />
 
               {/* Bot Activity Log */}
