@@ -533,6 +533,84 @@ export type Database = {
         }
         Relationships: []
       }
+      token_processing_states: {
+        Row: {
+          buyer_position_at_discovery: number | null
+          created_at: string
+          discovered_at: string
+          id: string
+          liquidity_at_discovery: number | null
+          max_retries: number
+          pending_reason: string | null
+          pending_since: string | null
+          position_id: string | null
+          rejected_at: string | null
+          rejection_reason: string | null
+          retry_count: number
+          retry_expires_at: string | null
+          risk_score_at_discovery: number | null
+          source: string | null
+          state: string
+          token_address: string
+          token_name: string | null
+          token_symbol: string | null
+          trade_tx_hash: string | null
+          traded_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          buyer_position_at_discovery?: number | null
+          created_at?: string
+          discovered_at?: string
+          id?: string
+          liquidity_at_discovery?: number | null
+          max_retries?: number
+          pending_reason?: string | null
+          pending_since?: string | null
+          position_id?: string | null
+          rejected_at?: string | null
+          rejection_reason?: string | null
+          retry_count?: number
+          retry_expires_at?: string | null
+          risk_score_at_discovery?: number | null
+          source?: string | null
+          state?: string
+          token_address: string
+          token_name?: string | null
+          token_symbol?: string | null
+          trade_tx_hash?: string | null
+          traded_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          buyer_position_at_discovery?: number | null
+          created_at?: string
+          discovered_at?: string
+          id?: string
+          liquidity_at_discovery?: number | null
+          max_retries?: number
+          pending_reason?: string | null
+          pending_since?: string | null
+          position_id?: string | null
+          rejected_at?: string | null
+          rejection_reason?: string | null
+          retry_count?: number
+          retry_expires_at?: string | null
+          risk_score_at_discovery?: number | null
+          source?: string | null
+          state?: string
+          token_address?: string
+          token_name?: string | null
+          token_symbol?: string | null
+          trade_tx_hash?: string | null
+          traded_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       trade_history: {
         Row: {
           amount: number

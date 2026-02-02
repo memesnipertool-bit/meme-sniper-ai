@@ -37,6 +37,7 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useDemoPortfolio } from "@/contexts/DemoPortfolioContext";
 import { useBotContext } from "@/contexts/BotContext";
 import { useDisplayUnit } from "@/contexts/DisplayUnitContext";
+import { useTokenStateManager } from "@/hooks/useTokenStateManager";
 
 import { reconcilePositionsWithPools } from "@/lib/positionMetadataReconciler";
 import { fetchDexScreenerTokenMetadata } from "@/lib/dexscreener";
@@ -117,6 +118,19 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     setScanSpeed: setBotScanSpeed,
     recordTrade,
   } = useBotContext();
+
+  // PERSISTENT TOKEN STATE MANAGER - survives restarts, prevents duplicate trades
+  const {
+    initialized: tokenStatesInitialized,
+    canTradeToken,
+    filterTradeableTokens,
+    registerTokensBatch,
+    markTraded,
+    markPending,
+    markRejected,
+    cleanupExpiredPending,
+    getStateCounts,
+  } = useTokenStateManager();
 
   // Local aliases from bot context for easier access
   const isBotActive = botState.isBotActive;
@@ -918,9 +932,20 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       return;
     }
     
+    // CRITICAL: Wait for persistent token states to load before processing
+    if (!isDemo && !tokenStatesInitialized) {
+      console.log('[Scanner] Waiting for token states to initialize...');
+      return;
+    }
+    
     // If autoEntry is disabled, skip new trade evaluations (but bot can still run for other features)
     if (!autoEntryEnabled) {
       return;
+    }
+    
+    // Periodically clean up expired PENDING tokens (move to REJECTED)
+    if (!isDemo) {
+      cleanupExpiredPending();
     }
     
     // Build set of active position addresses for deduplication
@@ -929,19 +954,25 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     );
     
     // Filter for tokens we haven't processed yet AND haven't traded AND not in active positions
-    // tradedTokensRef is NEVER cleared during bot session - prevents duplicate buys
+    // In LIVE mode, also check persistent database state via canTradeToken
     const unseenTokens = tokens.filter(t => {
       const addrLower = t.address.toLowerCase();
       
-      // Skip if already processed this session
+      // Skip if already processed this session (in-memory cache)
       if (processedTokensRef.current.has(t.address)) return false;
       
-      // Skip if already traded this session
+      // Skip if already traded this session (in-memory cache)
       if (tradedTokensRef.current.has(t.address)) return false;
       
       // CRITICAL: Skip if token already has an active position in database
       if (activePositionAddresses.has(addrLower)) {
         console.log(`[Scanner] Filtered out ${t.symbol} - already in active positions`);
+        return false;
+      }
+      
+      // CRITICAL (LIVE MODE): Check persistent database state - prevents duplicate trades across restarts
+      if (!isDemo && !canTradeToken(t.address)) {
+        console.log(`[Scanner] Filtered out ${t.symbol} - persistent state: TRADED or REJECTED`);
         return false;
       }
       
@@ -958,7 +989,13 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       if (!t.address) return false;
       if (blacklist.has(t.address)) return false;
       if (t.symbol?.toUpperCase() === 'SOL' && t.address !== SOL_MINT) return false;
-      if (t.canSell === false) return false;
+      if (t.canSell === false) {
+        // Mark non-sellable tokens as REJECTED in persistent state
+        if (!isDemo) {
+          markRejected(t.address, 'not_sellable');
+        }
+        return false;
+      }
       // Double-check against traded tokens
       if (tradedTokensRef.current.has(t.address)) return false;
       // CRITICAL: Double-check against active positions
@@ -967,6 +1004,19 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     });
 
     if (candidates.length === 0) return;
+    
+    // Register new tokens in persistent state (LIVE mode only)
+    if (!isDemo && candidates.length > 0) {
+      await registerTokensBatch(candidates.map(t => ({
+        address: t.address,
+        symbol: t.symbol,
+        name: t.name,
+        source: t.source,
+        liquidity: t.liquidity,
+        riskScore: t.riskScore,
+        buyerPosition: t.buyerPosition,
+      })));
+    }
 
     const batchSize = isDemo ? 10 : 20;
     const batch = candidates.slice(0, batchSize);
@@ -1243,6 +1293,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         );
 
         if (result?.status === 'SUCCESS' && result.position) {
+          // CRITICAL: Mark token as TRADED in persistent state (survives restarts)
+          await markTraded(next.token.address, result.position.entryTxHash);
+          
           const entryVal = (result.position.entryPrice || 0) * (result.position.tokenAmount || 0);
           addBotLog({ 
             level: 'success', 
@@ -1258,14 +1311,36 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           await new Promise(r => setTimeout(r, 500));
         } else {
           const failReason = result?.error || 'Trade failed - unknown error';
-          addBotLog({ 
-            level: 'error', 
-            category: 'trade', 
-            message: `❌ BUY FAILED: ${next.token.symbol}`,
-            tokenSymbol: next.token.symbol,
-            tokenAddress: next.token.address,
-            details: `💧 Liquidity: ${liqText} | 👤 Buyer Pos: ${buyerPos} | 🛡️ Safety: ${safetyScore}\n❗ Reason: ${failReason}\n⚙️ Attempted: ${tradeAmountSol} SOL | Slippage: ${settings.slippage_tolerance || 15}%\n📍 Token: ${next.token.address}`,
-          });
+          
+          // Check if failure is due to no liquidity/route - mark as PENDING for retry
+          const isLiquidityIssue = failReason.toLowerCase().includes('no route') || 
+            failReason.toLowerCase().includes('no liquidity') ||
+            failReason.toLowerCase().includes('insufficient liquidity');
+          
+          if (isLiquidityIssue) {
+            // Mark as PENDING - will retry within time window
+            await markPending(next.token.address, 'no_route');
+            addBotLog({ 
+              level: 'warning', 
+              category: 'trade', 
+              message: `⏳ PENDING: ${next.token.symbol} (no route - will retry)`,
+              tokenSymbol: next.token.symbol,
+              tokenAddress: next.token.address,
+              details: `💧 Liquidity: ${liqText} | 👤 Buyer Pos: ${buyerPos}\n❗ Reason: ${failReason}\n🔄 Will retry within 5 minutes`,
+            });
+          } else {
+            // Mark as REJECTED for permanent failures
+            await markRejected(next.token.address, failReason.slice(0, 100));
+            addBotLog({ 
+              level: 'error', 
+              category: 'trade', 
+              message: `❌ REJECTED: ${next.token.symbol}`,
+              tokenSymbol: next.token.symbol,
+              tokenAddress: next.token.address,
+              details: `💧 Liquidity: ${liqText} | 👤 Buyer Pos: ${buyerPos} | 🛡️ Safety: ${safetyScore}\n❗ Reason: ${failReason}\n⚙️ Attempted: ${tradeAmountSol} SOL | Slippage: ${settings.slippage_tolerance || 15}%\n📍 Token: ${next.token.address}`,
+            });
+          }
+          
           recordTrade(false);
           break; // Stop on first failure
         }
@@ -1283,6 +1358,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     demoBalance, solPrice, evaluateTokens, snipeToken, recordTrade,
     signAndSendTransaction, refreshBalance, fetchPositions, toast,
     deductBalance, addBalance, addDemoPosition, updateDemoPosition, closeDemoPosition,
+    // Persistent token state manager functions
+    tokenStatesInitialized, canTradeToken, cleanupExpiredPending, registerTokensBatch,
+    markTraded, markPending, markRejected,
   ]);
 
   // Continuous evaluation loop - runs on interval
