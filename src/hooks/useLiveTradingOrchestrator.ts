@@ -19,6 +19,7 @@ import { useTradingEngine } from '@/hooks/useTradingEngine';
 import { usePositions } from '@/hooks/usePositions';
 import { useSniperSettings, SniperSettings } from '@/hooks/useSniperSettings';
 import { useToast } from '@/hooks/use-toast';
+import { useTokenStateManager } from '@/hooks/useTokenStateManager';
 import { addBotLog } from '@/components/scanner/BotActivityLog';
 import { isPlaceholderText } from '@/lib/formatters';
 import type { TradingFlowResult } from '@/lib/trading-engine';
@@ -71,6 +72,15 @@ export function useLiveTradingOrchestrator() {
   const { createPosition, fetchPositions, openPositions } = usePositions();
   const { settings } = useSniperSettings();
   const { toast } = useToast();
+  
+  // CRITICAL: Persistent token state manager - survives restarts
+  const {
+    initialized: tokenStatesInitialized,
+    canTradeToken,
+    markTraded,
+    markPending,
+    markRejected,
+  } = useTokenStateManager();
 
   const [state, setState] = useState<OrchestratorState>({
     isExecuting: false,
@@ -96,6 +106,7 @@ export function useLiveTradingOrchestrator() {
     activePositionAddressesRef.current = addresses;
     console.log(`[Orchestrator] Synced ${addresses.size} active position addresses for deduplication`);
   }, [openPositions]);
+
 
   /**
    * Validate prerequisites for live trading
@@ -346,6 +357,19 @@ export function useLiveTradingOrchestrator() {
         });
         continue;
       }
+      
+      // CRITICAL: Check persistent token state - prevents duplicate trades across restarts
+      if (tokenStatesInitialized && !canTradeToken(token.address)) {
+        addBotLog({
+          level: 'warning',
+          category: 'trade',
+          message: `⏭️ Skipped: ${token.symbol} (persistent state: TRADED/REJECTED)`,
+          tokenSymbol: token.symbol,
+          tokenAddress: token.address,
+          details: 'Token already traded or rejected - skipping to avoid duplicate',
+        });
+        continue;
+      }
 
       // Enforce cooldown
       const timeSinceLastTrade = Date.now() - state.lastTradeTime;
@@ -369,6 +393,9 @@ export function useLiveTradingOrchestrator() {
       }));
 
       if (result.success) {
+        // CRITICAL: Mark token as TRADED in persistent state (survives restarts)
+        await markTraded(token.address, result.txHash, result.positionId);
+        
         toast({
           title: `🎯 Trade Executed: ${token.symbol}`,
           description: `Entry: $${result.entryPrice?.toFixed(8)} | TX: ${result.txHash?.slice(0, 8)}...`,
@@ -378,6 +405,17 @@ export function useLiveTradingOrchestrator() {
         refreshBalance();
         fetchPositions();
       } else {
+        // Check if failure is due to liquidity/route issue - mark as PENDING for retry
+        const isLiquidityIssue = result.error?.toLowerCase().includes('no route') || 
+          result.error?.toLowerCase().includes('no liquidity') ||
+          result.error?.toLowerCase().includes('insufficient liquidity');
+        
+        if (isLiquidityIssue) {
+          await markPending(token.address, 'no_route');
+        } else {
+          await markRejected(token.address, result.error?.slice(0, 100) || 'unknown_error');
+        }
+        
         toast({
           title: `Trade Failed: ${token.symbol}`,
           description: result.error || 'Unknown error',
@@ -393,7 +431,7 @@ export function useLiveTradingOrchestrator() {
     }));
     
     executingRef.current = false;
-  }, [validatePrerequisites, state.lastTradeTime, settings, executeSingleTrade, toast, refreshBalance, fetchPositions, openWalletModal]);
+  }, [validatePrerequisites, state.lastTradeTime, settings, executeSingleTrade, toast, refreshBalance, fetchPositions, openWalletModal, tokenStatesInitialized, canTradeToken, markTraded, markPending, markRejected]);
 
   /**
    * Queue approved tokens for execution
@@ -412,6 +450,12 @@ export function useLiveTradingOrchestrator() {
       // CRITICAL: Skip if token already has an active position in database
       if (activePositionAddressesRef.current.has(addrLower)) {
         console.log(`[Orchestrator] Filtered out ${t.symbol} - already in active positions`);
+        return false;
+      }
+      
+      // CRITICAL: Check persistent token state - prevents duplicate trades across restarts
+      if (tokenStatesInitialized && !canTradeToken(t.address)) {
+        console.log(`[Orchestrator] Filtered out ${t.symbol} - persistent state: TRADED/REJECTED`);
         return false;
       }
       
@@ -435,7 +479,7 @@ export function useLiveTradingOrchestrator() {
 
     // Start processing
     processQueue();
-  }, [processQueue]);
+  }, [processQueue, tokenStatesInitialized, canTradeToken]);
 
   /**
    * Execute immediate trade (bypass queue)
