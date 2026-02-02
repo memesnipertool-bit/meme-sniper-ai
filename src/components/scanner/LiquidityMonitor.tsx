@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScannedToken } from "@/hooks/useTokenScanner";
-import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye, Clock } from "lucide-react";
+import { Zap, TrendingUp, TrendingDown, ExternalLink, ShieldCheck, ShieldX, Lock, Search, LogOut, ChevronDown, ChevronUp, DollarSign, Eye, Clock, Play, Pause } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import WaitingLiquidityTab, { type CombinedWaitingItem } from "./WaitingLiquidityTab";
@@ -46,6 +46,9 @@ interface LiquidityMonitorProps {
   onManualSellWaiting?: (position: WaitingPosition | CombinedWaitingItem) => void;
   onRefreshWalletTokens?: () => void;
   checkingLiquidity?: boolean;
+  // Pool scanning controls
+  isScanningPaused?: boolean;
+  onToggleScanning?: () => void;
 }
 
 const formatLiquidity = (value: number) => {
@@ -523,6 +526,8 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
   onManualSellWaiting,
   onRefreshWalletTokens,
   checkingLiquidity = false,
+  isScanningPaused = false,
+  onToggleScanning,
 }, ref) {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("pools");
@@ -741,16 +746,43 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
             </div>
             
             <TabsContent value="pools" className="mt-0">
-              {/* Search */}
-              <div className="px-4 pb-3">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by name or symbol..."
-                    value={searchTerm}
-                    onChange={(e) => handleSearchChange(e.target.value)}
-                    className="pl-9 bg-secondary/40 border-border/30 h-9 text-sm"
-                  />
+              {/* Search + Pause/Start Controls */}
+              <div className="px-4 pb-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by name or symbol..."
+                      value={searchTerm}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      className="pl-9 bg-secondary/40 border-border/30 h-9 text-sm"
+                    />
+                  </div>
+                  {onToggleScanning && (
+                    <Button
+                      variant={isScanningPaused ? "default" : "outline"}
+                      size="sm"
+                      onClick={onToggleScanning}
+                      className={cn(
+                        "h-9 gap-1.5 min-w-[90px]",
+                        isScanningPaused 
+                          ? "bg-success hover:bg-success/90 text-success-foreground" 
+                          : "border-warning/50 text-warning hover:bg-warning/10"
+                      )}
+                    >
+                      {isScanningPaused ? (
+                        <>
+                          <Play className="w-3.5 h-3.5" />
+                          Start
+                        </>
+                      ) : (
+                        <>
+                          <Pause className="w-3.5 h-3.5" />
+                          Pause
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
               </div>
               
