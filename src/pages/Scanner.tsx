@@ -754,6 +754,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
 
   // Calculate stats based on mode
   // ROOT FIX: Total P&L includes BOTH open AND closed positions (realized + unrealized)
+  // Display scale factor for better readability of micro-cap token values
+  const DISPLAY_SCALE = 1000;
   
   // Open positions: current value and invested
   const totalValue = useMemo(() => {
@@ -1994,22 +1996,22 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-6">
             <StatsCard
               title="Invested"
-              value={formatDualValue(totalInvested).primary}
-              change={formatDualValue(totalInvested).secondary}
+              value={formatDualValue(totalInvested * DISPLAY_SCALE).primary}
+              change={formatDualValue(totalInvested * DISPLAY_SCALE).secondary}
               changeType="neutral"
               icon={Coins}
             />
             <StatsCard
               title="Open Value"
-              value={isDemo ? `${demoBalance.toFixed(2)} SOL` : formatDualValue(totalValue).primary}
-              change={isDemo ? `≈ $${(demoBalance * solPrice).toFixed(2)}` : formatDualValue(totalValue).secondary}
+              value={isDemo ? `${demoBalance.toFixed(2)} SOL` : formatDualValue(totalValue * DISPLAY_SCALE).primary}
+              change={isDemo ? `≈ $${(demoBalance * solPrice).toFixed(2)}` : formatDualValue(totalValue * DISPLAY_SCALE).secondary}
               changeType={openPnL >= 0 ? 'positive' : 'negative'}
               icon={Wallet}
             />
             <StatsCard
               title="Total P&L"
-              value={formatDualValue(totalPnL, { showSign: true }).primary}
-              change={formatDualValue(totalPnL, { showSign: true }).secondary}
+              value={formatDualValue(totalPnL * DISPLAY_SCALE, { showSign: true }).primary}
+              change={formatDualValue(totalPnL * DISPLAY_SCALE, { showSign: true }).secondary}
               changeType={totalPnL >= 0 ? 'positive' : 'negative'}
               icon={totalPnL >= 0 ? TrendingUp : TrendingUp}
             />
