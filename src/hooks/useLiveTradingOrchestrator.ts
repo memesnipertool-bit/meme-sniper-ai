@@ -392,7 +392,25 @@ export function useLiveTradingOrchestrator() {
       const routeValidation = await validateSwapRoute(token.address, {
         timeoutMs: 8000,
         checkBothParallel: true,
+        checkIndexing: true,
       });
+
+      // CRITICAL: Block tokens awaiting indexing - too new to trade safely
+      if (routeValidation.isAwaitingIndexing) {
+        addBotLog({
+          level: 'warning',
+          category: 'trade',
+          message: `⏳ Awaiting indexing: ${token.symbol} - skipped`,
+          tokenSymbol: token.symbol,
+          tokenAddress: token.address,
+          details: 'Token is too new and not yet indexed on DEX aggregators.\nWill retry once indexing completes.',
+        });
+        
+        // Mark as PENDING for retry later when indexed
+        await markPending(token.address, 'awaiting_indexing');
+        executedTokensRef.current.add(token.address); // Prevent immediate retry
+        continue;
+      }
 
       if (!routeValidation.hasRoute) {
         addBotLog({
@@ -416,7 +434,7 @@ export function useLiveTradingOrchestrator() {
         message: `✓ Route found: ${token.symbol} via ${routeValidation.source}`,
         tokenSymbol: token.symbol,
         tokenAddress: token.address,
-        details: `Jupiter: ${routeValidation.jupiter ? '✓' : '✗'} | Raydium: ${routeValidation.raydium ? '✓' : '✗'}`,
+        details: `Jupiter: ${routeValidation.jupiter ? '✓' : '✗'} | Raydium: ${routeValidation.raydium ? '✓' : '✗'} | Indexed: ✓`,
       });
 
       setState(prev => ({
