@@ -104,9 +104,9 @@ export default function StatsGrid({
     : 0;
 
   // Get dual formatted values (SOL primary, USD secondary)
-  // Apply ×1000 multiplier for display readability of micro-cap values
-  const pnlFormatted = formatDualValue(totalPnL * 1000, { showSign: true });
-  const valueFormatted = formatDualValue(totalValue * 1000);
+  // Values are already in USD - format directly without any multiplier
+  const pnlFormatted = formatDualValue(totalPnL, { showSign: true });
+  const valueFormatted = formatDualValue(totalValue);
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

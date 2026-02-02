@@ -118,43 +118,53 @@ function Index() {
     return chartData;
   }, [isDemo, getCurrentPortfolioData, allPositions, selectedPeriod]);
 
-  // Calculate stats from ALL positions (open + closed) for cumulative view
-  // CRITICAL: entry_value is stored in SOL, but current_value is in USD
-  // We need to calculate accurate USD values for all displays
+  // ROOT FIX: Always recalculate values from amount × prices instead of using stored values
+  // This ensures accuracy regardless of any inconsistencies in stored fields
+  
+  // Calculate total invested (entry value) for ALL positions
+  const totalInvested = useMemo(() => {
+    if (isDemo) {
+      return demoTotalValue; // Demo handles this differently
+    }
+    const allPositions = [...realOpenPositions, ...realClosedPositions];
+    return allPositions.reduce((sum, p) => {
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
+  }, [isDemo, demoTotalValue, realOpenPositions, realClosedPositions]);
+  
+  // Calculate total current value (open positions only use current price, closed use exit price)
   const totalValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
-    // For open positions: current_value is in USD
-    // For closed positions: add realized P&L
-    const openValue = realOpenPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
-    const closedPnL = realClosedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
-    return openValue + closedPnL;
+    // Open positions: amount × current_price
+    const openValue = realOpenPositions.reduce((sum, p) => {
+      const currentPrice = p.current_price ?? p.entry_price ?? 0;
+      return sum + (p.amount * currentPrice);
+    }, 0);
+    // Closed positions: amount × exit_price (realized value)
+    const closedValue = realClosedPositions.reduce((sum, p) => {
+      const exitPrice = p.exit_price ?? p.current_price ?? p.entry_price ?? 0;
+      return sum + (p.amount * exitPrice);
+    }, 0);
+    return openValue + closedValue;
   }, [isDemo, demoTotalValue, realOpenPositions, realClosedPositions]);
   
+  // ROOT FIX: P&L = Total Value - Total Invested (recalculated)
   const totalPnL = useMemo(() => {
     if (isDemo) {
       return demoTotalPnL;
     }
-    // Cumulative P&L from ALL positions (profit_loss_value is in USD)
-    const openPnL = realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
-    const closedPnL = realClosedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
-    return openPnL + closedPnL;
-  }, [isDemo, demoTotalPnL, realOpenPositions, realClosedPositions]);
+    return totalValue - totalInvested;
+  }, [isDemo, demoTotalPnL, totalValue, totalInvested]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {
       return demoTotalPnLPercent;
     }
-    // Calculate % based on total entry value of all positions (in USD)
-    const allPositions = [...realOpenPositions, ...realClosedPositions];
-    const entryTotal = allPositions.reduce((sum, p) => {
-      // Use amount * entry_price_usd for accurate USD entry value
-      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
-      return sum + (p.amount * entryPriceUsd);
-    }, 0);
-    return entryTotal > 0 ? (totalPnL / entryTotal) * 100 : 0;
-  }, [isDemo, demoTotalPnLPercent, realOpenPositions, realClosedPositions, totalPnL]);
+    return totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+  }, [isDemo, demoTotalPnLPercent, totalInvested, totalPnL]);
 
   const todayPerformance = useMemo(() => {
     if (portfolioData.length < 2) return 0;

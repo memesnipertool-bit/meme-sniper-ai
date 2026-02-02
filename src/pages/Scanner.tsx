@@ -753,41 +753,40 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   ]);
 
   // Calculate stats based on mode
-  // CRITICAL: entry_value is stored in SOL, but current_value is in USD
-  // We need to calculate USD values for proper display with formatDualValue
+  // ROOT FIX: Always recalculate values from amount × prices instead of using stored values
+  // This ensures accuracy regardless of any inconsistencies in stored fields
   const totalValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
-    // current_value is already in USD (amount * current_price_usd)
-    return realOpenPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
+    // Recalculate: Open Value = sum of (amount × current_price) for all open positions
+    return realOpenPositions.reduce((sum, p) => {
+      const currentPrice = p.current_price ?? p.entry_price ?? 0;
+      return sum + (p.amount * currentPrice);
+    }, 0);
   }, [isDemo, demoTotalValue, realOpenPositions]);
   
-  const totalPnL = useMemo(() => {
-    if (isDemo) {
-      return demoTotalPnL;
-    }
-    // profit_loss_value is in USD
-    return realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
-  }, [isDemo, demoTotalPnL, realOpenPositions]);
-  
   // Calculate total invested (entry value) for active positions
-  // CRITICAL FIX: entry_value is stored in SOL (trade amount in SOL)
-  // We need to calculate the USD value: entry_value_sol * solPrice
-  // OR use amount * entry_price_usd which is the actual USD entry value
+  // ROOT FIX: Invested = sum of (amount × entry_price_usd) for all open positions
   const totalInvested = useMemo(() => {
     if (isDemo) {
       // Demo stores entry_value in SOL
       return openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
     }
-    // For live positions: calculate USD entry value from amount * entry_price_usd
-    // This is more accurate than entry_value which is stored in SOL
+    // For live positions: calculate USD entry value from amount × entry_price_usd
     return realOpenPositions.reduce((sum, p) => {
-      // Use amount * entry_price_usd for accurate USD entry value
       const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
       return sum + (p.amount * entryPriceUsd);
     }, 0);
   }, [isDemo, openDemoPositions, realOpenPositions, fallbackSolPrice]);
+  
+  // ROOT FIX: P&L = Open Value - Invested (recalculated, not from stored profit_loss_value)
+  const totalPnL = useMemo(() => {
+    if (isDemo) {
+      return demoTotalPnL;
+    }
+    return totalValue - totalInvested;
+  }, [isDemo, demoTotalPnL, totalValue, totalInvested]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {
@@ -1962,15 +1961,15 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
             <StatsCard
               title="Invested"
-              value={formatDualValue(totalInvested * 1000).primary}
-              change={formatDualValue(totalInvested * 1000).secondary}
+              value={formatDualValue(totalInvested).primary}
+              change={formatDualValue(totalInvested).secondary}
               changeType="neutral"
               icon={Coins}
             />
             <StatsCard
               title="Open Value"
-              value={isDemo ? `${demoBalance.toFixed(2)} SOL` : formatDualValue(totalValue * 1000).primary}
-              change={isDemo ? `≈ $${(demoBalance * solPrice).toFixed(2)}` : formatDualValue(totalValue * 1000).secondary}
+              value={isDemo ? `${demoBalance.toFixed(2)} SOL` : formatDualValue(totalValue).primary}
+              change={isDemo ? `≈ $${(demoBalance * solPrice).toFixed(2)}` : formatDualValue(totalValue).secondary}
               changeType={totalPnL >= 0 ? 'positive' : 'negative'}
               icon={Wallet}
             />
