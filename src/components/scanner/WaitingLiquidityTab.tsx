@@ -634,16 +634,8 @@ export default function WaitingLiquidityTab({
     }
   }, [isTabActive, onRefreshWalletTokens]);
 
-  // Auto-check routes for items that don't have status yet
-  useEffect(() => {
-    if (!isTabActive) return;
-    
-    for (const item of combinedItems) {
-      if (!routeStatuses[item.token_address]) {
-        checkRoutesForToken(item.token_address);
-      }
-    }
-  }, [combinedItems, routeStatuses, checkRoutesForToken, isTabActive]);
+  // REMOVED: Auto-check routes - now only checks on user action (button click)
+  // Route status starts as 'unknown' until user clicks "Check" button
 
   const waitingCount = positions.filter(p => !activeTokenAddresses.has(p.token_address.toLowerCase())).length;
   const walletCount = combinedItems.filter(i => i.isWalletToken).length;
@@ -750,7 +742,7 @@ export default function WaitingLiquidityTab({
       {/* Info footer */}
       <div className="px-4 py-3 bg-muted/30 border-t border-border/30">
         <p className="text-xs text-muted-foreground">
-          💡 Click a token to expand details. Exit attempts Jupiter first, then Raydium fallback. Auto-checks routes every 30s.
+          💡 Click a token to expand details and use "Check" button to verify swap routes. Exit attempts Jupiter first, then Raydium fallback.
         </p>
       </div>
     </div>
