@@ -22,6 +22,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useTokenStateManager } from '@/hooks/useTokenStateManager';
 import { addBotLog } from '@/components/scanner/BotActivityLog';
 import { isPlaceholderText } from '@/lib/formatters';
+import { validateSwapRoute } from '@/lib/routeValidator';
 import type { TradingFlowResult } from '@/lib/trading-engine';
 
 // Approved token from auto-sniper
@@ -376,6 +377,47 @@ export function useLiveTradingOrchestrator() {
       if (timeSinceLastTrade < TRADE_COOLDOWN_MS) {
         await new Promise(r => setTimeout(r, TRADE_COOLDOWN_MS - timeSinceLastTrade));
       }
+
+      // CRITICAL: Mandatory route validation before any trade decision
+      // Check both Jupiter AND Raydium - block if no route on either
+      addBotLog({
+        level: 'info',
+        category: 'trade',
+        message: `🔍 Validating swap route: ${token.symbol}`,
+        tokenSymbol: token.symbol,
+        tokenAddress: token.address,
+        details: 'Checking Jupiter and Raydium for active swap route...',
+      });
+
+      const routeValidation = await validateSwapRoute(token.address, {
+        timeoutMs: 8000,
+        checkBothParallel: true,
+      });
+
+      if (!routeValidation.hasRoute) {
+        addBotLog({
+          level: 'warning',
+          category: 'trade',
+          message: `🚫 No route: ${token.symbol} - skipped`,
+          tokenSymbol: token.symbol,
+          tokenAddress: token.address,
+          details: `Jupiter: ${routeValidation.jupiter ? '✓' : '✗'} | Raydium: ${routeValidation.raydium ? '✓' : '✗'}\n${routeValidation.error || 'No active swap route on either DEX'}`,
+        });
+        
+        // Mark as PENDING for retry later
+        await markPending(token.address, 'no_route');
+        executedTokensRef.current.add(token.address); // Prevent immediate retry
+        continue;
+      }
+
+      addBotLog({
+        level: 'success',
+        category: 'trade',
+        message: `✓ Route found: ${token.symbol} via ${routeValidation.source}`,
+        tokenSymbol: token.symbol,
+        tokenAddress: token.address,
+        details: `Jupiter: ${routeValidation.jupiter ? '✓' : '✗'} | Raydium: ${routeValidation.raydium ? '✓' : '✗'}`,
+      });
 
       setState(prev => ({
         ...prev,
