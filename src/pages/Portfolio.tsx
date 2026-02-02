@@ -323,7 +323,6 @@ function Portfolio() {
         </div>
 
         {/* Stats Overview - Comprehensive Grid */}
-        {/* Apply ×1000 display scaling for better readability of micro-cap values */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
           {/* Invested Card - Total Entry Value computed from amount × entry_price_usd */}
           <Card className="bg-gradient-to-br from-blue-500/10 to-card">
@@ -332,8 +331,8 @@ function Portfolio() {
                 <Coins className="w-4 h-4 text-blue-500" />
                 <span className="text-xs text-muted-foreground">Invested</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue * 1000).primary}</p>
-              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue * 1000).secondary}</p>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue).secondary}</p>
             </CardContent>
           </Card>
 
@@ -343,8 +342,8 @@ function Portfolio() {
                 <DollarSign className="w-4 h-4 text-primary" />
                 <span className="text-xs text-muted-foreground">Open Value</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openValue * 1000).primary}</p>
-              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openValue * 1000).secondary}</p>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openValue).secondary}</p>
             </CardContent>
           </Card>
 
@@ -355,10 +354,10 @@ function Portfolio() {
                 <span className="text-xs text-muted-foreground">Total P&L</span>
               </div>
               <p className={`text-xl font-bold ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {formatDualValue(stats.totalPnL * 1000, { showSign: true }).primary}
+                {formatDualValue(stats.totalPnL, { showSign: true }).primary}
               </p>
               <p className={`text-xs ${stats.totalPnL >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
-                {formatDualValue(stats.totalPnL * 1000, { showSign: true }).secondary}
+                {formatDualValue(stats.totalPnL, { showSign: true }).secondary}
               </p>
             </CardContent>
           </Card>
