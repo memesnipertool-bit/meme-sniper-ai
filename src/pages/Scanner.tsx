@@ -1948,8 +1948,8 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
           <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
             <StatsCard
               title="Invested"
-              value={formatSolNativeValue(totalInvested).primary}
-              change={formatSolNativeValue(totalInvested).secondary}
+              value={formatDualValue(totalInvested).primary}
+              change={formatDualValue(totalInvested).secondary}
               changeType="neutral"
               icon={Coins}
             />
@@ -1957,7 +1957,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
               title="Open Value"
               value={isDemo ? `${demoBalance.toFixed(2)} SOL` : formatDualValue(totalValue).primary}
               change={isDemo ? `≈ $${(demoBalance * solPrice).toFixed(2)}` : formatDualValue(totalValue).secondary}
-              changeType={totalPnLPercent >= 0 ? 'positive' : 'negative'}
+              changeType={totalPnL >= 0 ? 'positive' : 'negative'}
               icon={Wallet}
             />
             <StatsCard
