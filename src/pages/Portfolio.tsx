@@ -214,26 +214,36 @@ function Portfolio() {
   };
 
   // Calculate comprehensive stats
-  // CRITICAL: entry_value is stored in SOL, but current_value is in USD
-  // We need to calculate accurate USD values for all displays
+  // ROOT FIX: Always recalculate values from amount × prices instead of using stored values
+  // This ensures accuracy regardless of any inconsistencies in stored fields
   const stats = useMemo(() => {
-    // current_value is already in USD
-    const openValue = openPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
+    // ROOT FIX: Open Value = sum of (amount × current_price) - recalculated, not stored
+    const openValue = openPositions.reduce((sum, p) => {
+      const currentPrice = p.current_price ?? p.entry_price ?? 0;
+      return sum + (p.amount * currentPrice);
+    }, 0);
     
-    // Calculate entry value in USD: amount * entry_price_usd
+    // ROOT FIX: Entry Value = sum of (amount × entry_price_usd) - recalculated
     const openEntryValue = openPositions.reduce((sum, p) => {
       const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
       return sum + (p.amount * entryPriceUsd);
     }, 0);
     
-    // profit_loss_value is in USD
-    const openPnL = openPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
+    // ROOT FIX: Open P&L = Open Value - Entry Value (recalculated)
+    const openPnL = openValue - openEntryValue;
     
-    const closedPnL = closedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
+    // For closed positions, recalculate similarly
     const closedEntryValue = closedPositions.reduce((sum, p) => {
       const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
       return sum + (p.amount * entryPriceUsd);
     }, 0);
+    
+    const closedExitValue = closedPositions.reduce((sum, p) => {
+      const exitPrice = p.exit_price ?? p.current_price ?? p.entry_price ?? 0;
+      return sum + (p.amount * exitPrice);
+    }, 0);
+    
+    const closedPnL = closedExitValue - closedEntryValue;
     
     const totalPnL = openPnL + closedPnL;
     const totalEntryValue = openEntryValue + closedEntryValue;
@@ -314,15 +324,15 @@ function Portfolio() {
 
         {/* Stats Overview - Comprehensive Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-          {/* Invested Card - Total Entry Value (stored in USD, displayed ×1000 for readability) */}
+          {/* Invested Card - Total Entry Value computed from amount × entry_price_usd */}
           <Card className="bg-gradient-to-br from-blue-500/10 to-card">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <Coins className="w-4 h-4 text-blue-500" />
                 <span className="text-xs text-muted-foreground">Invested</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue * 1000).primary}</p>
-              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue * 1000).secondary}</p>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue).secondary}</p>
             </CardContent>
           </Card>
 
@@ -332,8 +342,8 @@ function Portfolio() {
                 <DollarSign className="w-4 h-4 text-primary" />
                 <span className="text-xs text-muted-foreground">Open Value</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openValue * 1000).primary}</p>
-              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openValue * 1000).secondary}</p>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openValue).secondary}</p>
             </CardContent>
           </Card>
 
@@ -344,10 +354,10 @@ function Portfolio() {
                 <span className="text-xs text-muted-foreground">Total P&L</span>
               </div>
               <p className={`text-xl font-bold ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {formatDualValue(stats.totalPnL * 1000, { showSign: true }).primary}
+                {formatDualValue(stats.totalPnL, { showSign: true }).primary}
               </p>
               <p className={`text-xs ${stats.totalPnL >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
-                {formatDualValue(stats.totalPnL * 1000, { showSign: true }).secondary}
+                {formatDualValue(stats.totalPnL, { showSign: true }).secondary}
               </p>
             </CardContent>
           </Card>
