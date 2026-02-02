@@ -1830,6 +1830,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         tokenName={noRoutePosition?.token_name || ''}
         onMoveToWaiting={async () => {
           if (noRoutePosition) {
+            console.log('[NoRouteModal] Moving position to waiting:', noRoutePosition.id, noRoutePosition.token_symbol);
             addBotLog({
               level: 'warning',
               category: 'exit',
@@ -1837,8 +1838,35 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
               tokenSymbol: noRoutePosition.token_symbol,
               details: 'No Jupiter/Raydium route available. Will auto-retry every 30s until liquidity returns.',
             });
-            await moveToWaitingForLiquidity(noRoutePosition.id);
-            fetchPositions(true);
+            
+            const success = await moveToWaitingForLiquidity(noRoutePosition.id);
+            console.log('[NoRouteModal] Move result:', success);
+            
+            if (success) {
+              addBotLog({
+                level: 'success',
+                category: 'exit',
+                message: `✅ Moved to Waiting Pool: ${noRoutePosition.token_symbol}`,
+                tokenSymbol: noRoutePosition.token_symbol,
+                details: 'Token removed from Active trades. Will auto-sell when liquidity returns.',
+              });
+            } else {
+              addBotLog({
+                level: 'error',
+                category: 'exit',
+                message: `❌ Failed to move: ${noRoutePosition.token_symbol}`,
+                tokenSymbol: noRoutePosition.token_symbol,
+                details: 'Could not update position status. Check console for details.',
+              });
+              toast({
+                title: 'Failed to move position',
+                description: 'Could not update the position status. Please try again.',
+                variant: 'destructive',
+              });
+            }
+            
+            // Always refresh positions to sync UI state
+            await fetchPositions(true);
           }
           setShowNoRouteModal(false);
           setNoRoutePosition(null);

@@ -434,14 +434,23 @@ export function useLiquidityRetryWorker() {
 
   // Move a position to waiting for liquidity
   const moveToWaitingForLiquidity = useCallback(async (positionId: string): Promise<boolean> => {
+    console.log('[LiquidityRetry] moveToWaitingForLiquidity called with ID:', positionId);
+    
+    if (!positionId) {
+      console.error('[LiquidityRetry] No position ID provided');
+      return false;
+    }
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         console.error('[LiquidityRetry] No authenticated user');
         return false;
       }
+      
+      console.log('[LiquidityRetry] Updating position for user:', user.id);
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('positions')
         .update({
           status: 'waiting_for_liquidity',
@@ -450,10 +459,18 @@ export function useLiquidityRetryWorker() {
           liquidity_last_checked_at: null,
         })
         .eq('id', positionId)
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .select();
 
       if (error) {
-        console.error('[LiquidityRetry] Move error:', error);
+        console.error('[LiquidityRetry] Database update error:', error);
+        return false;
+      }
+      
+      console.log('[LiquidityRetry] Update result:', data);
+      
+      if (!data || data.length === 0) {
+        console.error('[LiquidityRetry] No rows updated - position may not exist or belong to different user');
         return false;
       }
 
