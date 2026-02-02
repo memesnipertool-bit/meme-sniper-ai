@@ -753,47 +753,80 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   ]);
 
   // Calculate stats based on mode
-  // ROOT FIX: Always recalculate values from amount × prices instead of using stored values
-  // This ensures accuracy regardless of any inconsistencies in stored fields
+  // ROOT FIX: Total P&L includes BOTH open AND closed positions (realized + unrealized)
+  
+  // Open positions: current value and invested
   const totalValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
-    // Recalculate: Open Value = sum of (amount × current_price) for all open positions
     return realOpenPositions.reduce((sum, p) => {
       const currentPrice = p.current_price ?? p.entry_price ?? 0;
       return sum + (p.amount * currentPrice);
     }, 0);
   }, [isDemo, demoTotalValue, realOpenPositions]);
   
-  // Calculate total invested (entry value) for active positions
-  // ROOT FIX: Invested = sum of (amount × entry_price_usd) for all open positions
   const totalInvested = useMemo(() => {
     if (isDemo) {
-      // Demo stores entry_value in SOL
       return openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
     }
-    // For live positions: calculate USD entry value from amount × entry_price_usd
     return realOpenPositions.reduce((sum, p) => {
       const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
       return sum + (p.amount * entryPriceUsd);
     }, 0);
   }, [isDemo, openDemoPositions, realOpenPositions, fallbackSolPrice]);
   
-  // ROOT FIX: P&L = Open Value - Invested (recalculated, not from stored profit_loss_value)
+  // Open P&L (unrealized)
+  const openPnL = useMemo(() => totalValue - totalInvested, [totalValue, totalInvested]);
+  
+  // Closed P&L (realized) - calculated from closed positions
+  const closedPnL = useMemo(() => {
+    if (isDemo) {
+      return closedDemoPositions.reduce((sum, p) => {
+        const exitPrice = p.exit_price ?? p.current_price ?? p.entry_price ?? 0;
+        const entryPrice = p.entry_price ?? 0;
+        return sum + ((exitPrice - entryPrice) * p.amount);
+      }, 0);
+    }
+    return realClosedPositions.reduce((sum, p) => {
+      const exitPrice = p.exit_price ?? p.current_price ?? p.entry_price ?? 0;
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price ?? 0;
+      return sum + ((exitPrice - entryPriceUsd) * p.amount);
+    }, 0);
+  }, [isDemo, closedDemoPositions, realClosedPositions]);
+  
+  // TOTAL P&L = Open P&L + Closed P&L (all trades)
   const totalPnL = useMemo(() => {
     if (isDemo) {
       return demoTotalPnL;
     }
-    return totalValue - totalInvested;
-  }, [isDemo, demoTotalPnL, totalValue, totalInvested]);
+    return openPnL + closedPnL;
+  }, [isDemo, demoTotalPnL, openPnL, closedPnL]);
+  
+  // Total invested across ALL positions for percentage
+  const allInvested = useMemo(() => {
+    if (isDemo) {
+      const openSum = openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
+      const closedSum = closedDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
+      return openSum + closedSum;
+    }
+    const openSum = realOpenPositions.reduce((sum, p) => {
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
+    const closedSum = realClosedPositions.reduce((sum, p) => {
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
+    return openSum + closedSum;
+  }, [isDemo, openDemoPositions, closedDemoPositions, realOpenPositions, realClosedPositions, fallbackSolPrice]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {
       return demoTotalPnLPercent;
     }
-    return totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
-  }, [isDemo, demoTotalPnLPercent, totalInvested, totalPnL]);
+    return allInvested > 0 ? (totalPnL / allInvested) * 100 : 0;
+  }, [isDemo, demoTotalPnLPercent, allInvested, totalPnL]);
 
   // Resume monitors when navigating back to Scanner with bot still active
   // CRITICAL: Also start auto-exit when there are open positions in live mode
@@ -1957,22 +1990,28 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
             </Alert>
           )}
 
-          {/* Stats Row - Mobile optimized with 2x3 grid, 5 cols on desktop */}
-          <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-5">
-            {/* Apply ×1000 display scaling for better readability of micro-cap values */}
+          {/* Stats Row - Mobile optimized with 2x3 grid, 6 cols on desktop */}
+          <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-6">
             <StatsCard
               title="Invested"
-              value={formatDualValue(totalInvested * 1000).primary}
-              change={formatDualValue(totalInvested * 1000).secondary}
+              value={formatDualValue(totalInvested).primary}
+              change={formatDualValue(totalInvested).secondary}
               changeType="neutral"
               icon={Coins}
             />
             <StatsCard
               title="Open Value"
-              value={isDemo ? `${demoBalance.toFixed(2)} SOL` : formatDualValue(totalValue * 1000).primary}
-              change={isDemo ? `≈ $${(demoBalance * solPrice).toFixed(2)}` : formatDualValue(totalValue * 1000).secondary}
-              changeType={totalPnL >= 0 ? 'positive' : 'negative'}
+              value={isDemo ? `${demoBalance.toFixed(2)} SOL` : formatDualValue(totalValue).primary}
+              change={isDemo ? `≈ $${(demoBalance * solPrice).toFixed(2)}` : formatDualValue(totalValue).secondary}
+              changeType={openPnL >= 0 ? 'positive' : 'negative'}
               icon={Wallet}
+            />
+            <StatsCard
+              title="Total P&L"
+              value={formatDualValue(totalPnL, { showSign: true }).primary}
+              change={formatDualValue(totalPnL, { showSign: true }).secondary}
+              changeType={totalPnL >= 0 ? 'positive' : 'negative'}
+              icon={totalPnL >= 0 ? TrendingUp : TrendingUp}
             />
             <StatsCard
               title="Active"

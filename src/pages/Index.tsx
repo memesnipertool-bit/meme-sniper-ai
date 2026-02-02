@@ -118,13 +118,13 @@ function Index() {
     return chartData;
   }, [isDemo, getCurrentPortfolioData, allPositions, selectedPeriod]);
 
-  // ROOT FIX: Always recalculate values from amount × prices instead of using stored values
-  // This ensures accuracy regardless of any inconsistencies in stored fields
-  // CRITICAL: Use only OPEN positions for "Open Value" to match Scanner page
+  // ROOT FIX: Total P&L should include BOTH open AND closed positions
+  // This ensures the dashboard shows comprehensive performance across all trades
   
-  // Calculate total invested (entry value) for OPEN positions only
   const fallbackSolPrice = Number.isFinite(solPrice) && solPrice > 0 ? solPrice : 150;
-  const totalInvested = useMemo(() => {
+  
+  // Calculate OPEN positions metrics (for "Open Value" card)
+  const openInvested = useMemo(() => {
     if (isDemo) {
       return openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
     }
@@ -134,8 +134,7 @@ function Index() {
     }, 0);
   }, [isDemo, openDemoPositions, realOpenPositions, fallbackSolPrice]);
   
-  // Calculate current value for OPEN positions only (matches Scanner)
-  const totalValue = useMemo(() => {
+  const openValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
@@ -145,27 +144,63 @@ function Index() {
     }, 0);
   }, [isDemo, demoTotalValue, realOpenPositions]);
   
-  // P&L = Current Value - Invested (for open positions)
+  const openPnL = useMemo(() => openValue - openInvested, [openValue, openInvested]);
+  
+  // Calculate CLOSED positions P&L (realized gains/losses)
+  const closedPnL = useMemo(() => {
+    if (isDemo) {
+      return closedDemoPositions.reduce((sum, p) => {
+        const exitPrice = p.exit_price ?? p.current_price ?? p.entry_price ?? 0;
+        const entryPrice = p.entry_price ?? 0;
+        return sum + ((exitPrice - entryPrice) * p.amount);
+      }, 0);
+    }
+    return realClosedPositions.reduce((sum, p) => {
+      const exitPrice = p.exit_price ?? p.current_price ?? p.entry_price ?? 0;
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price ?? 0;
+      return sum + ((exitPrice - entryPriceUsd) * p.amount);
+    }, 0);
+  }, [isDemo, closedDemoPositions, realClosedPositions]);
+  
+  // TOTAL P&L = Open P&L (unrealized) + Closed P&L (realized)
   const totalPnL = useMemo(() => {
     if (isDemo) {
       return demoTotalPnL;
     }
-    return totalValue - totalInvested;
-  }, [isDemo, demoTotalPnL, totalValue, totalInvested]);
+    return openPnL + closedPnL;
+  }, [isDemo, demoTotalPnL, openPnL, closedPnL]);
+  
+  // Total invested across ALL positions for percentage calculation
+  const allInvested = useMemo(() => {
+    if (isDemo) {
+      const openSum = openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
+      const closedSum = closedDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
+      return openSum + closedSum;
+    }
+    const openSum = realOpenPositions.reduce((sum, p) => {
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
+    const closedSum = realClosedPositions.reduce((sum, p) => {
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
+    return openSum + closedSum;
+  }, [isDemo, openDemoPositions, closedDemoPositions, realOpenPositions, realClosedPositions, fallbackSolPrice]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {
       return demoTotalPnLPercent;
     }
-    return totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
-  }, [isDemo, demoTotalPnLPercent, totalInvested, totalPnL]);
+    return allInvested > 0 ? (totalPnL / allInvested) * 100 : 0;
+  }, [isDemo, demoTotalPnLPercent, allInvested, totalPnL]);
 
   const todayPerformance = useMemo(() => {
     if (portfolioData.length < 2) return 0;
-    const initial = portfolioData[0]?.value || totalValue;
-    const current = portfolioData[portfolioData.length - 1]?.value || totalValue;
+    const initial = portfolioData[0]?.value || openValue;
+    const current = portfolioData[portfolioData.length - 1]?.value || openValue;
     return initial > 0 ? ((current - initial) / initial) * 100 : 0;
-  }, [portfolioData, totalValue]);
+  }, [portfolioData, openValue]);
 
   // Reset demo handler
   const handleResetDemo = () => {
@@ -219,9 +254,9 @@ function Index() {
           />
         )}
 
-        {/* Stats Grid */}
+        {/* Stats Grid - openValue for "Open Value" card, totalPnL includes all trades */}
         <StatsGrid
-          totalValue={totalValue}
+          totalValue={openValue}
           totalPnL={totalPnL}
           totalPnLPercent={totalPnLPercent}
           openPositionsCount={openPositions.length}
@@ -253,7 +288,7 @@ function Index() {
                         <span className="text-2xl font-bold text-foreground">
                           {isDemo 
                             ? `${demoBalance.toFixed(0)} SOL`
-                            : formatPrimaryValue(portfolioData[portfolioData.length - 1]?.value || totalValue)
+                            : formatPrimaryValue(portfolioData[portfolioData.length - 1]?.value || openValue)
                           }
                         </span>
                         <Badge 
