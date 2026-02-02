@@ -801,19 +801,16 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         startAutoExitMonitor(15000); // Check every 15 seconds for faster response
       }
       
-      // Start liquidity retry worker if there are waiting positions
-      if (hasWaitingPositions && wallet.isConnected) {
-        startLiquidityRetryWorker(30000); // Check every 30 seconds
-      }
+      // NOTE: Liquidity retry worker is NOT auto-started
+      // Users must manually click "Check" button in Waiting tab to check routes
     }
     
     return () => {
       // Don't stop bot on unmount - just stop monitors (bot state persists)
       stopDemoMonitor();
       stopAutoExitMonitor();
-      stopLiquidityRetryWorker();
     };
-  }, [isBotActive, isPaused, isDemo, autoExitEnabled, startDemoMonitor, stopDemoMonitor, startAutoExitMonitor, stopAutoExitMonitor, realOpenPositions.length, waitingPositions.length, wallet.isConnected, startLiquidityRetryWorker, stopLiquidityRetryWorker]);
+  }, [isBotActive, isPaused, isDemo, autoExitEnabled, startDemoMonitor, stopDemoMonitor, startAutoExitMonitor, stopAutoExitMonitor, realOpenPositions.length, wallet.isConnected]);
 
   // Cleanup on unmount
   useEffect(() => {
