@@ -301,15 +301,15 @@ function Portfolio() {
 
         {/* Stats Overview - Comprehensive Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-          {/* Invested Card - Total Entry Value (stored in SOL) */}
+          {/* Invested Card - Total Entry Value (stored in USD) */}
           <Card className="bg-gradient-to-br from-blue-500/10 to-card">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <Coins className="w-4 h-4 text-blue-500" />
                 <span className="text-xs text-muted-foreground">Invested</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{stats.openEntryValue.toFixed(4)} SOL</p>
-              <p className="text-xs text-muted-foreground">${(stats.openEntryValue * solPrice).toFixed(2)}</p>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue).secondary}</p>
             </CardContent>
           </Card>
 
