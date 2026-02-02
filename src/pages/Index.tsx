@@ -119,21 +119,24 @@ function Index() {
   }, [isDemo, getCurrentPortfolioData, allPositions, selectedPeriod]);
 
   // Calculate stats from ALL positions (open + closed) for cumulative view
+  // CRITICAL: entry_value is stored in SOL, but current_value is in USD
+  // We need to calculate accurate USD values for all displays
   const totalValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
-    // For open positions: current value; For closed positions: final exit value
-    const openValue = realOpenPositions.reduce((sum, p) => sum + (p.current_value ?? p.entry_value ?? 0), 0);
+    // For open positions: current_value is in USD
+    // For closed positions: add realized P&L
+    const openValue = realOpenPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
     const closedPnL = realClosedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
-    return openValue + closedPnL; // Total portfolio = current holdings + realized P&L
+    return openValue + closedPnL;
   }, [isDemo, demoTotalValue, realOpenPositions, realClosedPositions]);
   
   const totalPnL = useMemo(() => {
     if (isDemo) {
       return demoTotalPnL;
     }
-    // Cumulative P&L from ALL positions
+    // Cumulative P&L from ALL positions (profit_loss_value is in USD)
     const openPnL = realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
     const closedPnL = realClosedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
     return openPnL + closedPnL;
@@ -143,9 +146,13 @@ function Index() {
     if (isDemo) {
       return demoTotalPnLPercent;
     }
-    // Calculate % based on total entry value of all positions
+    // Calculate % based on total entry value of all positions (in USD)
     const allPositions = [...realOpenPositions, ...realClosedPositions];
-    const entryTotal = allPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0);
+    const entryTotal = allPositions.reduce((sum, p) => {
+      // Use amount * entry_price_usd for accurate USD entry value
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
     return entryTotal > 0 ? (totalPnL / entryTotal) * 100 : 0;
   }, [isDemo, demoTotalPnLPercent, realOpenPositions, realClosedPositions, totalPnL]);
 
