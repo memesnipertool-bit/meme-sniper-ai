@@ -1830,6 +1830,13 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
         tokenName={noRoutePosition?.token_name || ''}
         onMoveToWaiting={async () => {
           if (noRoutePosition) {
+            addBotLog({
+              level: 'warning',
+              category: 'exit',
+              message: `⏳ Moving to Waiting Pool: ${noRoutePosition.token_symbol}`,
+              tokenSymbol: noRoutePosition.token_symbol,
+              details: 'No Jupiter/Raydium route available. Will auto-retry every 30s until liquidity returns.',
+            });
             await moveToWaitingForLiquidity(noRoutePosition.id);
             fetchPositions(true);
           }
