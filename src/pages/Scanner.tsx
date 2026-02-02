@@ -1191,29 +1191,37 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
     batch.forEach(t => processedTokensRef.current.add(t.address));
     const approved = evaluation.decisions?.filter((d) => d.approved) || [];
     
-    if (approved.length === 0) {
-      // Get rejected tokens with their primary rejection reasons
-      const rejected = evaluation.decisions?.filter(d => !d.approved) || [];
-      const rejectionSummary = rejected.slice(0, 3).map(d => {
-        const reason = d.reasons.find(r => r.startsWith('✗')) || d.reasons[0] || 'N/A';
-        return `${d.token.symbol}: ${reason}`;
-      }).join(' | ');
+    // Log each token's validation result individually
+    const allDecisions = evaluation.decisions || [];
+    for (const decision of allDecisions) {
+      const { token, approved: isApproved, reasons } = decision;
+      const validationSteps = reasons.slice(0, 4).join(' | ');
       
-      addBotLog({ 
-        level: 'skip', 
-        category: 'evaluate', 
-        message: `${rejected.length} token(s) did not pass filters`,
-        details: rejectionSummary || undefined,
-      });
+      if (isApproved) {
+        addBotLog({
+          level: 'success',
+          category: 'evaluate',
+          message: `✅ ${token.symbol} passed validation`,
+          tokenSymbol: token.symbol,
+          tokenAddress: token.address,
+          details: `${validationSteps}\n💧 Liq: $${token.liquidity?.toLocaleString() || 'N/A'} | 🛡️ Safety: ${100 - (token.riskScore || 0)}/100`,
+        });
+      } else {
+        const failReason = reasons.find(r => r.startsWith('✗')) || reasons[0] || 'Did not meet criteria';
+        addBotLog({
+          level: 'skip',
+          category: 'evaluate',
+          message: `⏭️ ${token.symbol} skipped`,
+          tokenSymbol: token.symbol,
+          tokenAddress: token.address,
+          details: failReason,
+        });
+      }
+    }
+    
+    if (approved.length === 0) {
       return;
     }
-
-    addBotLog({
-      level: 'success',
-      category: 'evaluate',
-      message: `${approved.length} token(s) approved for trading`,
-      details: approved.map(d => d.token.symbol).join(', '),
-    });
 
     const availableSlots = Math.max(0, (settings.max_concurrent_trades || 0) - openPositions.length);
     if (availableSlots <= 0) {
@@ -1397,12 +1405,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       runBotEvaluation();
     }, intervalMs);
 
-    addBotLog({
-      level: 'success',
-      category: 'system',
-      message: `🤖 Bot Active`,
-      details: `⏱️ Scan Interval: ${intervalMs / 1000}s | Mode: ${isDemo ? 'Demo' : 'Live'}\n⚙️ Settings: ${settings?.trade_amount || 0.1} SOL | TP: ${settings?.profit_take_percentage || 100}% | SL: ${settings?.stop_loss_percentage || 20}%\n🔍 Max Positions: ${settings?.max_concurrent_trades || 3} | Min Liquidity: ${settings?.min_liquidity || 300} SOL`,
-    });
+    // Bot activation is indicated by the status badge - no need to log it
 
     return () => {
       if (evaluationIntervalRef.current) {
