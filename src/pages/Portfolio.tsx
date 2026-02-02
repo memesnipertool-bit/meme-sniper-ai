@@ -123,7 +123,7 @@ const PositionRow = ({ position, onClose, compact = false, formatValue }: Positi
             )}
           </div>
           <p className="text-xs text-muted-foreground truncate">
-            Entry: ${position.entry_price.toFixed(8)} • {formatDistanceToNow(new Date(position.created_at), { addSuffix: true })}
+            Entry: ${(position.entry_price * POSITION_DISPLAY_SCALE).toFixed(8)} • {formatDistanceToNow(new Date(position.created_at), { addSuffix: true })}
           </p>
         </div>
       </div>
@@ -132,7 +132,7 @@ const PositionRow = ({ position, onClose, compact = false, formatValue }: Positi
         {!compact && (
           <div className="text-right hidden md:block">
             <p className="text-xs text-muted-foreground">Current</p>
-            <p className="font-medium text-foreground text-sm">${(position.current_price ?? 0).toFixed(8)}</p>
+            <p className="font-medium text-foreground text-sm">${((position.current_price ?? 0) * POSITION_DISPLAY_SCALE).toFixed(8)}</p>
           </div>
         )}
         
