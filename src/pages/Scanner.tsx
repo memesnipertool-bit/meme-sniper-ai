@@ -753,27 +753,41 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   ]);
 
   // Calculate stats based on mode
+  // CRITICAL: entry_value is stored in SOL, but current_value is in USD
+  // We need to calculate USD values for proper display with formatDualValue
   const totalValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
-    return realOpenPositions.reduce((sum, p) => sum + p.current_value, 0);
+    // current_value is already in USD (amount * current_price_usd)
+    return realOpenPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
   }, [isDemo, demoTotalValue, realOpenPositions]);
   
   const totalPnL = useMemo(() => {
     if (isDemo) {
       return demoTotalPnL;
     }
-    return realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value || 0), 0);
+    // profit_loss_value is in USD
+    return realOpenPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
   }, [isDemo, demoTotalPnL, realOpenPositions]);
   
   // Calculate total invested (entry value) for active positions
+  // CRITICAL FIX: entry_value is stored in SOL (trade amount in SOL)
+  // We need to calculate the USD value: entry_value_sol * solPrice
+  // OR use amount * entry_price_usd which is the actual USD entry value
   const totalInvested = useMemo(() => {
     if (isDemo) {
-      return openDemoPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
+      // Demo stores entry_value in SOL
+      return openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
     }
-    return realOpenPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
-  }, [isDemo, openDemoPositions, realOpenPositions]);
+    // For live positions: calculate USD entry value from amount * entry_price_usd
+    // This is more accurate than entry_value which is stored in SOL
+    return realOpenPositions.reduce((sum, p) => {
+      // Use amount * entry_price_usd for accurate USD entry value
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
+  }, [isDemo, openDemoPositions, realOpenPositions, fallbackSolPrice]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {

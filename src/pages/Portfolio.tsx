@@ -214,13 +214,26 @@ function Portfolio() {
   };
 
   // Calculate comprehensive stats
+  // CRITICAL: entry_value is stored in SOL, but current_value is in USD
+  // We need to calculate accurate USD values for all displays
   const stats = useMemo(() => {
-    const openValue = openPositions.reduce((sum, p) => sum + (p.current_value ?? p.entry_value ?? 0), 0);
-    const openEntryValue = openPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0);
+    // current_value is already in USD
+    const openValue = openPositions.reduce((sum, p) => sum + (p.current_value ?? 0), 0);
+    
+    // Calculate entry value in USD: amount * entry_price_usd
+    const openEntryValue = openPositions.reduce((sum, p) => {
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
+    
+    // profit_loss_value is in USD
     const openPnL = openPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
     
     const closedPnL = closedPositions.reduce((sum, p) => sum + (p.profit_loss_value ?? 0), 0);
-    const closedEntryValue = closedPositions.reduce((sum, p) => sum + (p.entry_value ?? 0), 0);
+    const closedEntryValue = closedPositions.reduce((sum, p) => {
+      const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
+      return sum + (p.amount * entryPriceUsd);
+    }, 0);
     
     const totalPnL = openPnL + closedPnL;
     const totalEntryValue = openEntryValue + closedEntryValue;
@@ -243,7 +256,7 @@ function Portfolio() {
     
     return {
       openValue,
-      openEntryValue, // Added for Invested card
+      openEntryValue,
       openPnL,
       closedPnL,
       totalPnL,
