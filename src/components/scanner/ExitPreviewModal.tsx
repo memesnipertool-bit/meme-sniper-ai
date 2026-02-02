@@ -127,7 +127,15 @@ export default function ExitPreviewModal({
   if (!position) return null;
 
   const estimatedSolReceived = onChainData.balanceUi * position.current_price;
-  const balanceMismatch = Math.abs(onChainData.balanceUi - position.amount) > 0.001;
+  
+  // Use percentage-based tolerance (5%) to ignore minor rounding differences
+  // Only show mismatch if difference is > 5% AND > 1 token absolute difference
+  const percentDiff = position.amount > 0 
+    ? Math.abs(onChainData.balanceUi - position.amount) / position.amount 
+    : 0;
+  const absoluteDiff = Math.abs(onChainData.balanceUi - position.amount);
+  const balanceMismatch = percentDiff > 0.05 && absoluteDiff > 1;
+  
   const hasNoBalance = onChainData.balanceUi <= 0 && !onChainData.loading;
 
   return (
