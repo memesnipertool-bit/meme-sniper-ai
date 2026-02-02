@@ -26,7 +26,7 @@ function Index() {
   const { wallet } = useWallet();
   const { isDemo } = useAppMode();
   const { toast } = useToast();
-  const { formatPrimaryValue, displayUnit } = useDisplayUnit();
+  const { formatPrimaryValue, displayUnit, solPrice } = useDisplayUnit();
   
   // Demo portfolio context
   const {
@@ -120,38 +120,32 @@ function Index() {
 
   // ROOT FIX: Always recalculate values from amount × prices instead of using stored values
   // This ensures accuracy regardless of any inconsistencies in stored fields
+  // CRITICAL: Use only OPEN positions for "Open Value" to match Scanner page
   
-  // Calculate total invested (entry value) for ALL positions
+  // Calculate total invested (entry value) for OPEN positions only
+  const fallbackSolPrice = Number.isFinite(solPrice) && solPrice > 0 ? solPrice : 150;
   const totalInvested = useMemo(() => {
     if (isDemo) {
-      return demoTotalValue; // Demo handles this differently
+      return openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
     }
-    const allPositions = [...realOpenPositions, ...realClosedPositions];
-    return allPositions.reduce((sum, p) => {
+    return realOpenPositions.reduce((sum, p) => {
       const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
       return sum + (p.amount * entryPriceUsd);
     }, 0);
-  }, [isDemo, demoTotalValue, realOpenPositions, realClosedPositions]);
+  }, [isDemo, openDemoPositions, realOpenPositions, fallbackSolPrice]);
   
-  // Calculate total current value (open positions only use current price, closed use exit price)
+  // Calculate current value for OPEN positions only (matches Scanner)
   const totalValue = useMemo(() => {
     if (isDemo) {
       return demoTotalValue;
     }
-    // Open positions: amount × current_price
-    const openValue = realOpenPositions.reduce((sum, p) => {
+    return realOpenPositions.reduce((sum, p) => {
       const currentPrice = p.current_price ?? p.entry_price ?? 0;
       return sum + (p.amount * currentPrice);
     }, 0);
-    // Closed positions: amount × exit_price (realized value)
-    const closedValue = realClosedPositions.reduce((sum, p) => {
-      const exitPrice = p.exit_price ?? p.current_price ?? p.entry_price ?? 0;
-      return sum + (p.amount * exitPrice);
-    }, 0);
-    return openValue + closedValue;
-  }, [isDemo, demoTotalValue, realOpenPositions, realClosedPositions]);
+  }, [isDemo, demoTotalValue, realOpenPositions]);
   
-  // ROOT FIX: P&L = Total Value - Total Invested (recalculated)
+  // P&L = Current Value - Invested (for open positions)
   const totalPnL = useMemo(() => {
     if (isDemo) {
       return demoTotalPnL;
