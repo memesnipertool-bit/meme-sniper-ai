@@ -768,13 +768,15 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   
   const totalInvested = useMemo(() => {
     if (isDemo) {
-      return openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
+      // Demo positions store entry_value directly in their internal unit (SOL-denominated)
+      // Don't multiply by SOL price - entry_value is already the "invested" amount
+      return openDemoPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
     }
     return realOpenPositions.reduce((sum, p) => {
       const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
       return sum + (p.amount * entryPriceUsd);
     }, 0);
-  }, [isDemo, openDemoPositions, realOpenPositions, fallbackSolPrice]);
+  }, [isDemo, openDemoPositions, realOpenPositions]);
   
   // Open P&L (unrealized)
   const openPnL = useMemo(() => totalValue - totalInvested, [totalValue, totalInvested]);
@@ -806,8 +808,9 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
   // Total invested across ALL positions for percentage
   const allInvested = useMemo(() => {
     if (isDemo) {
-      const openSum = openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
-      const closedSum = closedDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
+      // Demo positions store entry_value directly - no SOL price multiplication needed
+      const openSum = openDemoPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
+      const closedSum = closedDemoPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
       return openSum + closedSum;
     }
     const openSum = realOpenPositions.reduce((sum, p) => {
@@ -819,7 +822,7 @@ const Scanner = forwardRef<HTMLDivElement, object>(function Scanner(_props, ref)
       return sum + (p.amount * entryPriceUsd);
     }, 0);
     return openSum + closedSum;
-  }, [isDemo, openDemoPositions, closedDemoPositions, realOpenPositions, realClosedPositions, fallbackSolPrice]);
+  }, [isDemo, openDemoPositions, closedDemoPositions, realOpenPositions, realClosedPositions]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {

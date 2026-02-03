@@ -551,7 +551,8 @@ export function usePositions() {
           const MAX_REASONABLE_LOSS = -99.99;
           profitLossPercent = Math.max(MAX_REASONABLE_LOSS, Math.min(MAX_REASONABLE_GAIN, profitLossPercent));
           
-          // P&L $ value = current value - entry value (both in USD now)
+          // FIXED: Calculate P&L $ value as direct subtraction (currentValue - entryValue)
+          // This avoids compounding errors from percent-based calculation
           const entryValueForDollarCalc = p.entry_value ?? (p.amount * (p.entry_price_usd ?? p.entry_price));
           const profitLossValue = currentValue - entryValueForDollarCalc;
 

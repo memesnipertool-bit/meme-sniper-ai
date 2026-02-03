@@ -126,13 +126,14 @@ function Index() {
   // Calculate OPEN positions metrics (for "Open Value" card)
   const openInvested = useMemo(() => {
     if (isDemo) {
-      return openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
+      // Demo positions store entry_value directly - no SOL price multiplication needed
+      return openDemoPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
     }
     return realOpenPositions.reduce((sum, p) => {
       const entryPriceUsd = p.entry_price_usd ?? p.entry_price;
       return sum + (p.amount * entryPriceUsd);
     }, 0);
-  }, [isDemo, openDemoPositions, realOpenPositions, fallbackSolPrice]);
+  }, [isDemo, openDemoPositions, realOpenPositions]);
   
   const openValue = useMemo(() => {
     if (isDemo) {
@@ -173,8 +174,9 @@ function Index() {
   // Total invested across ALL positions for percentage calculation
   const allInvested = useMemo(() => {
     if (isDemo) {
-      const openSum = openDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
-      const closedSum = closedDemoPositions.reduce((sum, p) => sum + ((p.entry_value || 0) * fallbackSolPrice), 0);
+      // Demo positions store entry_value directly - no SOL price multiplication needed
+      const openSum = openDemoPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
+      const closedSum = closedDemoPositions.reduce((sum, p) => sum + (p.entry_value || 0), 0);
       return openSum + closedSum;
     }
     const openSum = realOpenPositions.reduce((sum, p) => {
@@ -186,7 +188,7 @@ function Index() {
       return sum + (p.amount * entryPriceUsd);
     }, 0);
     return openSum + closedSum;
-  }, [isDemo, openDemoPositions, closedDemoPositions, realOpenPositions, realClosedPositions, fallbackSolPrice]);
+  }, [isDemo, openDemoPositions, closedDemoPositions, realOpenPositions, realClosedPositions]);
   
   const totalPnLPercent = useMemo(() => {
     if (isDemo) {
