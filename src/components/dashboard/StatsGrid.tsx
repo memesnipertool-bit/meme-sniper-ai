@@ -88,9 +88,6 @@ interface StatsGridPropsExtended extends StatsGridProps {
   winCount?: number;
 }
 
-// Display scale factor for better readability of micro-cap token values
-const DISPLAY_SCALE = 1000;
-
 export default function StatsGrid({
   totalValue,
   totalPnL,
@@ -106,10 +103,9 @@ export default function StatsGrid({
     ? Math.round((winCount / closedPositionsCount) * 100) 
     : 0;
 
-  // Get dual formatted values (SOL primary, USD secondary)
-  // Apply ×1000 display scaling for better readability of micro-cap values
-  const pnlFormatted = formatDualValue(totalPnL * DISPLAY_SCALE, { showSign: true });
-  const valueFormatted = formatDualValue(totalValue * DISPLAY_SCALE);
+  // Get dual formatted values (SOL primary, USD secondary) - raw values, no scaling
+  const pnlFormatted = formatDualValue(totalPnL, { showSign: true });
+  const valueFormatted = formatDualValue(totalValue);
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

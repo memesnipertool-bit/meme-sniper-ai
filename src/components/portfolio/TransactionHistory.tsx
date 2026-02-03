@@ -74,9 +74,6 @@ export function TransactionHistory({ trades, loading, onRefetch, onForceSync }: 
   const { formatPrimaryValue, formatDualValue } = useDisplayUnit();
   const [exporting, setExporting] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  
-  // Display scale factor for better readability of micro-cap token values
-  const DISPLAY_SCALE = 1000;
 
   const handleForceSync = async () => {
     if (!onForceSync) return;
@@ -691,11 +688,11 @@ export function TransactionHistory({ trades, loading, onRefetch, onForceSync }: 
                         {totalValueSol !== null ? (
                           <>
                             <div className="font-semibold text-foreground">
-                              {(totalValueSol * DISPLAY_SCALE).toFixed(4)} SOL
+                              {totalValueSol.toFixed(4)} SOL
                             </div>
                             {totalValueUsd !== null && (
                               <div className="text-xs text-muted-foreground">
-                                (${(totalValueUsd * DISPLAY_SCALE).toFixed(2)})
+                                (${totalValueUsd.toFixed(2)})
                               </div>
                             )}
                           </>
