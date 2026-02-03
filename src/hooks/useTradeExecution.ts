@@ -88,14 +88,19 @@ export function useTradeExecution() {
   const getQuote = useCallback(async (params: Omit<TradeParams, 'priorityLevel'>): Promise<TradeQuote | null> => {
     if (isDemo) {
       // Return simulated quote in demo mode
+      // NOTE: Demo uses raw lamport values for amounts, no implicit scaling
+      const inputLamports = parseInt(params.amount);
+      const outputLamports = Math.floor(inputLamports * 0.95);
       const mockQuote: TradeQuote = {
-        inputAmount: parseInt(params.amount),
-        outputAmount: Math.floor(parseInt(params.amount) * 0.95),
-        inputAmountDecimal: parseInt(params.amount) / 1e9,
-        outputAmountDecimal: (parseInt(params.amount) * 0.95) / 1e6,
+        inputAmount: inputLamports,
+        outputAmount: outputLamports,
+        // Decimals: SOL = 9 for input, assume 6 for output (USDC-like)
+        // Real implementation would fetch actual token decimals
+        inputAmountDecimal: inputLamports / 1e9,
+        outputAmountDecimal: outputLamports / 1e6, // Demo assumes 6 decimals for output
         priceImpactPct: 0.12,
         slippageBps: params.slippageBps || 100,
-        route: 'SOL → USDC (Simulated)',
+        route: 'SOL → Token (Simulated)',
       };
       setCurrentQuote(mockQuote);
       return mockQuote;
@@ -172,15 +177,18 @@ export function useTradeExecution() {
         description: `Simulated swap of ${params.tokenSymbol || 'token'}`,
       });
 
+      // Demo quote: raw lamport values, no implicit scaling
+      const inputLamports = parseInt(params.amount);
+      const outputLamports = Math.floor(inputLamports * 0.95);
       return {
         success: true,
         signature: mockSignature,
         positionId: 'demo_position_' + Date.now(),
         quote: {
-          inputAmount: parseInt(params.amount),
-          outputAmount: Math.floor(parseInt(params.amount) * 0.95),
-          inputAmountDecimal: parseInt(params.amount) / 1e9,
-          outputAmountDecimal: (parseInt(params.amount) * 0.95) / 1e6,
+          inputAmount: inputLamports,
+          outputAmount: outputLamports,
+          inputAmountDecimal: inputLamports / 1e9, // SOL = 9 decimals
+          outputAmountDecimal: outputLamports / 1e6, // Demo assumes 6 decimals for output
           priceImpactPct: 0.12,
           slippageBps: params.slippageBps || 100,
         },

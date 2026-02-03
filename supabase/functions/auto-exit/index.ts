@@ -621,8 +621,9 @@ serve(async (req) => {
         : position.amount;
       const entryValueForCalc = position.entry_value ?? (effectiveAmountForValuation * entryPriceForCalc);
       const currentValue = effectiveAmountForValuation * currentPrice;
-      // Use entry_value for accurate P&L $ calculation
-      const profitLossValue = entryValueForCalc * (profitLossPercent / 100);
+      // FIXED: Calculate P&L as direct subtraction (currentValue - entryValue)
+      // This avoids the compounding error from percent-based calculation
+      const profitLossValue = currentValue - entryValueForCalc;
 
       // Update position with current price data
       positionUpdates.push({

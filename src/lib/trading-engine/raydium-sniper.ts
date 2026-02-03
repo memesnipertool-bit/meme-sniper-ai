@@ -250,9 +250,30 @@ async function executeSwapViaJupiter(
     };
   }
 
-  // Calculate entry price
+  // Calculate entry price - fetch actual decimals from quote or RPC
   const outputAmount = parseInt(quoteData.outAmount, 10) || 0;
-  const tokenAmount = outputAmount / Math.pow(10, quoteData.outputMint?.decimals || 9);
+  // CRITICAL: Jupiter lite-api often omits decimals, so we fetch it properly
+  let tokenDecimals = 9; // Default fallback
+  if (typeof quoteData.outputMint?.decimals === 'number') {
+    tokenDecimals = quoteData.outputMint.decimals;
+  } else {
+    // Fetch decimals from RPC/Jupiter token API
+    try {
+      const response = await fetch(
+        `https://lite-api.jup.ag/tokens/v1/${tokenAddress}`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+      if (response.ok) {
+        const tokenData = await response.json();
+        if (typeof tokenData.decimals === 'number') {
+          tokenDecimals = tokenData.decimals;
+        }
+      }
+    } catch {
+      console.log('[RaydiumSniper] Failed to fetch token decimals, using default 9');
+    }
+  }
+  const tokenAmount = outputAmount / Math.pow(10, tokenDecimals);
   const entryPrice = tokenAmount > 0 ? buyAmount / tokenAmount : 0;
 
   const result: RaydiumSnipeResult = {
