@@ -412,10 +412,10 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
   };
 
   return (
-    <div className="grid grid-cols-[40px_1fr_auto_auto] items-center gap-3 px-3 py-2.5 border-b border-border/20 hover:bg-secondary/30 transition-colors">
+    <div className="grid grid-cols-[32px_1fr_auto_auto] md:grid-cols-[40px_1fr_auto_auto] items-center gap-2 md:gap-3 px-2 md:px-3 py-2 md:py-2.5 border-b border-border/20 hover:bg-secondary/30 transition-colors">
       {/* Avatar */}
       <div className={cn(
-        "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs border border-white/5",
+        "w-8 h-8 md:w-9 md:h-9 rounded-lg flex items-center justify-center font-bold text-[10px] md:text-xs border border-white/5",
         avatarClass
       )}>
         {initials}
@@ -423,18 +423,18 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
       
       {/* Token Info - Simplified: quantity + entry/current price */}
       <div className="min-w-0 space-y-0.5">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-foreground text-sm truncate">{displayName}</span>
-          <span className="text-muted-foreground text-xs">{displaySymbol}</span>
+        <div className="flex items-center gap-1.5 md:gap-2">
+          <span className="font-semibold text-foreground text-xs md:text-sm truncate max-w-[80px] md:max-w-[120px]">{displayName}</span>
+          <span className="text-muted-foreground text-[10px] md:text-xs shrink-0">{displaySymbol}</span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs text-muted-foreground">
           {/* Token quantity */}
-          <span className="tabular-nums font-medium text-foreground/80">
+          <span className="tabular-nums font-medium text-foreground/80 truncate max-w-[60px] md:max-w-none">
             {formatTokenAmount(actualTokenAmount)} {displaySymbol}
           </span>
-          <span className="text-muted-foreground/40">•</span>
+          <span className="text-muted-foreground/40 hidden sm:inline">•</span>
           {/* Entry → Current price (raw values) */}
-          <span className="tabular-nums">
+          <span className="tabular-nums hidden sm:inline">
             {formatPrice(entryPriceUsd)} → <span className={cn(
               "font-medium",
               isPositive ? 'text-success' : 'text-destructive'
@@ -444,17 +444,17 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
       </div>
       
       {/* Current Value + P&L like Phantom wallet */}
-      <div className="text-right min-w-[80px]">
+      <div className="text-right min-w-[55px] md:min-w-[80px]">
         {/* Current USD value (raw value - no scaling) */}
         <div className={cn(
-          "font-bold text-sm tabular-nums",
+          "font-bold text-xs md:text-sm tabular-nums",
           isPositive ? 'text-success' : 'text-destructive'
         )}>
           {formatUsdValue(currentUsdValue)}
         </div>
         {/* Simple P&L percentage only */}
         <div className={cn(
-          "text-xs tabular-nums font-medium transition-all duration-300",
+          "text-[10px] md:text-xs tabular-nums font-medium transition-all duration-300",
           isPositive ? 'text-success' : 'text-destructive'
         )}>
           {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}%
@@ -465,11 +465,11 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
       <Button
         variant="outline"
         size="sm"
-        className="h-8 px-3 text-destructive border-destructive/30 hover:bg-destructive/10 hover:border-destructive/50"
+        className="h-7 md:h-8 px-2 md:px-3 text-destructive border-destructive/30 hover:bg-destructive/10 hover:border-destructive/50"
         onClick={handleExit}
       >
-        <LogOut className="w-3.5 h-3.5 mr-1.5" />
-        <span className="text-xs font-medium">Exit</span>
+        <LogOut className="w-3 h-3 md:w-3.5 md:h-3.5 md:mr-1.5" />
+        <span className="text-[10px] md:text-xs font-medium hidden md:inline">Exit</span>
       </Button>
     </div>
   );
