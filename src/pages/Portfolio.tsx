@@ -67,8 +67,7 @@ const getExitReasonDisplay = (reason: string | null | undefined) => {
   }
 };
 
-// Display scale factor for better readability of micro-cap token values
-const POSITION_DISPLAY_SCALE = 1000;
+// Raw values - no display scaling
 
 interface PositionRowProps {
   position: Position;
@@ -123,7 +122,7 @@ const PositionRow = ({ position, onClose, compact = false, formatValue }: Positi
             )}
           </div>
           <p className="text-xs text-muted-foreground truncate">
-            Entry: ${(position.entry_price * POSITION_DISPLAY_SCALE).toFixed(8)} • {formatDistanceToNow(new Date(position.created_at), { addSuffix: true })}
+            Entry: ${position.entry_price.toFixed(8)} • {formatDistanceToNow(new Date(position.created_at), { addSuffix: true })}
           </p>
         </div>
       </div>
@@ -132,7 +131,7 @@ const PositionRow = ({ position, onClose, compact = false, formatValue }: Positi
         {!compact && (
           <div className="text-right hidden md:block">
             <p className="text-xs text-muted-foreground">Current</p>
-            <p className="font-medium text-foreground text-sm">${((position.current_price ?? 0) * POSITION_DISPLAY_SCALE).toFixed(8)}</p>
+            <p className="font-medium text-foreground text-sm">${(position.current_price ?? 0).toFixed(8)}</p>
           </div>
         )}
         
@@ -142,14 +141,14 @@ const PositionRow = ({ position, onClose, compact = false, formatValue }: Positi
             {formatPercentage(position.profit_loss_percent ?? 0)}
           </div>
           <p className={`text-xs ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-            {formatValue(pnlValue * POSITION_DISPLAY_SCALE, { showSign: true })}
+            {formatValue(pnlValue, { showSign: true })}
           </p>
         </div>
 
         {!compact && (
           <div className="text-right hidden lg:block min-w-[100px]">
             <p className="text-xs text-muted-foreground">Entry Value</p>
-            <p className="font-medium text-foreground text-sm">{formatValue((position.entry_value ?? 0) * POSITION_DISPLAY_SCALE)}</p>
+            <p className="font-medium text-foreground text-sm">{formatValue(position.entry_value ?? 0)}</p>
           </div>
         )}
 
@@ -192,9 +191,6 @@ function Portfolio() {
   } = useAutoExit();
 
   const { formatPrimaryValue, formatDualValue, solPrice } = useDisplayUnit();
-  
-  // Display scale factor for better readability of micro-cap token values
-  const DISPLAY_SCALE = 1000;
 
   // Fetch up to the backend max (1000) so the table always shows the full history.
   const { trades, loading: tradesLoading, refetch: refetchTrades, forceSync } = useTradeHistory(1000);
@@ -330,15 +326,15 @@ function Portfolio() {
 
         {/* Stats Overview - Comprehensive Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-          {/* Invested Card - Total Entry Value computed from amount × entry_price_usd - scaled ×1000 for display */}
+          {/* Invested Card - Total Entry Value computed from amount × entry_price_usd */}
           <Card className="bg-gradient-to-br from-blue-500/10 to-card">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <Coins className="w-4 h-4 text-blue-500" />
                 <span className="text-xs text-muted-foreground">Invested</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue * DISPLAY_SCALE).primary}</p>
-              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue * DISPLAY_SCALE).secondary}</p>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue).secondary}</p>
             </CardContent>
           </Card>
 
@@ -348,8 +344,8 @@ function Portfolio() {
                 <DollarSign className="w-4 h-4 text-primary" />
                 <span className="text-xs text-muted-foreground">Open Value</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openValue * DISPLAY_SCALE).primary}</p>
-              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openValue * DISPLAY_SCALE).secondary}</p>
+              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openValue).primary}</p>
+              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openValue).secondary}</p>
             </CardContent>
           </Card>
 
@@ -360,10 +356,10 @@ function Portfolio() {
                 <span className="text-xs text-muted-foreground">Total P&L</span>
               </div>
               <p className={`text-xl font-bold ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {formatDualValue(stats.totalPnL * DISPLAY_SCALE, { showSign: true }).primary}
+                {formatDualValue(stats.totalPnL, { showSign: true }).primary}
               </p>
               <p className={`text-xs ${stats.totalPnL >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
-                {formatDualValue(stats.totalPnL * DISPLAY_SCALE, { showSign: true }).secondary}
+                {formatDualValue(stats.totalPnL, { showSign: true }).secondary}
               </p>
             </CardContent>
           </Card>
