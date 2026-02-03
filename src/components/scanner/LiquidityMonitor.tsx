@@ -433,24 +433,24 @@ const TradeRow = memo(({ trade, colorIndex, onExit }: {
             {formatTokenAmount(actualTokenAmount)} {displaySymbol}
           </span>
           <span className="text-muted-foreground/40">•</span>
-          {/* Entry → Current price (×1000 for display readability) */}
+          {/* Entry → Current price (raw values) */}
           <span className="tabular-nums">
-            {formatPrice(entryPriceUsd * 1000)} → <span className={cn(
+            {formatPrice(entryPriceUsd)} → <span className={cn(
               "font-medium",
               isPositive ? 'text-success' : 'text-destructive'
-            )}>{formatPrice(currentPriceUsd * 1000)}</span>
+            )}>{formatPrice(currentPriceUsd)}</span>
           </span>
         </div>
       </div>
       
       {/* Current Value + P&L like Phantom wallet */}
       <div className="text-right min-w-[80px]">
-        {/* Current USD value (×1000 for display readability) */}
+        {/* Current USD value (raw value - no scaling) */}
         <div className={cn(
           "font-bold text-sm tabular-nums",
           isPositive ? 'text-success' : 'text-destructive'
         )}>
-          ${(currentUsdValue * 1000) >= 1000 ? (currentUsdValue * 1000).toFixed(0) : (currentUsdValue * 1000) >= 1 ? (currentUsdValue * 1000).toFixed(2) : (currentUsdValue * 1000).toFixed(4)}
+          {formatUsdValue(currentUsdValue)}
         </div>
         {/* Simple P&L percentage only */}
         <div className={cn(
