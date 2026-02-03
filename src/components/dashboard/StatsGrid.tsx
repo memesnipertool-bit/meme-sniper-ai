@@ -45,24 +45,24 @@ const StatCard = ({
       {/* Glow effect */}
       <div className="absolute -top-20 -right-20 w-40 h-40 bg-primary/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
       
-      <CardContent className="relative p-5">
-        <div className="flex items-start justify-between">
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</p>
-            <div>
-              <p className="text-2xl font-bold text-foreground tracking-tight">{primaryValue}</p>
+      <CardContent className="relative p-4 md:p-5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-1.5 md:space-y-2 min-w-0 flex-1">
+            <p className="text-label">{title}</p>
+            <div className="min-w-0">
+              <p className="text-value-md text-foreground break-all">{primaryValue}</p>
               {secondaryValue && (
-                <p className="text-xs text-muted-foreground font-mono mt-0.5">{secondaryValue}</p>
+                <p className="text-xs text-muted-foreground font-mono mt-0.5 break-all">{secondaryValue}</p>
               )}
             </div>
             {change && (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 {changeType === 'positive' ? (
-                  <ArrowUpRight className="w-3.5 h-3.5 text-success" />
+                  <ArrowUpRight className="w-3.5 h-3.5 text-success shrink-0" />
                 ) : changeType === 'negative' ? (
-                  <ArrowDownRight className="w-3.5 h-3.5 text-destructive" />
+                  <ArrowDownRight className="w-3.5 h-3.5 text-destructive shrink-0" />
                 ) : null}
-                <span className={`text-xs font-medium ${
+                <span className={`text-xs font-medium break-words ${
                   changeType === 'positive' ? 'text-success' : 
                   changeType === 'negative' ? 'text-destructive' : 
                   'text-muted-foreground'
@@ -72,8 +72,8 @@ const StatCard = ({
               </div>
             )}
           </div>
-          <div className={`p-3 rounded-2xl ${iconColor} transition-transform duration-300 group-hover:scale-110`}>
-            <Icon className="w-5 h-5" />
+          <div className={`p-2.5 md:p-3 rounded-xl md:rounded-2xl ${iconColor} transition-transform duration-300 group-hover:scale-110 shrink-0`}>
+            <Icon className="w-4 h-4 md:w-5 md:h-5" />
           </div>
         </div>
         

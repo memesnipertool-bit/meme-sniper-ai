@@ -109,55 +109,55 @@ const PositionRow = memo(({
   };
 
   return (
-    <div className="px-4 py-3 border-b border-border/20 hover:bg-secondary/20 transition-colors group">
-      <div className="flex items-center justify-between gap-3">
+    <div className="px-3 md:px-4 py-2.5 md:py-3 border-b border-border/20 hover:bg-secondary/20 transition-colors group">
+      <div className="flex items-center justify-between gap-2 md:gap-3">
         {/* Left: Avatar + Info */}
-        <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
           <div 
             className={cn(
-              "w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 border border-white/5",
+              "w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center text-[10px] md:text-xs font-bold shrink-0 border border-white/5",
               avatarColors[colorIndex % avatarColors.length]
             )}
           >
             {displaySymbol.slice(0, 2).toUpperCase()}
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm text-foreground truncate">{displayName}</span>
-              <span className="text-xs text-muted-foreground">{displaySymbol}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 md:gap-2">
+              <span className="font-semibold text-xs md:text-sm text-foreground truncate max-w-[80px] md:max-w-[120px]">{displayName}</span>
+              <span className="text-[10px] md:text-xs text-muted-foreground shrink-0">{displaySymbol}</span>
             </div>
             {/* Token quantity + Entry → Current value */}
-            <p className="text-xs text-muted-foreground tabular-nums">
+            <p className="text-[10px] md:text-xs text-muted-foreground tabular-nums truncate">
               {formatTokenAmount(actualTokenAmount)} {displaySymbol} • {formatUsdValue(entryUsdValue)} → {formatUsdValue(currentUsdValue)}
             </p>
           </div>
         </div>
         
         {/* Right: Current Value + P&L like Phantom wallet */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="text-right cursor-help">
                 {/* Current USD value prominently */}
-                <div className="font-bold text-sm tabular-nums text-foreground">
+                <div className="font-bold text-xs md:text-sm tabular-nums text-foreground">
                   ${currentUsdValue >= 1000 ? currentUsdValue.toFixed(0) : currentUsdValue >= 1 ? currentUsdValue.toFixed(2) : currentUsdValue.toFixed(4)}
                 </div>
                 {/* Simple P&L percentage */}
                 <p className={cn(
-                  "text-xs tabular-nums font-medium transition-all duration-300",
+                  "text-[10px] md:text-xs tabular-nums font-medium transition-all duration-300",
                   isPositive ? 'text-success' : 'text-destructive'
                 )}>
                   {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}%
                 </p>
               </div>
             </TooltipTrigger>
-            <TooltipContent side="left" className="bg-popover border-border text-xs">
+            <TooltipContent side="left" className="bg-popover border-border text-xs max-w-[200px]">
               <div className="space-y-1">
-                <p className="tabular-nums">Tokens: {formatTokenAmount(actualTokenAmount)} {displaySymbol}</p>
-                <p className="tabular-nums">Entry Price: {formatPrice(position.entry_price)}</p>
-                <p className="tabular-nums">Current Price: {formatPrice(position.current_price)}</p>
+                <p className="tabular-nums truncate">Tokens: {formatTokenAmount(actualTokenAmount)} {displaySymbol}</p>
+                <p className="tabular-nums">Entry: {formatPrice(position.entry_price)}</p>
+                <p className="tabular-nums">Current: {formatPrice(position.current_price)}</p>
                 <p className="tabular-nums text-muted-foreground">Entry Value: {formatUsdValue(entryUsdValue)}</p>
-                <p className="tabular-nums font-medium">Current Value: {formatUsdValue(currentUsdValue)}</p>
+                <p className="tabular-nums font-medium">Current: {formatUsdValue(currentUsdValue)}</p>
                 <p className={cn("tabular-nums font-medium", isPositive ? 'text-success' : 'text-destructive')}>
                   P&L: {isPositive ? '+' : ''}{pnlPercent.toFixed(2)}%
                 </p>
@@ -224,11 +224,11 @@ const PositionRow = memo(({
       </div>
       
       {/* Progress Bar */}
-      <div className="mt-2.5 flex items-center gap-3 text-xs">
-        <span className="text-muted-foreground tabular-nums min-w-[85px]">
+      <div className="mt-2 md:mt-2.5 flex items-center gap-2 md:gap-3 text-[10px] md:text-xs">
+        <span className="text-muted-foreground tabular-nums min-w-[70px] md:min-w-[85px] truncate">
           Entry: {formatPrice(position.entry_price)}
         </span>
-        <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden">
+        <div className="flex-1 h-1.5 md:h-2 bg-secondary rounded-full overflow-hidden">
           <div 
             className={cn(
               "h-full rounded-full transition-all duration-500 ease-out",
@@ -238,7 +238,7 @@ const PositionRow = memo(({
           />
         </div>
         <span className={cn(
-          "tabular-nums min-w-[85px] text-right font-medium transition-all duration-300",
+          "tabular-nums min-w-[70px] md:min-w-[85px] text-right font-medium transition-all duration-300 truncate",
           isPositive ? 'text-success' : 'text-destructive'
         )}>
           Now: {formatPrice(position.current_price)}
@@ -342,19 +342,19 @@ export default function ActivePositionsPanel({
 
   return (
     <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-      <CardHeader className="pb-2 px-4 pt-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/20">
-              <TrendingUp className="w-5 h-5 text-primary" />
+      <CardHeader className="pb-2 px-3 md:px-4 pt-3 md:pt-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/20 shrink-0">
+              <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-primary" />
             </div>
-            <div>
-              <CardTitle className="text-base font-semibold">Active Positions</CardTitle>
-              <p className="text-xs text-muted-foreground tabular-nums">
+            <div className="min-w-0">
+              <CardTitle className="text-sm md:text-base font-semibold truncate">Active Positions</CardTitle>
+              <p className="text-[10px] md:text-xs text-muted-foreground tabular-nums">
                 {positions.length} open trades
                 {positions.length > 0 && (
                   <span className={cn(
-                    "ml-2 font-medium",
+                    "ml-1.5 md:ml-2 font-medium",
                     totalPnL >= 0 ? 'text-success' : 'text-destructive'
                   )}>
                     ({formatTotalPnL(totalPnL)})
@@ -363,7 +363,7 @@ export default function ActivePositionsPanel({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 md:gap-1 shrink-0">
             {onRefresh && (
               <Tooltip>
                 <TooltipTrigger asChild>

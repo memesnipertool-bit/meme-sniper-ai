@@ -96,73 +96,73 @@ const PositionRow = ({ position, onClose, compact = false, formatValue }: Positi
   const ExitIcon = exitInfo?.icon || XCircle;
 
   return (
-    <div className={`flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors ${
+    <div className={`flex items-center justify-between p-3 md:p-4 hover:bg-secondary/30 transition-colors ${
       isPendingTakeProfit ? 'bg-green-500/5 border-l-2 border-green-500' : 
       isPendingStopLoss ? 'bg-red-500/5 border-l-2 border-red-500' : ''
     }`}>
-      <div className="flex items-center gap-3 min-w-0 flex-1">
-        <div className={`p-2 rounded-lg ${isProfit ? 'bg-success/20' : 'bg-destructive/20'}`}>
+      <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
+        <div className={`p-1.5 md:p-2 rounded-lg shrink-0 ${isProfit ? 'bg-success/20' : 'bg-destructive/20'}`}>
           {isProfit ? (
-            <TrendingUp className="w-4 h-4 text-success" />
+            <TrendingUp className="w-3.5 h-3.5 md:w-4 md:h-4 text-success" />
           ) : (
-            <TrendingDown className="w-4 h-4 text-destructive" />
+            <TrendingDown className="w-3.5 h-3.5 md:w-4 md:h-4 text-destructive" />
           )}
         </div>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-foreground truncate">{displaySymbol}</span>
-            <Badge variant="outline" className="text-xs">{displayName}</Badge>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
+            <span className="font-semibold text-sm text-foreground truncate max-w-[100px] md:max-w-[150px]">{displaySymbol}</span>
+            <Badge variant="outline" className="text-[10px] md:text-xs shrink-0 max-w-[80px] truncate">{displayName}</Badge>
             {position.status === 'open' ? (
-              <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">Open</Badge>
+              <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px] md:text-xs shrink-0">Open</Badge>
             ) : (
-              <Badge variant="secondary" className="text-xs flex items-center gap-1">
-                <ExitIcon className={`w-3 h-3 ${exitInfo?.color}`} />
-                {exitInfo?.label}
+              <Badge variant="secondary" className="text-[10px] md:text-xs flex items-center gap-1 shrink-0">
+                <ExitIcon className={`w-2.5 h-2.5 md:w-3 md:h-3 ${exitInfo?.color}`} />
+                <span className="truncate max-w-[60px]">{exitInfo?.label}</span>
               </Badge>
             )}
           </div>
-          <p className="text-xs text-muted-foreground truncate">
+          <p className="text-[10px] md:text-xs text-muted-foreground truncate mt-0.5">
             Entry: ${position.entry_price.toFixed(8)} • {formatDistanceToNow(new Date(position.created_at), { addSuffix: true })}
           </p>
         </div>
       </div>
 
-      <div className="flex items-center gap-4 md:gap-6">
+      <div className="flex items-center gap-2 md:gap-4 lg:gap-6 shrink-0">
         {!compact && (
-          <div className="text-right hidden md:block">
-            <p className="text-xs text-muted-foreground">Current</p>
-            <p className="font-medium text-foreground text-sm">${(position.current_price ?? 0).toFixed(8)}</p>
+          <div className="text-right hidden md:block min-w-[70px]">
+            <p className="text-[10px] md:text-xs text-muted-foreground">Current</p>
+            <p className="font-medium text-foreground text-xs md:text-sm tabular-nums">${(position.current_price ?? 0).toFixed(8)}</p>
           </div>
         )}
         
-        <div className="text-right min-w-[80px]">
-          <p className="text-xs text-muted-foreground">P&L</p>
-          <div className={`flex items-center justify-end gap-1 font-bold text-sm ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+        <div className="text-right min-w-[60px] md:min-w-[80px]">
+          <p className="text-[10px] md:text-xs text-muted-foreground">P&L</p>
+          <div className={`flex items-center justify-end gap-0.5 font-bold text-xs md:text-sm ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
             {formatPercentage(position.profit_loss_percent ?? 0)}
           </div>
-          <p className={`text-xs ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+          <p className={`text-[10px] md:text-xs ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
             {formatValue(pnlValue, { showSign: true })}
           </p>
         </div>
 
         {!compact && (
-          <div className="text-right hidden lg:block min-w-[100px]">
-            <p className="text-xs text-muted-foreground">Entry Value</p>
-            <p className="font-medium text-foreground text-sm">{formatValue(position.entry_value ?? 0)}</p>
+          <div className="text-right hidden lg:block min-w-[80px] md:min-w-[100px]">
+            <p className="text-[10px] md:text-xs text-muted-foreground">Entry Value</p>
+            <p className="font-medium text-foreground text-xs md:text-sm">{formatValue(position.entry_value ?? 0)}</p>
           </div>
         )}
 
         {position.status === 'open' && onClose && (
-          <Button size="sm" variant="outline" onClick={onClose} className="shrink-0">
+          <Button size="sm" variant="outline" onClick={onClose} className="shrink-0 h-7 md:h-8 text-xs px-2 md:px-3">
             <XCircle className="w-3 h-3 mr-1" />
-            Close
+            <span className="hidden sm:inline">Close</span>
           </Button>
         )}
         
         {position.status === 'closed' && position.closed_at && (
-          <div className="text-right min-w-[80px] hidden sm:block">
-            <p className="text-xs text-muted-foreground">Closed</p>
-            <p className="text-xs text-foreground">{format(new Date(position.closed_at), 'MMM d, HH:mm')}</p>
+          <div className="text-right min-w-[60px] md:min-w-[80px] hidden sm:block">
+            <p className="text-[10px] md:text-xs text-muted-foreground">Closed</p>
+            <p className="text-[10px] md:text-xs text-foreground">{format(new Date(position.closed_at), 'MMM d, HH:mm')}</p>
           </div>
         )}
       </div>
@@ -299,12 +299,12 @@ function Portfolio() {
     <AppLayout>
       <div className="container mx-auto px-4">
         {/* Page Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-1">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4 mb-4 md:mb-6">
+          <div className="min-w-0">
+            <h1 className="text-xl md:text-2xl lg:text-3xl font-bold text-foreground mb-0.5 md:mb-1">
               Portfolio
             </h1>
-            <p className="text-muted-foreground text-sm">
+            <p className="text-muted-foreground text-xs md:text-sm line-clamp-2">
               Track all positions and auto-exit management
               {lastExitCheck && ` • Last check: ${formatDistanceToNow(new Date(lastExitCheck), { addSuffix: true })}`}
             </p>
@@ -313,6 +313,7 @@ function Portfolio() {
             variant="glow"
             onClick={() => fetchPositions(true)}
             disabled={loading}
+            className="shrink-0 h-9 md:h-10"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             Refresh
@@ -325,88 +326,88 @@ function Portfolio() {
         </div>
 
         {/* Stats Overview - Comprehensive Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 md:gap-3 mb-4 md:mb-6">
           {/* Invested Card - Total Entry Value computed from amount × entry_price_usd */}
           <Card className="bg-gradient-to-br from-blue-500/10 to-card">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <Coins className="w-4 h-4 text-blue-500" />
-                <span className="text-xs text-muted-foreground">Invested</span>
+            <CardContent className="p-3 md:p-4">
+              <div className="flex items-center gap-1.5 md:gap-2 mb-0.5 md:mb-1">
+                <Coins className="w-3.5 h-3.5 md:w-4 md:h-4 text-blue-500 shrink-0" />
+                <span className="text-[10px] md:text-xs text-muted-foreground truncate">Invested</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openEntryValue).primary}</p>
-              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openEntryValue).secondary}</p>
+              <p className="text-base md:text-xl font-bold text-foreground tabular-nums break-all">{formatDualValue(stats.openEntryValue).primary}</p>
+              <p className="text-[10px] md:text-xs text-muted-foreground truncate">{formatDualValue(stats.openEntryValue).secondary}</p>
             </CardContent>
           </Card>
 
           <Card className="bg-gradient-to-br from-card to-card/80">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <DollarSign className="w-4 h-4 text-primary" />
-                <span className="text-xs text-muted-foreground">Open Value</span>
+            <CardContent className="p-3 md:p-4">
+              <div className="flex items-center gap-1.5 md:gap-2 mb-0.5 md:mb-1">
+                <DollarSign className="w-3.5 h-3.5 md:w-4 md:h-4 text-primary shrink-0" />
+                <span className="text-[10px] md:text-xs text-muted-foreground truncate">Open Value</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{formatDualValue(stats.openValue).primary}</p>
-              <p className="text-xs text-muted-foreground">{formatDualValue(stats.openValue).secondary}</p>
+              <p className="text-base md:text-xl font-bold text-foreground tabular-nums break-all">{formatDualValue(stats.openValue).primary}</p>
+              <p className="text-[10px] md:text-xs text-muted-foreground truncate">{formatDualValue(stats.openValue).secondary}</p>
             </CardContent>
           </Card>
 
           <Card className={`bg-gradient-to-br ${stats.totalPnL >= 0 ? 'from-green-500/10 to-card' : 'from-red-500/10 to-card'}`}>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                {stats.totalPnL >= 0 ? <TrendingUp className="w-4 h-4 text-green-500" /> : <TrendingDown className="w-4 h-4 text-red-500" />}
-                <span className="text-xs text-muted-foreground">Total P&L</span>
+            <CardContent className="p-3 md:p-4">
+              <div className="flex items-center gap-1.5 md:gap-2 mb-0.5 md:mb-1">
+                {stats.totalPnL >= 0 ? <TrendingUp className="w-3.5 h-3.5 md:w-4 md:h-4 text-green-500 shrink-0" /> : <TrendingDown className="w-3.5 h-3.5 md:w-4 md:h-4 text-red-500 shrink-0" />}
+                <span className="text-[10px] md:text-xs text-muted-foreground truncate">Total P&L</span>
               </div>
-              <p className={`text-xl font-bold ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              <p className={`text-base md:text-xl font-bold tabular-nums break-all ${stats.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                 {formatDualValue(stats.totalPnL, { showSign: true }).primary}
               </p>
-              <p className={`text-xs ${stats.totalPnL >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
+              <p className={`text-[10px] md:text-xs truncate ${stats.totalPnL >= 0 ? 'text-green-500/70' : 'text-red-500/70'}`}>
                 {formatDualValue(stats.totalPnL, { showSign: true }).secondary}
               </p>
             </CardContent>
           </Card>
 
           <Card className="bg-gradient-to-br from-card to-card/80">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <Activity className="w-4 h-4 text-primary" />
-                <span className="text-xs text-muted-foreground">Total Trades</span>
+            <CardContent className="p-3 md:p-4">
+              <div className="flex items-center gap-1.5 md:gap-2 mb-0.5 md:mb-1">
+                <Activity className="w-3.5 h-3.5 md:w-4 md:h-4 text-primary shrink-0" />
+                <span className="text-[10px] md:text-xs text-muted-foreground truncate">Total Trades</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{stats.totalTrades}</p>
-              <p className="text-xs text-muted-foreground">{closedPositions.length} closed</p>
+              <p className="text-base md:text-xl font-bold text-foreground tabular-nums">{stats.totalTrades}</p>
+              <p className="text-[10px] md:text-xs text-muted-foreground">{closedPositions.length} closed</p>
             </CardContent>
           </Card>
 
           <Card className={`bg-gradient-to-br ${stats.winRate >= 50 ? 'from-green-500/10 to-card' : 'from-yellow-500/10 to-card'}`}>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <Trophy className="w-4 h-4 text-yellow-500" />
-                <span className="text-xs text-muted-foreground">Win Rate</span>
+            <CardContent className="p-3 md:p-4">
+              <div className="flex items-center gap-1.5 md:gap-2 mb-0.5 md:mb-1">
+                <Trophy className="w-3.5 h-3.5 md:w-4 md:h-4 text-yellow-500 shrink-0" />
+                <span className="text-[10px] md:text-xs text-muted-foreground truncate">Win Rate</span>
               </div>
-              <p className={`text-xl font-bold ${stats.winRate >= 50 ? 'text-green-500' : 'text-yellow-500'}`}>
+              <p className={`text-base md:text-xl font-bold tabular-nums ${stats.winRate >= 50 ? 'text-green-500' : 'text-yellow-500'}`}>
                 {stats.winRate.toFixed(0)}%
               </p>
-              <p className="text-xs text-muted-foreground">{stats.wins}W / {stats.losses}L</p>
+              <p className="text-[10px] md:text-xs text-muted-foreground">{stats.wins}W / {stats.losses}L</p>
             </CardContent>
           </Card>
 
           <Card className="bg-gradient-to-br from-green-500/10 to-card">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                <span className="text-xs text-muted-foreground">Avg Win</span>
+            <CardContent className="p-3 md:p-4">
+              <div className="flex items-center gap-1.5 md:gap-2 mb-0.5 md:mb-1">
+                <CheckCircle className="w-3.5 h-3.5 md:w-4 md:h-4 text-green-500 shrink-0" />
+                <span className="text-[10px] md:text-xs text-muted-foreground truncate">Avg Win</span>
               </div>
-              <p className="text-xl font-bold text-green-500">+{stats.avgWinPercent.toFixed(1)}%</p>
-              <p className="text-xs text-muted-foreground">{stats.takeProfitExits} TP exits</p>
+              <p className="text-base md:text-xl font-bold text-green-500 tabular-nums">+{stats.avgWinPercent.toFixed(1)}%</p>
+              <p className="text-[10px] md:text-xs text-muted-foreground">{stats.takeProfitExits} TP exits</p>
             </CardContent>
           </Card>
 
           <Card className="bg-gradient-to-br from-red-500/10 to-card">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <AlertTriangle className="w-4 h-4 text-red-500" />
-                <span className="text-xs text-muted-foreground">Avg Loss</span>
+            <CardContent className="p-3 md:p-4">
+              <div className="flex items-center gap-1.5 md:gap-2 mb-0.5 md:mb-1">
+                <AlertTriangle className="w-3.5 h-3.5 md:w-4 md:h-4 text-red-500 shrink-0" />
+                <span className="text-[10px] md:text-xs text-muted-foreground truncate">Avg Loss</span>
               </div>
-              <p className="text-xl font-bold text-red-500">{stats.avgLossPercent.toFixed(1)}%</p>
-              <p className="text-xs text-muted-foreground">{stats.stopLossExits} SL exits</p>
+              <p className="text-base md:text-xl font-bold text-red-500 tabular-nums">{stats.avgLossPercent.toFixed(1)}%</p>
+              <p className="text-[10px] md:text-xs text-muted-foreground">{stats.stopLossExits} SL exits</p>
             </CardContent>
           </Card>
         </div>
