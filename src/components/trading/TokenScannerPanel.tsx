@@ -19,7 +19,11 @@ import {
   TrendingUp,
   TrendingDown,
   Zap,
+   Clock,
+   Target,
 } from "lucide-react";
+ import { TokenDiscoveryBadge, DiscoveryRulesSummary } from "@/components/scanner/TokenDiscoveryBadge";
+ import { formatTokenAge, isInAgeWindow, isTargetPosition } from "@/lib/tokenDiscovery";
 
 interface TokenScannerPanelProps {
   tokens: ScannedToken[];
@@ -42,6 +46,25 @@ const TokenRow = ({ token, index }: { token: ScannedToken; index: number }) => {
   const isPositive = token.priceChange24h >= 0;
   
   const initials = token.symbol.slice(0, 2).toUpperCase();
+   
+   // Convert ScannedToken to DiscoveryCandidate for validation
+   const candidate = {
+     address: token.address,
+     name: token.name,
+     symbol: token.symbol,
+     liquidity: token.liquidity,
+     createdAt: token.createdAt,
+     buyerPosition: token.buyerPosition,
+     riskScore: token.riskScore,
+     holders: token.holders,
+     freezeAuthority: token.freezeAuthority ?? null,
+     mintAuthority: token.mintAuthority ?? null,
+     hasSwapRoute: token.isTradeable ?? false,
+     source: token.source,
+   };
+   
+   const ageValid = isInAgeWindow(token.createdAt);
+   const positionValid = isTargetPosition(token.buyerPosition);
   
   const getSafetyStatus = () => {
     const honeypotSafe = token.riskScore < 50;
@@ -117,9 +140,19 @@ const TokenRow = ({ token, index }: { token: ScannedToken; index: number }) => {
               {dex.name}
             </Badge>
           </div>
-          <div className="flex items-center gap-1.5 text-[10px] md:text-xs text-muted-foreground">
+           <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs text-muted-foreground">
             <span className="font-mono truncate">{token.address.slice(0, 4)}...{token.address.slice(-4)}</span>
             <ExternalLink className="w-3 h-3 hover:text-primary cursor-pointer shrink-0" />
+             {/* Age Badge */}
+             <span className={`flex items-center gap-0.5 ${ageValid ? 'text-success' : 'text-orange-400'}`}>
+               <Clock className="w-3 h-3" />
+               {formatTokenAge(token.createdAt)}
+             </span>
+             {/* Position Badge */}
+             <span className={`flex items-center gap-0.5 ${positionValid ? 'text-primary' : 'text-muted-foreground'}`}>
+               <Target className="w-3 h-3" />
+               #{token.buyerPosition ?? '?'}
+             </span>
           </div>
         </div>
         
@@ -146,6 +179,11 @@ const TokenRow = ({ token, index }: { token: ScannedToken; index: number }) => {
       {/* Expanded Details */}
       {expanded && (
         <div className="px-3 md:px-4 pb-3 md:pb-4 pl-[44px] md:pl-[60px] animate-fade-in">
+           {/* Discovery Status */}
+           <div className="mb-2">
+             <TokenDiscoveryBadge token={candidate} />
+           </div>
+           
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 p-2 md:p-3 bg-secondary/30 rounded-lg text-[10px] md:text-xs">
             <div>
               <span className="text-muted-foreground block mb-0.5">Buyers</span>
@@ -156,8 +194,10 @@ const TokenRow = ({ token, index }: { token: ScannedToken; index: number }) => {
               <span className="text-foreground font-semibold tabular-nums">{token.lockPercentage || 0}%</span>
             </div>
             <div>
-              <span className="text-muted-foreground block mb-0.5">Position</span>
-              <span className="text-primary font-semibold tabular-nums">#{token.buyerPosition || '-'}</span>
+               <span className="text-muted-foreground block mb-0.5">Target Pos</span>
+               <span className={`font-semibold tabular-nums ${positionValid ? 'text-primary' : 'text-muted-foreground'}`}>
+                 #{token.buyerPosition || '-'} {positionValid ? '✓' : ''}
+               </span>
             </div>
             <div>
               <span className="text-muted-foreground block mb-0.5">Risk</span>
@@ -247,6 +287,8 @@ export default function TokenScannerPanel({
                 {loading ? 'Scanning...' : isPaused ? 'Paused' : 'Active'}
               </span>
             </div>
+             {/* Discovery Rules */}
+             <DiscoveryRulesSummary />
           </div>
           <span className="text-foreground font-semibold text-xs md:text-sm tabular-nums">{tokens.length} tokens</span>
         </div>
