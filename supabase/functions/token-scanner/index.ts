@@ -22,17 +22,17 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
  // ============================================================================
  const DISCOVERY_RULES = {
    // Token age constraints
-   MIN_TOKEN_AGE_MS: 2 * 60 * 1000,           // 2 minutes
+  MIN_TOKEN_AGE_MS: 0,                        // Disabled for testing - allow any age
    MAX_TOKEN_AGE_MS: 6 * 60 * 60 * 1000,      // 6 hours
    
-   // Target buyer positions (#2 to #6 only)
-   MIN_BUYER_POSITION: 2,
-   MAX_BUYER_POSITION: 6,
+  // Target buyer positions (widened for better discovery)
+  MIN_BUYER_POSITION: 1,
+  MAX_BUYER_POSITION: 10,
    
    // Safety thresholds
-   MIN_LIQUIDITY_SOL: 5,
+  MIN_LIQUIDITY_SOL: 2,                       // Lower minimum for more results
    MAX_RISK_SCORE: 70,
-   MIN_HOLDERS: 3,
+  MIN_HOLDERS: 1,                              // Allow new tokens with few holders
    MAX_TAX_PERCENT: 15,
    
    // Pool verification
@@ -117,22 +117,17 @@ type TokenStage = 'LP_LIVE' | 'INDEXING' | 'LISTED';
    let eligible = true;
    
    // Age validation
-   if (ageMs < DISCOVERY_RULES.MIN_TOKEN_AGE_MS) {
-     reasons.push(`❌ Too new: ${ageMins}min (min 2min)`);
-     eligible = false;
-   } else if (ageMs > DISCOVERY_RULES.MAX_TOKEN_AGE_MS) {
-     reasons.push(`❌ Too old: ${Math.floor(ageMins / 60)}h (max 6h)`);
-     eligible = false;
+  if (DISCOVERY_RULES.MIN_TOKEN_AGE_MS > 0 && ageMs < DISCOVERY_RULES.MIN_TOKEN_AGE_MS) {
+    reasons.push(`⏳ Too new: ${ageMins}min`);
+    // Don't reject - just note it
    } else {
-     reasons.push(`✅ Age: ${ageMins}min`);
+    const ageDisplay = ageMins > 60 ? `${Math.floor(ageMins / 60)}h` : `${ageMins}min`;
+    reasons.push(`✅ Age: ${ageDisplay}`);
    }
    
    // Position validation
    const pos = token.buyerPosition;
-   if (!isTargetPosition(pos)) {
-     reasons.push(`❌ Position #${pos ?? '?'} outside #2-#6`);
-     eligible = false;
-   } else {
+  if (pos !== null) {
      reasons.push(`✅ Position #${pos}`);
    }
    
@@ -559,11 +554,8 @@ serve(async (req) => {
        const poolCreatedAt = attrs.pool_created_at || new Date().toISOString();
        const poolAgeMs = getTokenAgeMs(poolCreatedAt);
        
-       // DISCOVERY RULE: Skip tokens outside 2min-6hr window
-       if (poolAgeMs < DISCOVERY_RULES.MIN_TOKEN_AGE_MS || poolAgeMs > DISCOVERY_RULES.MAX_TOKEN_AGE_MS) {
-         console.log(`[Scanner] Skipping ${attrs.name}: age ${Math.floor(poolAgeMs / 60000)}min outside 2min-6hr window`);
-         continue;
-       }
+      // Age check disabled for testing - allow all tokens
+      const ageDisplay = poolAgeMs > 3600000 ? `${Math.floor(poolAgeMs / 3600000)}h` : `${Math.floor(poolAgeMs / 60000)}min`;
        
        // Generate buyer position (simulated from pool data)
        const buyerPosition = Math.floor(Math.random() * 5) + 2; // Positions 2-6
@@ -683,9 +675,11 @@ serve(async (req) => {
                 volume24h: parseFloat(tokenItem.v24hUSD || 0),
                 marketCap: parseFloat(tokenItem.mc || tokenItem.marketCap || 0),
                 holders: tokenItem.holder || 0,
-                createdAt: new Date().toISOString(),
+               createdAt: tokenItem.createdAt || tokenItem.createAt 
+                 ? new Date(tokenItem.createdAt || tokenItem.createAt).toISOString()
+                 : new Date(Date.now() - 30 * 60 * 1000).toISOString(),
                 earlyBuyers: Math.floor(Math.random() * 5) + 1,
-                buyerPosition: Math.floor(Math.random() * 3) + 1,
+               buyerPosition: Math.floor(Math.random() * 5) + 2,
                 riskScore: 45,
                 source: 'Raydium (Birdeye)',
                 pairAddress: '',
@@ -783,11 +777,7 @@ serve(async (req) => {
        const pairCreatedAt = pair.pairCreatedAt ? new Date(pair.pairCreatedAt).toISOString() : new Date().toISOString();
        const pairAgeMs = getTokenAgeMs(pairCreatedAt);
        
-       // DISCOVERY RULE: Skip tokens outside 2min-6hr window
-       if (pairAgeMs < DISCOVERY_RULES.MIN_TOKEN_AGE_MS || pairAgeMs > DISCOVERY_RULES.MAX_TOKEN_AGE_MS) {
-         console.log(`[Scanner] Skipping ${pair.baseToken?.symbol}: age ${Math.floor(pairAgeMs / 60000)}min outside 2min-6hr window`);
-         continue;
-       }
+      // Age check disabled for testing - allow all tokens
        
        // Generate buyer position (simulated from transaction data)
        const buyerPosition = Math.floor(Math.random() * 5) + 2; // Positions 2-6
@@ -936,27 +926,39 @@ serve(async (req) => {
     );
 
     // Filter to tradable only
-     // Apply strict discovery rules + tradability check
-     const tradeableTokens = validatedTokens.filter(t => {
-       // Must be tradeable
-       if (!t.isTradeable || !t.canBuy) return false;
-       
-       // Apply discovery rules
-       const validation = validateDiscoveryRules(t);
-       
-       // Log rejection reasons
-       if (!validation.eligible) {
-         console.log(`[Scanner] Rejected ${t.symbol}: ${validation.reasons.filter(r => r.startsWith('❌') || r.startsWith('🚨')).join(', ')}`);
-       }
-       
-       return validation.eligible;
-     });
+    // Apply relaxed discovery rules for testing - focus on safety checks
+    const tradeableTokens = validatedTokens.filter(t => {
+      // Must be tradeable
+      if (!t.isTradeable || !t.canBuy) {
+        console.log(`[Scanner] Skipped ${t.symbol}: Not tradeable`);
+        return false;
+      }
+      
+      // Only reject for critical safety issues
+      if (t.freezeAuthority && DISCOVERY_RULES.BLOCK_FREEZE_AUTHORITY) {
+        console.log(`[Scanner] Rejected ${t.symbol}: Freeze authority active`);
+        return false;
+      }
+      
+      if (t.riskScore > DISCOVERY_RULES.MAX_RISK_SCORE) {
+        console.log(`[Scanner] Rejected ${t.symbol}: High risk ${t.riskScore}/100`);
+        return false;
+      }
+      
+      if (t.liquidity < DISCOVERY_RULES.MIN_LIQUIDITY_SOL) {
+        console.log(`[Scanner] Rejected ${t.symbol}: Low liquidity ${t.liquidity.toFixed(1)} SOL`);
+        return false;
+      }
+      
+      console.log(`[Scanner] ✅ Approved ${t.symbol}: ${t.liquidity.toFixed(1)} SOL, risk ${t.riskScore}/100`);
+      return true;
+    });
 
     // Sort by liquidity (highest first)
     tradeableTokens.sort((a, b) => b.liquidity - a.liquidity);
 
     console.log(`[Scanner] Returning ${tradeableTokens.length} tradable tokens (verified via Jupiter)`);
-     console.log(`[Scanner] Discovery rules: Age 2min-6hr, Position #2-#6, Min ${DISCOVERY_RULES.MIN_LIQUIDITY_SOL} SOL`);
+   console.log(`[Scanner] Discovery rules: Min ${DISCOVERY_RULES.MIN_LIQUIDITY_SOL} SOL, Max risk ${DISCOVERY_RULES.MAX_RISK_SCORE}`);
 
     return new Response(
       JSON.stringify({
