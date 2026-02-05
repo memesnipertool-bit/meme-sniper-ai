@@ -81,9 +81,7 @@
            </TooltipTrigger>
            <TooltipContent side="top">
              <span className="text-xs">
-               {ageValid 
-                 ? `✅ Within 2min-6hr window` 
-                 : `❌ Outside 2min-6hr window`}
+              {`Age: ${formatTokenAge(token.createdAt)}`}
              </span>
            </TooltipContent>
          </Tooltip>
@@ -107,9 +105,7 @@
            </TooltipTrigger>
            <TooltipContent side="top">
              <span className="text-xs">
-               {positionValid 
-                 ? `✅ Target position #2-#6` 
-                 : `❌ Outside target range #2-#6`}
+              {`Buyer position #${token.buyerPosition ?? '?'}`}
              </span>
            </TooltipContent>
          </Tooltip>
@@ -150,17 +146,12 @@
  export function DiscoveryRulesSummary() {
    return (
      <div className="text-[10px] text-muted-foreground flex items-center gap-2 flex-wrap">
-       <span className="flex items-center gap-1">
-         <Clock className="w-3 h-3" />
-         2min-6hr
-       </span>
-       <span className="flex items-center gap-1">
-         <Target className="w-3 h-3" />
-         #2-#6
-       </span>
        <span>
          Min {DISCOVERY_CONFIG.MIN_LIQUIDITY_SOL} SOL
        </span>
+      <span>
+        Max risk {DISCOVERY_CONFIG.MAX_RISK_SCORE}
+      </span>
      </div>
    );
  }

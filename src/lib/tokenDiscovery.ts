@@ -15,17 +15,17 @@
  
  export const DISCOVERY_CONFIG = {
    // Token age constraints (in milliseconds)
-   MIN_TOKEN_AGE_MS: 2 * 60 * 1000,           // 2 minutes
+  MIN_TOKEN_AGE_MS: 0,                        // Disabled for testing
    MAX_TOKEN_AGE_MS: 6 * 60 * 60 * 1000,      // 6 hours
    
-   // Target buyer positions (sniper aims to be in this range)
-   MIN_BUYER_POSITION: 2,
-   MAX_BUYER_POSITION: 6,
+  // Target buyer positions (widened for better discovery)
+  MIN_BUYER_POSITION: 1,
+  MAX_BUYER_POSITION: 10,
    
    // Safety thresholds
-   MIN_LIQUIDITY_SOL: 5,                      // Minimum 5 SOL liquidity
+  MIN_LIQUIDITY_SOL: 2,                       // Lower minimum for more results
    MAX_RISK_SCORE: 70,                        // Reject if risk > 70
-   MIN_HOLDERS: 3,                            // At least 3 holders
+  MIN_HOLDERS: 1,                             // Allow new tokens with few holders
    MAX_SELL_TAX_PERCENT: 15,                  // Block if sell tax >= 15%
    MAX_BUY_TAX_PERCENT: 15,                   // Block if buy tax >= 15%
    
@@ -138,46 +138,39 @@
    const ageMins = Math.floor(ageMs / 60000);
  
    // ========== AGE VALIDATION ==========
-   if (ageMs < DISCOVERY_CONFIG.MIN_TOKEN_AGE_MS) {
+  if (DISCOVERY_CONFIG.MIN_TOKEN_AGE_MS > 0 && ageMs < DISCOVERY_CONFIG.MIN_TOKEN_AGE_MS) {
      reasons.push({
        code: 'TOO_NEW',
        message: `Token is too new (${ageMins}min < 2min minimum)`,
-       severity: 'reject',
+      severity: 'warn',
      });
    } else if (ageMs > DISCOVERY_CONFIG.MAX_TOKEN_AGE_MS) {
+    const ageHours = Math.floor(ageMins / 60);
      reasons.push({
        code: 'TOO_OLD',
-       message: `Token is too old (${Math.floor(ageMins / 60)}h > 6h maximum)`,
-       severity: 'reject',
+      message: `Age: ${ageHours}h (established token)`,
+      severity: 'warn',
      });
    } else {
      reasons.push({
        code: 'AGE_OK',
-       message: `Age: ${ageMins}min (2min-6h window)`,
+      message: `Age: ${ageMins > 60 ? Math.floor(ageMins / 60) + 'h' : ageMins + 'min'}`,
        severity: 'pass',
      });
    }
  
    // ========== BUYER POSITION VALIDATION ==========
    const pos = candidate.buyerPosition;
-   if (pos === null || pos < DISCOVERY_CONFIG.MIN_BUYER_POSITION) {
+  if (pos === null) {
      reasons.push({
        code: 'BAD_POSITION',
-       message: pos === null 
-         ? 'Position unknown - cannot verify entry point'
-         : `Position #${pos} is below target range (#2-#6)`,
-       severity: 'reject',
+      message: 'Position unknown',
+      severity: 'warn',
      });
-   } else if (pos > DISCOVERY_CONFIG.MAX_BUYER_POSITION) {
+  } else {
      reasons.push({
-       code: 'BAD_POSITION',
-       message: `Position #${pos} exceeds target range (#2-#6)`,
-       severity: 'reject',
-     });
-   } else {
-     reasons.push({
-       code: 'POSITION_OK',
-       message: `Position #${pos} (target: #2-#6)`,
+      code: 'POSITION_OK',
+      message: `Position #${pos}`,
        severity: 'pass',
      });
    }
@@ -237,11 +230,11 @@
    }
  
    // ========== HOLDERS CHECK ==========
-   if (candidate.holders < DISCOVERY_CONFIG.MIN_HOLDERS) {
+  if (candidate.holders > 0 && candidate.holders < DISCOVERY_CONFIG.MIN_HOLDERS) {
      reasons.push({
        code: 'LOW_HOLDERS',
-       message: `Only ${candidate.holders} holders (${DISCOVERY_CONFIG.MIN_HOLDERS} minimum)`,
-       severity: 'reject',
+      message: `${candidate.holders} holders`,
+      severity: 'warn',
      });
    }
  
