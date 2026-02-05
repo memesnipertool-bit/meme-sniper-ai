@@ -748,6 +748,23 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
             <TabsContent value="pools" className="mt-0">
               {/* Search + Pause/Start Controls */}
               <div className="px-4 pb-3 space-y-2">
+                {/* Discovery Stats Bar */}
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground overflow-x-auto pb-1">
+                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 shrink-0 border-primary/30 text-primary bg-primary/5">
+                    Sources: Raydium • GeckoTerminal • Birdeye • DexScreener
+                  </Badge>
+                  {apiStatus === 'active' && (
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 shrink-0 border-success/30 text-success bg-success/5 animate-pulse">
+                      Live Discovery
+                    </Badge>
+                  )}
+                  {apiStatus === 'rate_limited' && (
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 shrink-0 border-warning/30 text-warning bg-warning/5">
+                      Rate limited - retrying...
+                    </Badge>
+                  )}
+                </div>
+
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -810,7 +827,10 @@ const LiquidityMonitor = forwardRef<HTMLDivElement, LiquidityMonitorProps>(funct
                       {searchTerm ? 'No matching pools' : 'No pools detected yet'}
                     </p>
                     <p className="text-xs text-muted-foreground/70">
-                      {searchTerm ? 'Try a different search term' : 'Enable the bot to start scanning'}
+                      {searchTerm ? 'Try a different search term' : 'Scanner is querying Raydium, GeckoTerminal, Birdeye & DexScreener...'}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/50 mt-2">
+                      Discovering newly launched meme tokens with verified liquidity
                     </p>
                   </div>
                 ) : (

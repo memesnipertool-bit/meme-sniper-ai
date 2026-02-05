@@ -47,6 +47,16 @@
    ],
  } as const;
  
+// Data sources used for token discovery
+export const DISCOVERY_SOURCES = [
+  'Raydium V3 API',
+  'GeckoTerminal',
+  'Birdeye',
+  'DexScreener',
+] as const;
+
+export type DiscoverySource = typeof DISCOVERY_SOURCES[number];
+
  // ============================================================================
  // TYPES
  // ============================================================================
