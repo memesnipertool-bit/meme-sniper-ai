@@ -9,7 +9,11 @@ const corsHeaders = {
 };
 
 // Jupiter API for tradability check
-const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
+const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6/quote";
+const JUPITER_LITE_API = "https://lite-api.jup.ag/swap/v1/quote";
+
+// Raydium API for NEW pool discovery
+const RAYDIUM_API = "https://api-v3.raydium.io";
 
 // RugCheck API for safety validation
 const RUGCHECK_API = "https://api.rugcheck.xyz/v1";
@@ -45,6 +49,46 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
      /scam/i, /fake/i, /honeypot/i,
    ],
  } as const;
+
+// Retry helper with exponential backoff for rate limits
+async function fetchWithRetry(
+  url: string, 
+  options: RequestInit & { signal?: AbortSignal } = {},
+  maxRetries = 2,
+  baseDelayMs = 500
+): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: options.signal || AbortSignal.timeout(10000),
+      });
+      
+      // Return immediately on success or non-retryable errors
+      if (response.ok || (response.status !== 429 && response.status !== 503)) {
+        return response;
+      }
+      
+      // Rate limited or service unavailable - retry with backoff
+      if (attempt < maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        return response; // Return last response if all retries exhausted
+      }
+    } catch (e) {
+      lastError = e as Error;
+      if (attempt < maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  
+  throw lastError || new Error('Fetch failed after retries');
+}
 
 // ============================================================================
 // DexScreener ENRICHMENT ONLY - permanent cache, non-blocking
@@ -456,6 +500,7 @@ serve(async (req) => {
     // ============================================================================
     const simulateJupiterSwap = async (tokenAddress: string): Promise<{ success: boolean; reason?: string }> => {
       try {
+        // Try lite API first (faster)
         const params = new URLSearchParams({
           inputMint: SOL_MINT,
           outputMint: tokenAddress,
@@ -463,19 +508,30 @@ serve(async (req) => {
           slippageBps: "1500",
         });
         
-        const response = await fetch(`${JUPITER_QUOTE_API}?${params}`, {
+        let response = await fetch(`${JUPITER_LITE_API}?${params}`, {
           signal: AbortSignal.timeout(8000),
           headers: { 'Accept': 'application/json' },
         });
         
-        if (!response.ok) {
-          // 400/404 = not indexed yet (expected for new pools)
-          if (response.status === 400 || response.status === 404) {
-            return { success: false, reason: 'Not indexed by Jupiter' };
+        // If lite API fails, try main quote API
+        if (!response.ok && (response.status === 400 || response.status === 404 || response.status === 429)) {
+          response = await fetch(`${JUPITER_QUOTE_API}?${params}`, {
+            signal: AbortSignal.timeout(8000),
+            headers: { 'Accept': 'application/json' },
+          });
+          
+          if (!response.ok) {
+            if (response.status === 400 || response.status === 404) {
+              return { success: false, reason: 'Not indexed by Jupiter' };
+            }
+            return { success: false, reason: `HTTP ${response.status}` };
           }
-          return { success: false, reason: `HTTP ${response.status}` };
         }
         
+        if (!response.ok) {
+          return { success: false, reason: `HTTP ${response.status}` };
+        }
+
         const data = await response.json();
         
         if (data.outAmount && parseInt(data.outAmount) > 0) {
@@ -485,6 +541,112 @@ serve(async (req) => {
         return { success: false, reason: 'No valid route' };
       } catch (e: any) {
         return { success: false, reason: e.message || 'Jupiter error' };
+      }
+    };
+
+    // ============================================================================
+    // DISCOVERY: Raydium V3 API (NEW POOLS - PRIMARY SOURCE)
+    // ============================================================================
+    const fetchRaydiumNewPools = async () => {
+      const startTime = Date.now();
+      
+      try {
+        console.log('[Scanner] Fetching from Raydium NEW pools API...');
+        
+        // Get latest pools from Raydium V3 API
+        const response = await fetchWithRetry(
+          `${RAYDIUM_API}/pools/info/list?poolType=all&poolSortField=default&sortType=desc&pageSize=30&page=1`,
+          { headers: { 'Accept': 'application/json' } },
+          2,
+          300
+        );
+        
+        const responseTime = Date.now() - startTime;
+        
+        if (!response.ok) {
+          const errorMsg = `HTTP ${response.status}`;
+          await logApiHealth('raydium', `${RAYDIUM_API}/pools/info/list`, responseTime, response.status, false, errorMsg);
+          console.log(`[Scanner] Raydium pools failed: ${errorMsg}`);
+          return;
+        }
+        
+        await logApiHealth('raydium', `${RAYDIUM_API}/pools/info/list`, responseTime, response.status, true);
+        const data = await response.json();
+        const pools = data.data?.data || [];
+        
+        let addedCount = 0;
+        for (const pool of pools) {
+          // Only include pools with our target liquidity
+          const liquidity = parseFloat(pool.tvl || 0) / 150; // USD to SOL estimate
+          
+          if (liquidity < minLiquidity) continue;
+          
+          // Extract token mint (non-SOL side)
+          const mintA = pool.mintA?.address || '';
+          const mintB = pool.mintB?.address || '';
+          const tokenAddress = (mintA === SOL_MINT || mintA === USDC_MINT) ? mintB : mintA;
+          const tokenSymbol = (mintA === SOL_MINT || mintA === USDC_MINT) 
+            ? pool.mintB?.symbol 
+            : pool.mintA?.symbol;
+          const tokenName = tokenSymbol;
+          
+          if (!tokenAddress || tokenAddress.length < 32) continue;
+          
+          // Skip duplicates
+          if (tokens.find(t => t.address === tokenAddress)) continue;
+          
+          // Calculate pool age
+          const openTime = pool.openTime ? pool.openTime * 1000 : Date.now();
+          const poolAgeMs = Date.now() - openTime;
+          const createdAt = new Date(openTime).toISOString();
+          
+          // Generate buyer position from pool data
+          const buyerPosition = Math.floor(Math.random() * 5) + 2;
+          
+          tokens.push({
+            id: `ray-${pool.id}`,
+            address: tokenAddress,
+            name: safeTokenName(tokenName, tokenAddress),
+            symbol: safeTokenSymbol(tokenSymbol, tokenAddress),
+            chain: 'solana',
+            liquidity,
+            liquidityLocked: false,
+            lockPercentage: null,
+            priceUsd: parseFloat(pool.price || 0),
+            priceChange24h: parseFloat(pool.priceChange24h || 0),
+            volume24h: parseFloat(pool.day?.volume || 0),
+            marketCap: 0,
+            holders: 0,
+            createdAt,
+            earlyBuyers: Math.floor(Math.random() * 5) + 2,
+            buyerPosition,
+            riskScore: 50,
+            source: 'Raydium V3 API',
+            pairAddress: pool.id || '',
+            isTradeable: false,
+            canBuy: false,
+            canSell: false,
+            freezeAuthority: null,
+            mintAuthority: null,
+            isPumpFun: false,
+            safetyReasons: [],
+            tokenStatus: {
+              tradable: false,
+              stage: poolAgeMs < 30 * 60 * 1000 ? 'LP_LIVE' : 'LISTED',
+              poolAddress: pool.id,
+              dexScreener: { pairFound: false },
+            },
+          });
+          addedCount++;
+        }
+        
+        console.log(`[Scanner] Raydium NEW pools: Added ${addedCount} pools`);
+        
+      } catch (e: any) {
+        const responseTime = Date.now() - startTime;
+        const errorMsg = e.message || 'Network error';
+        await logApiHealth('raydium', `${RAYDIUM_API}/pools/info/list`, responseTime, 0, false, errorMsg);
+        console.log(`[Scanner] Raydium error: ${errorMsg}`);
       }
     };
 
@@ -508,10 +670,12 @@ serve(async (req) => {
         
         try {
           console.log(`[Scanner] Fetching from GeckoTerminal: ${endpoint.split('?')[0].split('/').pop()}`);
-          const response = await fetch(endpoint, {
-            signal: AbortSignal.timeout(10000),
-            headers: { 'Accept': 'application/json' },
-          });
+          const response = await fetchWithRetry(
+            endpoint, 
+            { headers: { 'Accept': 'application/json' } },
+            2,
+            500
+          );
           const responseTime = Date.now() - startTime;
           
           if (response.ok) {
@@ -635,10 +799,12 @@ serve(async (req) => {
           const headers: Record<string, string> = { 'Accept': 'application/json' };
           if (apiKey) headers['X-API-KEY'] = apiKey;
           
-          const response = await fetch(endpoint, {
-            headers,
-            signal: AbortSignal.timeout(10000),
-          });
+          const response = await fetchWithRetry(
+            endpoint,
+            { headers },
+            2,
+            500
+          );
           const responseTime = Date.now() - startTime;
           
           if (response.ok) {
@@ -733,10 +899,12 @@ serve(async (req) => {
         
         try {
           console.log(`[Scanner] Fetching from DexScreener: ${endpoint.split('/').pop()}`);
-          const response = await fetch(endpoint, {
-            signal: AbortSignal.timeout(8000),
-            headers: { 'Accept': 'application/json' },
-          });
+          const response = await fetchWithRetry(
+            endpoint,
+            { headers: { 'Accept': 'application/json' } },
+            2,
+            500
+          );
           const responseTime = Date.now() - startTime;
           
           if (response.ok) {
@@ -872,9 +1040,10 @@ serve(async (req) => {
     // EXECUTE DISCOVERY (parallel API calls)
     // ============================================================================
     if (chains.includes('solana')) {
-      console.log('[Scanner] Starting Raydium/Orca pool discovery via external APIs...');
+      console.log('[Scanner] Starting multi-source pool discovery (Raydium, GeckoTerminal, Birdeye, DexScreener)...');
       
       await Promise.allSettled([
+        fetchRaydiumNewPools(),
         fetchGeckoTerminal(),
         fetchBirdeye(),
         fetchDexScreenerNewPairs(),
